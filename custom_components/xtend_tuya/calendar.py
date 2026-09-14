@@ -536,7 +536,9 @@ def _build_in_progress_event(
     )
 
 
-def _live_open_run(hass: HomeAssistant, d: dict[str, Any]) -> dict[str, Any] | None:
+def _live_open_run(
+    hass: HomeAssistant, d: dict[str, Any], store: Any = None
+) -> dict[str, Any] | None:
     """Detect an in-progress run from live states: the start_time DP is
     newer than the last real close and recent enough to be plausible.
     Liters-so-far come from the live cur_cap accumulator."""
@@ -555,9 +557,14 @@ def _live_open_run(hass: HomeAssistant, d: dict[str, Any]) -> dict[str, Any] | N
         return None
     if not (0 <= (now - start).total_seconds() <= MAX_SANE_RUN_SECONDS):
         return None
-    total_l: float | None = None
+    # Liters so far: the runs store's live delta accumulator, which is right
+    # whether the counter resets each cycle or runs as a lifetime odometer.
+    # The counter's raw value only works for the former (audit D3/R16).
+    total_l: float | None = (
+        store.delivered_since_rise(d["tuya_device_id"]) if store else None
+    )
     vol = d.get("volume_entity")
-    if vol and (vs := hass.states.get(vol)):
+    if total_l is None and vol and (vs := hass.states.get(vol)):
         try:
             v = float(vs.state)
         except (TypeError, ValueError):
@@ -1094,7 +1101,7 @@ class IrrigationCompletedCalendar(CalendarEntity):
             runs = self._runs_store.runs_in_window(
                 d["tuya_device_id"], effective_start, effective_end
             )
-            open_run = _live_open_run(self.hass, d)
+            open_run = _live_open_run(self.hass, d, self._runs_store)
             if open_run is not None:
                 runs.append(open_run)
             if not runs:
