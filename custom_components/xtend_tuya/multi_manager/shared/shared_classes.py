@@ -367,7 +367,24 @@ class XTDevice(TuyaDevice):
                 object.__setattr__(new, key, copy.deepcopy(value, memo))
         return new
 
+    DP_ATTRS: tuple[str, ...] = (
+        "function",
+        "status_range",
+        "status",
+        "local_strategy",
+    )
+
     def __setattr__(self, attr, value):
+        if (
+            attr in XTDevice.DP_ATTRS
+            and self.sync_changes  # a muted scratch copy is not the live model
+            and is_dp_collapse(self.__dict__.get(attr), value)
+        ):
+            trace_dp_collapse_write(
+                LOGGER,
+                f"device {getattr(self, 'name', '?')} ({getattr(self, 'id', '?')}) "
+                f"{attr} replaced: {len(self.__dict__[attr])} -> {len(value)} entries",
+            )
         super().__setattr__(attr, value)
         if not self.sync_changes:
             return
@@ -662,12 +679,29 @@ class XTDevice(TuyaDevice):
 
 
 # --- DP-collapse instrumentation -------------------------------------------
-# Three fleet-wide collapses (Aug 21/24/25) came from an unidentified sharing-
-# side code path replacing rich merged devices with bare 2-DP ones. These
-# hooks log the call stack of any such write so the path can finally be named.
+# Three fleet-wide collapses (Aug 21/24/25) came from a code path replacing a
+# rich merged device's DP model with a bare one. The 4.4.247 version of this
+# hooked XTDeviceMap.__setitem__ and clear(), i.e. map-*slot* replacement —
+# but the real collapses are attribute writes (`device.local_strategy = {}`)
+# that never touch either, and clear() fired on every routine reload, so the
+# 20-stacks-per-hour budget was spent on noise (audit D7/C22).
 # Capture only — no behavior change. Rate-limited to 20 full stacks per hour.
 _COLLAPSE_TRACE_TIMES: list[float] = []
 _COLLAPSE_TRACE_LIMIT = 20
+# Below this size the "lost half its entries" test is just chatter.
+_COLLAPSE_MIN_SIZE = 4
+
+
+def is_dp_collapse(old: Any, new: Any) -> bool:
+    """Did a DP dict lose at least half its entries in one write?
+
+    Mirrored in tests/test_dp_collapse_trace.py — keep in sync.
+    """
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return False
+    if len(old) < _COLLAPSE_MIN_SIZE:
+        return False
+    return len(new) * 2 <= len(old)
 
 
 def trace_dp_collapse_write(logger, message: str) -> None:
@@ -682,7 +716,7 @@ def trace_dp_collapse_write(logger, message: str) -> None:
         "DP-collapse trace: %s; thread=%s\n%s",
         message,
         threading.current_thread().name,
-        "".join(traceback.format_stack(limit=18)),
+        "".join(traceback.format_stack(limit=12)),
     )
 
 
@@ -710,14 +744,6 @@ class XTDeviceMap(UserDict[str, XTDevice]):
                     f"{self.device_source_priority}: local_strategy {old_n} -> {new_n} dps",
                 )
         super().__setitem__(key, value)
-
-    def clear(self) -> None:
-        if len(self.data) >= 3:
-            trace_dp_collapse_write(
-                LOGGER,
-                f"device map {self.device_source_priority} cleared with {len(self.data)} devices",
-            )
-        super().clear()
 
     # Identity, not equality: XTDeviceMap is a UserDict, so `in` / `remove`
     # would compare *contents* and two empty maps would look like the same
