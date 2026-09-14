@@ -13,6 +13,10 @@ Run: `python tests/test_smart_home_device_list_fallback.py`
 """
 
 
+class ConfigEntryNotReady(Exception):
+    pass
+
+
 def fetch_smart_home_device_list(api):
     """Mirror of XTIOTDeviceManager._fetch_smart_home_device_list."""
     response = api.get("/v1.0/users/uid/devices")
@@ -26,7 +30,7 @@ def fetch_smart_home_device_list(api):
             params["last_row_key"] = last_row_key
         response = api.get("/v1.0/iot-01/associated-users/devices", params)
         if not response.get("success"):
-            break
+            raise ConfigEntryNotReady("page failed")
         result = response["result"]
         devices.extend(result.get("devices") or [])
         last_row_key = result.get("last_row_key") or ""
@@ -84,7 +88,9 @@ def test_fallback_pages_until_done():
     )
 
 
-def test_fallback_failure_returns_what_it_got():
+def test_fallback_page_failure_is_a_failed_fetch():
+    """C17: a failed page 2 used to return page 1 only, silently halving the
+    hub — the dropped devices then ran on the 2-DP sharing descriptors."""
     api = StubApi(
         [
             PERMISSION_DENY,
@@ -92,7 +98,11 @@ def test_fallback_failure_returns_what_it_got():
             {"code": 1004, "msg": "sign invalid", "success": False},
         ]
     )
-    assert [d["id"] for d in fetch_smart_home_device_list(api)] == ["a"]
+    try:
+        fetch_smart_home_device_list(api)
+    except ConfigEntryNotReady:
+        return
+    raise AssertionError("a failed page must not count as a partial success")
 
 
 def test_missing_last_row_key_stops_the_loop():
@@ -103,6 +113,6 @@ def test_missing_last_row_key_stops_the_loop():
 if __name__ == "__main__":
     test_old_endpoint_still_works()
     test_fallback_pages_until_done()
-    test_fallback_failure_returns_what_it_got()
+    test_fallback_page_failure_is_a_failed_fetch()
     test_missing_last_row_key_stops_the_loop()
     print("ok")

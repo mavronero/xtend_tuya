@@ -6,6 +6,7 @@ import inspect
 from typing import Any, Literal, Optional, Callable
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from ..lib.tuya_iot.device import (
     PROTOCOL_DEVICE_REPORT,
     PROTOCOL_OTHER,
@@ -280,6 +281,12 @@ class MultiManager(TuyaManager):
                         dpcode, device.status[dpcode], self
                     )
             self._enable_multi_map_device_alignment()
+        except ConfigEntryNotReady:
+            # A source could not produce a usable device list and kept its
+            # previous map (see XTIOTHomeManager.async_update_device_cache).
+            # Do NOT continue on a degraded map: let the background load in
+            # __init__.py log it and schedule the retry.
+            raise
         except Exception as e:
             LOGGER.exception(
                 "mm_update_device_cache failed; flushing pending message queue "
