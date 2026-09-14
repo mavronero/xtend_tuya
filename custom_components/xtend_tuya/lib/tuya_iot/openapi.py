@@ -20,6 +20,12 @@ TUYA_ERROR_SIGN_INVALID = 1004
 TO_C_CUSTOM_REFRESH_TOKEN_API = "/v1.0/iot-03/users/token/"
 TO_C_SMART_HOME_REFRESH_TOKEN_API = "/v1.0/token/"
 
+# Requests has no default timeout, so a hung TCP connection parked an HA
+# executor thread forever; and reconnect() used to busy-wait unbounded on a
+# flag another thread might never clear (audit C4).
+REQUEST_TIMEOUT = 30
+RECONNECT_WAIT_TIMEOUT = 60
+
 TO_C_CUSTOM_TOKEN_API = "/v1.0/iot-03/users/login"
 TO_C_SMART_HOME_TOKEN_API = "/v1.0/iot-01/associated-users/actions/authorized-login"
 
@@ -249,17 +255,20 @@ class TuyaOpenAPI:
         schema: str = "",
     ) -> dict[str, Any]:
         self.token_info.set_reconnecting(is_connecting=True)
-        if self.non_user_specific_api:
-            return_value = self.connect_non_user_specific()
-        else:
-            return_value = self.connect_user_specific(
+        try:
+            if self.non_user_specific_api:
+                return self.connect_non_user_specific()
+            return self.connect_user_specific(
                 username=username,
                 password=password,
                 country_code=country_code,
                 schema=schema,
             )
-        self.token_info.set_reconnecting(is_connecting=False)
-        return return_value
+        finally:
+            # __request re-raises on a non-JSON body (e.g. a proxy HTML error
+            # page). Without the finally the flag stayed True for good and
+            # every later call needing a refresh spun in reconnect() forever.
+            self.token_info.set_reconnecting(is_connecting=False)
 
     def connect_non_user_specific(self) -> dict[str, Any]:
         if self.auth_type == AuthType.CUSTOM:
@@ -354,9 +363,20 @@ class TuyaOpenAPI:
             wait_time = 0.2
             loop_pass = 0
             # logger.debug("Already connecting to tuya cloud, wait for it to finish.")
-            while self.token_info.is_reconnecting() is True:
+            while (
+                self.token_info.is_reconnecting() is True
+                and loop_pass * wait_time < RECONNECT_WAIT_TIMEOUT
+            ):
                 time.sleep(wait_time)
                 loop_pass += 1
+            if self.token_info.is_reconnecting() is True:
+                # Bounded so a stuck flag parks one executor thread for a
+                # minute instead of forever; HA's pool used to wedge silently.
+                logger.error(
+                    "Gave up after %s s waiting for another thread's reconnect",
+                    RECONNECT_WAIT_TIMEOUT,
+                )
+                return self.is_token_valid()
             if self.token_info.is_valid() is False:
                 return self.reconnect(no_loop=True)
             # logger.debug(
@@ -402,6 +422,7 @@ class TuyaOpenAPI:
             params=params,
             json=body,
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
 
         try:

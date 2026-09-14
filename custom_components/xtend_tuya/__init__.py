@@ -8,7 +8,7 @@ import asyncio
 # rebinds this package's `time` attribute to that submodule, clobbering a
 # plain `import time`. Bind the function itself so the rebind cannot break it.
 from time import monotonic as _monotonic
-from datetime import datetime, timedelta
+from datetime import datetime
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -85,12 +85,24 @@ def _getaddrinfo_ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
 socket.getaddrinfo = _getaddrinfo_ipv4_only
 
 
-# Suppress logs from the library, it logs unneeded on error
-logging.getLogger("tuya_sharing").setLevel(logging.CRITICAL)
+# The library is chatty on error, but CRITICAL silenced it process-wide —
+# including its reconnect diagnostics, _get_mqtt_config errors and device-query
+# failures, which is a large part of why the Aug 2026 DP-collapse call site was
+# never identified (audit C12).
+logging.getLogger("tuya_sharing").setLevel(logging.WARNING)
+
+
+# entry_id -> the options dict the entry was last loaded with. HA fires the
+# update listener for any entry write, not only an options change, and each
+# reload costs ~5 cloud calls per device; reloading on a no-op write is how a
+# reload storm starts.
+_LOADED_OPTIONS: dict[str, dict] = {}
 
 
 async def update_listener(hass: HomeAssistant, entry: XTConfigEntry):
-    """Handle options update."""
+    """Reload the entry when its options actually changed."""
+    if _LOADED_OPTIONS.get(entry.entry_id) == dict(entry.options):
+        return
     hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
@@ -135,6 +147,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
         listener=multi_manager.multi_device_listener,
         service_manager=service_manager,
     )
+    # Options changes (credentials, endpoint, plugin selection) used to need a
+    # restart or a manual reload: the listener existed but was never
+    # registered (audit C14).
+    _LOADED_OPTIONS[entry.entry_id] = dict(entry.options)
+    entry.async_on_unload(entry.add_update_listener(update_listener))
     _LOAD_DONE.discard(entry.entry_id)
     _LOAD_TASKS[entry.entry_id] = entry.async_create_background_task(
         hass,
@@ -365,8 +382,6 @@ async def _async_load_entry_body(
     except Exception:  # noqa: BLE001
         LOGGER.debug("fdm5kw: location bootstrap scheduling failed", exc_info=True)
 
-    _register_dp_collapse_watchdog(hass, entry, multi_manager)
-
     multi_manager.device_watcher.report_message(
         XTDeviceWatcherSpecialDevice.NOT_LINKED_TO_A_DEVICE,
         f"Xtended Tuya {entry.title} loaded in {datetime.now() - start_time}",
@@ -375,60 +390,6 @@ async def _async_load_entry_body(
         False,
     )
 
-
-# Aug 2026 incident series: a sharing-SDK refresh mid-run can rebuild device
-# objects with the bare 2-DP sharing strategy, silently collapsing rich
-# OpenAPI DPs fleet-wide (meter/battery data gone) until the entry is
-# reloaded. The 4.4.244 self-heal only watches the IOT device-list fetch and
-# is blind to this. This watchdog watches the outcome instead of any one
-# cause: if devices that had rich status collapse to the 2-DP subset, reload.
-_WATCHDOG_LAST_RELOAD: dict[str, float] = {}  # entry_id -> monotonic ts, survives reload
-_WATCHDOG_INTERVAL = timedelta(minutes=15)
-_WATCHDOG_RELOAD_COOLDOWN = 3600.0  # seconds
-
-
-def _register_dp_collapse_watchdog(
-    hass: HomeAssistant, entry: XTConfigEntry, multi_manager: MultiManager
-) -> None:
-    from homeassistant.core import callback
-    from homeassistant.helpers.event import async_track_time_interval
-
-    # Baseline of devices that have rich status at setup time; ghosts and
-    # sharing-only devices (<8 DPs) never qualify, so they can't false-alarm.
-    baseline = [
-        dev_id
-        for dev_id, dev in multi_manager.device_map.items()
-        if len(dev.status) >= 8
-    ]
-    if len(baseline) < 3:
-        return
-
-    @callback
-    def _check(_now) -> None:
-        degraded = [
-            dev_id
-            for dev_id in baseline
-            if (dev := multi_manager.device_map.get(dev_id)) is not None
-            and len(dev.status) <= 3
-        ]
-        # A single flaky device is not a fleet collapse.
-        if len(degraded) < max(3, int(len(baseline) * 0.3)):
-            return
-        now = _monotonic()
-        if now - _WATCHDOG_LAST_RELOAD.get(entry.entry_id, -_WATCHDOG_RELOAD_COOLDOWN) < _WATCHDOG_RELOAD_COOLDOWN:
-            return
-        _WATCHDOG_LAST_RELOAD[entry.entry_id] = now
-        LOGGER.error(
-            "DP-collapse watchdog: %d/%d devices of '%s' dropped to <=3 DPs "
-            "(rich cloud DPs lost, e.g. %s) — reloading the entry to recover",
-            len(degraded),
-            len(baseline),
-            entry.title,
-            degraded[0],
-        )
-        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
-
-    entry.async_on_unload(async_track_time_interval(hass, _check, _WATCHDOG_INTERVAL))
 
 async def cleanup_duplicated_devices(
     hass: HomeAssistant, current_entry: ConfigEntry

@@ -250,7 +250,13 @@ class XTDevice(TuyaDevice):
         "device_source_priority",
         "original_device",
         "source",
+        "sync_changes",
     ]
+
+    # False on scratch copies that carry a live device's id but are still
+    # being built (get_open_api_device): their intermediate/empty attribute
+    # values must not be broadcast into the live device maps. See D6.
+    sync_changes: bool = True
 
     class XTDevicePreference(StrEnum):
         IS_A_COVER_DEVICE = "IS_A_COVER_DEVICE"
@@ -315,6 +321,13 @@ class XTDevice(TuyaDevice):
         self.set_up: bool | None = False
         self.support_local: bool | None = False
 
+        # Wall-clock epoch seconds of the last status update this device got
+        # from either source (MQ report, or the device-list fetch at load).
+        # Entity availability is otherwise a pure function of the cloud
+        # `online` flag, so a valve that stops reporting keeps serving frozen
+        # values and still looks healthy (audit C23). 0.0 = never seen.
+        self.last_report_ts: float = 0.0
+
         self.local_strategy = {}
         self.status = {}
         self.function = {}  # type: ignore
@@ -361,8 +374,27 @@ class XTDevice(TuyaDevice):
                 object.__setattr__(new, key, copy.deepcopy(value, memo))
         return new
 
+    DP_ATTRS: tuple[str, ...] = (
+        "function",
+        "status_range",
+        "status",
+        "local_strategy",
+    )
+
     def __setattr__(self, attr, value):
+        if (
+            attr in XTDevice.DP_ATTRS
+            and self.sync_changes  # a muted scratch copy is not the live model
+            and is_dp_collapse(self.__dict__.get(attr), value)
+        ):
+            trace_dp_collapse_write(
+                LOGGER,
+                f"device {getattr(self, 'name', '?')} ({getattr(self, 'id', '?')}) "
+                f"{attr} replaced: {len(self.__dict__[attr])} -> {len(value)} entries",
+            )
         super().__setattr__(attr, value)
+        if not self.sync_changes:
+            return
         if attr not in XTDevice.FIELDS_TO_EXCLUDE_FROM_SYNC:
             if (
                 self.original_device is not None
@@ -654,12 +686,29 @@ class XTDevice(TuyaDevice):
 
 
 # --- DP-collapse instrumentation -------------------------------------------
-# Three fleet-wide collapses (Aug 21/24/25) came from an unidentified sharing-
-# side code path replacing rich merged devices with bare 2-DP ones. These
-# hooks log the call stack of any such write so the path can finally be named.
+# Three fleet-wide collapses (Aug 21/24/25) came from a code path replacing a
+# rich merged device's DP model with a bare one. The 4.4.247 version of this
+# hooked XTDeviceMap.__setitem__ and clear(), i.e. map-*slot* replacement —
+# but the real collapses are attribute writes (`device.local_strategy = {}`)
+# that never touch either, and clear() fired on every routine reload, so the
+# 20-stacks-per-hour budget was spent on noise (audit D7/C22).
 # Capture only — no behavior change. Rate-limited to 20 full stacks per hour.
 _COLLAPSE_TRACE_TIMES: list[float] = []
 _COLLAPSE_TRACE_LIMIT = 20
+# Below this size the "lost half its entries" test is just chatter.
+_COLLAPSE_MIN_SIZE = 4
+
+
+def is_dp_collapse(old: Any, new: Any) -> bool:
+    """Did a DP dict lose at least half its entries in one write?
+
+    Mirrored in tests/test_dp_collapse_trace.py — keep in sync.
+    """
+    if not isinstance(old, dict) or not isinstance(new, dict):
+        return False
+    if len(old) < _COLLAPSE_MIN_SIZE:
+        return False
+    return len(new) * 2 <= len(old)
 
 
 def trace_dp_collapse_write(logger, message: str) -> None:
@@ -674,7 +723,7 @@ def trace_dp_collapse_write(logger, message: str) -> None:
         "DP-collapse trace: %s; thread=%s\n%s",
         message,
         threading.current_thread().name,
-        "".join(traceback.format_stack(limit=18)),
+        "".join(traceback.format_stack(limit=12)),
     )
 
 
@@ -703,27 +752,19 @@ class XTDeviceMap(UserDict[str, XTDevice]):
                 )
         super().__setitem__(key, value)
 
-    def clear(self) -> None:
-        if len(self.data) >= 3:
-            trace_dp_collapse_write(
-                LOGGER,
-                f"device map {self.device_source_priority} cleared with {len(self.data)} devices",
-            )
-        super().clear()
-
-    @staticmethod
-    def clear_master_device_map():
-        XTDeviceMap.master_device_map = []
-
+    # Identity, not equality: XTDeviceMap is a UserDict, so `in` / `remove`
+    # would compare *contents* and two empty maps would look like the same
+    # registration.
     @staticmethod
     def register_device_map(device_map: XTDeviceMap):
-        if device_map not in XTDeviceMap.master_device_map:
+        if not any(m is device_map for m in XTDeviceMap.master_device_map):
             XTDeviceMap.master_device_map.append(device_map)
 
     @staticmethod
     def unregister_device_map(device_map: XTDeviceMap):
-        if device_map in XTDeviceMap.master_device_map:
-            XTDeviceMap.master_device_map.remove(device_map)
+        XTDeviceMap.master_device_map = [
+            m for m in XTDeviceMap.master_device_map if m is not device_map
+        ]
 
     @staticmethod
     def set_device_key_value_multimap(device_id: str, key: str, value: Any):

@@ -32,14 +32,12 @@ def decorate_tuya_manager(
         skip_call=True,
     )
     return_list.append(decorator)
-    for device in tuya_manager.device_map.values():
-        decorator, device.__setattr__ = XTDecorator.get_decorator(
-            base_object=device,
-            callback=ha_tuya_integration_config_manager.on_tuya_device_attribute_change,
-            method_name="__setattr__",
-        )
-        return_list.append(decorator)
-
+    # No per-device __setattr__ decoration: assigning device.__setattr__ sets
+    # an *instance* attribute, and Python resolves dunder methods on the type,
+    # so the wrapper was never invoked by ordinary assignment — the whole
+    # "intercept core-Tuya device attribute changes" hook was dead code
+    # (audit C13). Core-Tuya changes to a shared device still do not
+    # propagate into the xtend maps; that needs a real mechanism, not this.
     return return_list
 
 

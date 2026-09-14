@@ -23,6 +23,7 @@ from ....lib.tuya_iot.tuya_enums import (
     AuthType,
 )
 from typing import Any, cast
+from homeassistant.exceptions import ConfigEntryNotReady
 from ....const import (
     LOGGER,
     MESSAGE_SOURCE_TUYA_IOT,
@@ -72,11 +73,6 @@ from .xt_tuya_iot_home_manager import (
 )
 
 
-# Per config entry: (retry count, reload pending). Module-level so a
-# scheduled reload (which recreates the manager) can't reset the backoff.
-_EMPTY_DEVICE_LIST_RETRY: dict[str, list] = {}
-
-
 class XTIOTDeviceManager(TuyaDeviceManager):
     device_map: XTDeviceMap = XTDeviceMap({}, XTDeviceSourcePriority.TUYA_IOT)
 
@@ -105,47 +101,6 @@ class XTIOTDeviceManager(TuyaDeviceManager):
 
     def register_home_manager(self, home_manager: TuyaHomeManager):
         self.home_manager = home_manager
-
-    # ---------------------------------------------------------------- 2026-08
-    # A boot-time race (token not yet valid / cloud briefly down) used to skip
-    # the device-list fetch SILENTLY, leaving the IOT map empty until someone
-    # manually reloaded the entry: every valve degraded to the 2-DP sharing
-    # subset and meter data stopped fleet-wide (Aug 10-20 incident).
-    def _note_device_list_result(self, ok: bool, reason: str) -> None:
-        entry = self.multi_manager.config_entry
-        state = _EMPTY_DEVICE_LIST_RETRY.setdefault(entry.entry_id, [0, False])
-        if ok:
-            state[0] = 0
-            return
-        if state[1]:  # reload already scheduled
-            return
-        # ponytail: full entry reload is the one recovery path proven to
-        # rebuild the merged device map end to end; exponential backoff
-        # (2 min → 1 h cap) keeps a dead cloud from reload-looping the hub.
-        delay = min(120 * (2 ** state[0]), 3600)
-        state[0] += 1
-        state[1] = True
-        LOGGER.error(
-            "IOT device list empty (%s) — scheduling reload of '%s' in %s s "
-            "to recover full device DPs",
-            reason,
-            entry.title,
-            delay,
-        )
-        hass = self.multi_manager.hass
-
-        def _schedule() -> None:
-            from homeassistant.helpers.event import async_call_later
-
-            def _reload(_now) -> None:
-                _EMPTY_DEVICE_LIST_RETRY[entry.entry_id][1] = False
-                hass.async_create_task(
-                    hass.config_entries.async_reload(entry.entry_id)
-                )
-
-            async_call_later(hass, delay, _reload)
-
-        hass.loop.call_soon_threadsafe(_schedule)
 
     def forward_message_to_multi_manager(self, msg: dict):
         self.multi_manager.on_message(msg, MESSAGE_SOURCE_TUYA_IOT)
@@ -215,12 +170,13 @@ class XTIOTDeviceManager(TuyaDeviceManager):
                 params["last_row_key"] = last_row_key
             response = self.api.get("/v1.0/iot-01/associated-users/devices", params)
             if not response.get("success"):
-                LOGGER.warning(
-                    "Associated-users device list failed (code=%s msg=%s)",
-                    response.get("code"),
-                    response.get("msg"),
+                # A failed page is a failed fetch, not a short list: returning
+                # the pages we did get would silently halve the hub and leave
+                # the dropped devices on the 2-DP sharing descriptors.
+                raise ConfigEntryNotReady(
+                    f"Associated-users device list page failed "
+                    f"(code={response.get('code')} msg={response.get('msg')})"
                 )
-                break
             result = response["result"]
             devices.extend(result.get("devices") or [])
             last_row_key = result.get("last_row_key") or ""
@@ -230,12 +186,10 @@ class XTIOTDeviceManager(TuyaDeviceManager):
 
     async def async_update_device_list_in_smart_home_mod(self):
         if self.api.token_info.is_valid() is False:  # CHANGED
-            self._note_device_list_result(False, "token not valid")
-            return None  # CHANGED
+            raise ConfigEntryNotReady("IOT token is not valid, cannot list devices")
         result = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
             self._fetch_smart_home_device_list
         )
-        self._note_device_list_result(bool(result), "fetch returned no devices")
         if result:
             for item in result:
                 device = XTDevice(**item)  # CHANGED
@@ -262,10 +216,8 @@ class XTIOTDeviceManager(TuyaDeviceManager):
     # Copy of the Tuya original method with some minor modifications
     def update_device_list_in_smart_home_mod(self):
         if self.api.token_info.is_valid() is False:  # CHANGED
-            self._note_device_list_result(False, "token not valid")
-            return None  # CHANGED
+            raise ConfigEntryNotReady("IOT token is not valid, cannot list devices")
         result = self._fetch_smart_home_device_list()
-        self._note_device_list_result(bool(result), "fetch returned no devices")
         if result:
             for item in result:
                 device = XTDevice(**item)  # CHANGED
@@ -493,21 +445,54 @@ class XTIOTDeviceManager(TuyaDeviceManager):
         updated_status_properties: list[str] | None = None,
         dp_timestamps: dict | None = None,
     ):
+        if updated_status_properties:
+            # Report recency, wall clock: the device's own `t` is ms on one
+            # source and seconds on the other (C19) and its clock drifts.
+            device.last_report_ts = time.time()
         for listener in self.device_listeners:
             listener.update_device(device, updated_status_properties, dp_timestamps)
+
+    @staticmethod
+    def _status_list_to_dict(status: Any) -> dict[str, Any]:
+        """Normalize a cloud `status` payload to the {code: value} form.
+
+        XTDevice(**item) assigns whatever the API sent. The industry-solution
+        device list (/v1.0/iot-03/devices) keeps `status` as a list of
+        {code, value} dicts, and every reader indexes it by code — the next
+        access raises `TypeError: list indices must be integers`. Mirrored in
+        tests/test_status_list_normalization.py.
+        """
+        if not isinstance(status, list):
+            return status or {}
+        return {
+            item["code"]: item["value"]
+            for item in status
+            if isinstance(item, dict) and "code" in item and "value" in item
+        }
 
     def _update_device_list_info_cache(self, devIds: list[str]):
         response = self.get_device_list_info(devIds)
         result = response.get("result", {})
         for item in result.get("list", []):
             device_id = item["id"]
-            self.device_map[device_id] = XTDevice(**item)
-            self.device_map[device_id].source = "IOT _update_device_list_info_cache"
+            device = XTDevice(**item)
+            device.status = self._status_list_to_dict(device.status)
+            device.source = "IOT _update_device_list_info_cache"
+            XTMergingManager.put_device_keeping_object(
+                self.device_map, device_id, device, self.multi_manager
+            )
 
     def get_open_api_device(self, device: XTDevice) -> XTDevice | None:
-        device_properties = XTDevice.from_compatible_device(
-            device, "IOT get_open_api_device"
-        )
+        # This used to go through from_compatible_device, which returns the
+        # SAME object when handed an XTDevice — so the four assignments below
+        # emptied the *live* device and XTDevice.__setattr__ broadcast those
+        # empty dicts into every registered device map, until the two OpenAPI
+        # calls below refilled them. A slow or failing shadow/model call left
+        # the fleet collapsed (audit D6). Build on a detached copy instead,
+        # with the mirror muted until the caller merges the result back.
+        device_properties = device.get_copy()
+        device_properties.sync_changes = False
+        device_properties.source = "IOT get_open_api_device"
         device_properties.function = {}
         device_properties.status_range = {}
         device_properties.status = {}

@@ -5,6 +5,7 @@ This file contains all the code that inherit from Tuya integration
 from __future__ import annotations
 from typing import Any, cast
 import json
+import time
 from tuya_sharing.manager import (
     Manager,
     SceneRepository,
@@ -40,6 +41,9 @@ from ...multi_manager import (
 from ...shared.shared_classes import (
     XTDevice,
     XTDeviceMap,
+)
+from ...shared.merging_manager import (
+    XTMergingManager,
 )
 import custom_components.xtend_tuya.multi_manager.managers.tuya_sharing.xt_tuya_sharing_device_repository as dr
 import custom_components.xtend_tuya.multi_manager.managers.tuya_sharing.xt_tuya_sharing_mq as mq
@@ -189,6 +193,28 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
         except Exception as e:
             LOGGER.error(f"on message error {msg=}")
             LOGGER.exception(e)
+
+    def _update_device_list_info_cache(self, ids: list[str]):
+        """Re-query devices without swapping the objects the maps hold.
+
+        The SDK assigns the re-queried CustomerDevice straight into the map.
+        On a BIZCODE_BIND_USER frame that object carries only the bare 2-DP
+        sharing descriptors, while the master map and every entity keep the
+        rich merged one — the device then silently stops updating (C20).
+        """
+        if self.device_repository is None:
+            return
+        for device in self.device_repository.query_devices_by_ids(ids):
+            XTMergingManager.put_device_keeping_object(
+                self.device_map,
+                device.id,
+                XTDevice.from_compatible_device(
+                    device,
+                    "Sharing _update_device_list_info_cache",
+                    device_source_priority=self.device_map.device_source_priority,
+                ),
+                self.multi_manager,
+            )
 
     def add_device_by_id(self, device_id: str):
         device_ids = [device_id]
@@ -342,6 +368,10 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
         updated_status_properties: list[str] | None = None,
         dp_timestamps: dict | None = None,
     ):
+        if updated_status_properties:
+            # Report recency, wall clock: the device's own `t` is ms on one
+            # source and seconds on the other (C19) and its clock drifts.
+            device.last_report_ts = time.time()
         for listener in self.device_listeners:
             listener.update_device(device, updated_status_properties, dp_timestamps)
 
@@ -351,10 +381,11 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
             f"Sending Tuya commands: {commands}",
             XTDeviceWatcherCategory.SHARING_API,
         )
+        # Hand the API response back so the caller can tell a refused command
+        # from an accepted one (audit C11).
         if other_manager := self.get_overriden_device_manager():
-            other_manager.send_commands(device_id, commands)
-            return
-        super().send_commands(device_id, commands)
+            return other_manager.send_commands(device_id, commands)
+        return super().send_commands(device_id, commands)
 
     def send_lock_unlock_command(
         self,

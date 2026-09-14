@@ -15,6 +15,31 @@ class XTMergingManager:
     # All the methods of this class (except merge device) take the LEFT device as a priority in case of conflict
 
     @staticmethod
+    def put_device_keeping_object(
+        device_map: shared.XTDeviceMap,
+        device_id: str,
+        fresh: shared.XTDevice,
+        multi_manager: mm.MultiManager | None = None,
+    ) -> shared.XTDevice:
+        """Store a re-queried device without orphaning the object in the map.
+
+        A cloud re-query (BIZCODE_BIND_USER, add_device_by_id) returns a
+        fresh, bare device object. Dropping it straight into the source map
+        orphans the rich merged object that the master map — and therefore
+        every entity — still points at: MQ reports then write into an object
+        nothing reads and the device silently stops updating while looking
+        perfectly healthy (audit C20). Merge into the existing object and
+        keep that one. Returns the object now in the map.
+        """
+        previous = device_map.get(device_id)
+        if previous is None or previous is fresh:
+            device_map[device_id] = fresh
+            return fresh
+        XTMergingManager.merge_devices(previous, fresh, multi_manager)
+        device_map[device_id] = previous
+        return previous
+
+    @staticmethod
     def merge_devices(
         device1: shared.XTDevice,
         device2: shared.XTDevice | None,

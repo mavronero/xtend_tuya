@@ -35,9 +35,12 @@ _LOGGER = logging.getLogger(__name__)
 # device_id -> {"home": str, "room": str}
 LOCATION_MAP: dict[str, dict[str, str]] = {}
 
-# multi_manager ids already put on a refresh timer (avoid stacking intervals
-# and avoid every valve re-walking homes/rooms on startup).
-_SCHEDULED: set[int] = set()
+# Config entries already put on a refresh timer (avoid stacking intervals and
+# avoid every valve re-walking homes/rooms on startup). Keyed by entry_id, not
+# id(multi_manager): CPython reuses ids after GC, so a new manager could
+# collide with a dead one's id and never build its map — the "Unassigned room"
+# class of bug (audit C16). Cleared on unload so a reload re-arms.
+_SCHEDULED: set[str] = set()
 
 # Called (no args) after LOCATION_MAP changes, so entities can re-publish the
 # new home/room attributes without this module importing the sensor module.
@@ -124,10 +127,12 @@ async def async_ensure_scheduled(hass: HomeAssistant, multi_manager: Any) -> Non
     walk and arms the timer; later valves on the same hub are no-ops (they
     just read the already-filled LOCATION_MAP).
     """
-    key = id(multi_manager)
+    entry = multi_manager.config_entry
+    key = entry.entry_id
     if key in _SCHEDULED:
         return
     _SCHEDULED.add(key)
+    entry.async_on_unload(lambda: _SCHEDULED.discard(key))
 
     # One view registration across all hubs/entries (same pattern as the
     # calendar ICS view — the view reads the process-wide map at request time).
@@ -140,7 +145,12 @@ async def async_ensure_scheduled(hass: HomeAssistant, multi_manager: Any) -> Non
     async def _tick(_now: Any) -> None:
         await async_refresh(hass, multi_manager)
 
-    async_track_time_interval(hass, _tick, REFRESH_INTERVAL)
+    # Bound to the entry: an unregistered 12 h timer kept a dead manager and
+    # its API client alive per reload, so the homes/rooms walk multiplied with
+    # the reload count.
+    entry.async_on_unload(
+        async_track_time_interval(hass, _tick, REFRESH_INTERVAL)
+    )
 
 
 def get_location(device_id: str) -> dict[str, str] | None:

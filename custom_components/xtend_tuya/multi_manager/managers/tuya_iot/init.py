@@ -10,7 +10,8 @@ from webrtc_models import (
     RTCIceCandidateInit,
 )
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 from ....lib.tuya_iot import (
     AuthType,
     TuyaTokenInfo,
@@ -69,6 +70,10 @@ from ....const import (
     XTDeviceWatcherCategory,
     XTDeviceWatcherSpecialDevice,
 )
+
+
+# How often the IOT MQ thread is checked for liveness (audit C5).
+MQ_SUPERVISOR_INTERVAL = timedelta(minutes=5)
 
 
 def get_plugin_instance() -> XTTuyaIOTDeviceManagerInterface | None:
@@ -230,6 +235,14 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                 learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/renew_cloud_credentials.md",
             )
             return None
+        # The hub is configured, reachable and authenticated: drop any repair
+        # issue left over from an earlier failure (audit C15).
+        for stale in (
+            "tuya_iot_not_configured",
+            "tuya_iot_failed_request",
+            "tuya_iot_failed_login",
+        ):
+            await self.clear_issue(hass, config_entry, stale)
         device_manager = XTIOTDeviceManager(self.multi_manager, api, non_user_api)
         device_ids: list[str] = list()
         home_manager = XTIOTHomeManager(api, device_manager, self.multi_manager)
@@ -257,7 +270,10 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
         return [self.iot_account.device_manager.device_map]
 
     def refresh_mq(self):
-        pass
+        if self.iot_account is None:
+            return None
+        self.iot_account.device_manager.refresh_mq()
+        self.iot_account.mq = self.iot_account.device_manager.mq
 
     def remove_device_listeners(self) -> None:
         if self.iot_account is None:
@@ -356,6 +372,44 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
             )
             return True
 
+    def _register_mq_supervisor(
+        self, hass: HomeAssistant, config_entry: XTConfigEntry
+    ) -> None:
+        """Restart a dead IOT MQ instead of waiting for an entry reload.
+
+        lib/tuya_iot/openmq.py stops its own thread after 10 consecutive
+        connect failures and nothing ever restarted it, so a 10-minute cloud
+        outage killed this hub's IOT message stream for the rest of the
+        process. DP counts and the cloud `online` flag are unchanged, so
+        nothing looks broken — the devices simply freeze (audit C5).
+        """
+        reported = False
+
+        @callback
+        def _check(_now) -> None:
+            nonlocal reported
+            if self.iot_account is None:
+                return
+            mq = self.iot_account.device_manager.mq
+            # ponytail: thread liveness only. A thread that is alive but
+            # briefly disconnected rebuilds its own client within 60 s
+            # (openmq.run); add a connected-for-N-minutes test here if a
+            # wedged-but-alive client is ever observed.
+            if mq is not None and mq.is_alive():
+                reported = False
+                return
+            if not reported:
+                LOGGER.error(
+                    "Xtended Tuya %s: the IOT MQTT thread is dead — restarting it",
+                    config_entry.title,
+                )
+                reported = True
+            XTEventLoopProtector.execute_out_of_event_loop(self.refresh_mq)
+
+        config_entry.async_on_unload(
+            async_track_time_interval(hass, _check, MQ_SUPERVISOR_INTERVAL)
+        )
+
     async def on_loading_finalized(
         self,
         hass: HomeAssistant,
@@ -364,6 +418,7 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
     ) -> None:
         if self.iot_account is None:
             return None
+        self._register_mq_supervisor(hass, config_entry)
         if lock_device_id := multi_manager.get_general_property(
             XTMultiManagerProperties.LOCK_DEVICE_ID, None
         ):
@@ -387,6 +442,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                         },
                         learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_locks.md",
                     )
+                else:
+                    await self.clear_issue(hass, config_entry, "tuya_iot_lock_not_subscribed")
         if camera_device_id := multi_manager.get_general_property(
             XTMultiManagerProperties.CAMERA_DEVICE_ID, None
         ):
@@ -410,6 +467,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                         },
                         learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_cameras.md",
                     )
+                else:
+                    await self.clear_issue(hass, config_entry, "tuya_iot_camera_not_subscribed")
 
         if ir_hub_device_id := multi_manager.get_general_property(
             XTMultiManagerProperties.IR_DEVICE_ID, None
@@ -434,6 +493,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                         },
                         learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_ir.md",
                     )
+                else:
+                    await self.clear_issue(hass, config_entry, "tuya_iot_ir_not_subscribed")
 
         if energy_sensor_entities := multi_manager.get_general_property(
             XTMultiManagerProperties.ENERGY_SENSOR, None
@@ -459,6 +520,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                             },
                             learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_energy_sensor_statistics.md",
                         )
+                    else:
+                        await self.clear_issue(hass, config_entry, "tuya_iot_sensor_energy_stat_not_subscribed")
                 break
 
     def get_ir_hub_information(self, device: XTDevice) -> XTIRHubInformation | None:
@@ -743,14 +806,20 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
         params: dict[str, Any] | None = None
         if payload:
             params = json.loads(payload)
+        api = self.iot_account.device_manager.api
         match method:
             case "GET":
-                return self.iot_account.device_manager.api.get(url, params)
+                return api.get(url, params)
             case "POST":
-                return self.iot_account.device_manager.api.post(url, params)
+                response = api.post(url, params)
             case "DELETE":
-                return self.iot_account.device_manager.api.delete(url, params)
-        return None
+                response = api.delete(url, params)
+            case _:
+                return None
+        # Timer POST/DELETE burns the project's controllable-device
+        # allowance exactly like a command does (audit C6).
+        self.multi_manager.note_cloud_write(method, url, response)
+        return response
 
     def get_webrtc_sdp_answer(
         self, device_id: str, session_id: str, sdp_offer: str, channel: str

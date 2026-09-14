@@ -1,11 +1,14 @@
 from __future__ import annotations
 import copy
+import re
+import time
 import importlib
 import os
 import inspect
 from typing import Any, Literal, Optional, Callable
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from ..lib.tuya_iot.device import (
     PROTOCOL_DEVICE_REPORT,
     PROTOCOL_OTHER,
@@ -82,6 +85,11 @@ from .shared.storage.storage_manager import (
 )
 import custom_components.xtend_tuya.multi_manager.shared.data_entry.shared_data_entry as shared_data_entry
 from .shared.quota import ControllableQuotaTracker
+
+
+# Any write under /v1.0/devices/<id>/ costs one unit of the Tuya project's
+# monthly controllable-device allowance (commands, timers, ...).
+_DEVICE_WRITE_URL = re.compile(r"^/v[0-9.]+/devices/([^/?]+)/")
 
 
 class MultiManager(TuyaManager):
@@ -243,7 +251,7 @@ class MultiManager(TuyaManager):
         # entities stay `unavailable` despite live MQTT traffic.
         self.is_ready_for_messages = False
         try:
-            XTDeviceMap.clear_master_device_map()
+            self._disable_multi_map_device_alignment()
             concurrency_manager = XTConcurrencyManager()
 
             async def update_manager_device_cache(
@@ -264,7 +272,11 @@ class MultiManager(TuyaManager):
             # Now let's aggregate all of these devices into a single
             # "All functionnality" device
             self._merge_devices_from_multiple_sources()
+            fetch_ts = time.time()
             for device in self.device_map.values():
+                # The device-list fetch is itself a report: it carries the
+                # cloud's current status for the device (audit C23).
+                device.last_report_ts = fetch_ts
                 # Applied twice because some parts at the end of apply_fix would change values of previous calls
                 CloudFixes.apply_fixes(device, self)
                 CloudFixes.apply_fixes(device, self)
@@ -280,6 +292,12 @@ class MultiManager(TuyaManager):
                         dpcode, device.status[dpcode], self
                     )
             self._enable_multi_map_device_alignment()
+        except ConfigEntryNotReady:
+            # A source could not produce a usable device list and kept its
+            # previous map (see XTIOTHomeManager.async_update_device_cache).
+            # Do NOT continue on a degraded map: let the background load in
+            # __init__.py log it and schedule the retry.
+            raise
         except Exception as e:
             LOGGER.exception(
                 "mm_update_device_cache failed; flushing pending message queue "
@@ -443,6 +461,19 @@ class MultiManager(TuyaManager):
         XTDeviceMap.register_device_map(self.device_map)
         self._align_multi_map_devices()
 
+    def _disable_multi_map_device_alignment(self):
+        """Take THIS entry's maps out of the cross-source mirror.
+
+        The registry is process-wide; it used to be wiped wholesale at the
+        start of every cache update, so reloading hub A de-registered hub B's
+        maps and B's IOT and sharing copies of a device stopped tracking each
+        other until B was reloaded too — silent, per-device disagreement with
+        the app (audit C9). Only unregister what this entry owns.
+        """
+        for device_map in self.__get_available_device_maps():
+            XTDeviceMap.unregister_device_map(device_map)
+        XTDeviceMap.unregister_device_map(self.device_map)
+
     def _align_multi_map_devices(self):
         # Refresh all master device variables with themselves to trigger alignment
         for device in self.device_map.values():
@@ -451,6 +482,7 @@ class MultiManager(TuyaManager):
 
     def unload(self):
         self.release_devices()
+        self._disable_multi_map_device_alignment()
         for manager in self.accounts.values():
             manager.unload()
 
@@ -659,6 +691,27 @@ class MultiManager(TuyaManager):
         if self.controllable_quota is not None:
             self.controllable_quota.record(device_id)
 
+    def note_cloud_write(
+        self, method: str, url: str, response: dict[str, Any] | None
+    ) -> None:
+        """Count a successful cloud write to /v1.0/devices/{id}/... .
+
+        send_commands is not the only path that burns the project's monthly
+        controllable-device allowance: the fdm5kw timer service POSTs and
+        DELETEs /v1.0/devices/{id}/timers through account.call_api, and the
+        farm's own rule is that a timer DELETE costs a control unit too. Those
+        bypassed the tracker entirely, so "remaining" was fiction (audit C6).
+
+        Reads are free, and a refused write (e.g. 60001001) must not count —
+        hence the `success: true` test.
+        """
+        if method == "GET" or self.controllable_quota is None:
+            return
+        if not isinstance(response, dict) or response.get("success") is not True:
+            return
+        if match := _DEVICE_WRITE_URL.match(url):
+            self.controllable_quota.record(match.group(1))
+
     def send_commands(self, device_id: str, commands: list[dict[str, Any]]) -> bool: # type: ignore
         virtual_function_commands: list[dict[str, Any]] = []
         regular_commands: list[dict[str, Any]] = []
@@ -727,20 +780,28 @@ class MultiManager(TuyaManager):
                                 }
                             )
                     for command in alias_command:
-                        last_command_result = False
+                        alias_result = False
                         for account in self.accounts.values():
-                            if last_command_result := account.send_command(
+                            if alias_result := account.send_command(
                                 device_id, command, reverse_filters=False
                             ):
                                 self._note_controllable_command(account, device_id)
                                 break
-                        for account in self.accounts.values():
-                            if last_command_result := account.send_command(
-                                device_id, command, reverse_filters=True
-                            ):
-                                self._note_controllable_command(account, device_id)
-                                break
-                        if last_command_result is True:
+                        # Only retry with the other filter set if the first
+                        # pass did NOT succeed: this loop used to run
+                        # unconditionally, sending the valve a second copy of
+                        # a command it had already accepted and overwriting
+                        # the success with the second attempt's result — which
+                        # then aborted the timer dual-write (audit C10).
+                        if not alias_result:
+                            for account in self.accounts.values():
+                                if alias_result := account.send_command(
+                                    device_id, command, reverse_filters=True
+                                ):
+                                    self._note_controllable_command(account, device_id)
+                                    break
+                        if alias_result:
+                            last_command_result = True
                             break
         return last_command_result
 
