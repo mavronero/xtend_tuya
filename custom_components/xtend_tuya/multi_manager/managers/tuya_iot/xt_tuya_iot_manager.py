@@ -474,7 +474,9 @@ class XTIOTDeviceManager(TuyaDeviceManager):
             device = XTDevice(**item)
             device.status = self._status_list_to_dict(device.status)
             device.source = "IOT _update_device_list_info_cache"
-            self.device_map[device_id] = device
+            XTMergingManager.put_device_keeping_object(
+                self.device_map, device_id, device, self.multi_manager
+            )
 
     def get_open_api_device(self, device: XTDevice) -> XTDevice | None:
         # This used to go through from_compatible_device, which returns the

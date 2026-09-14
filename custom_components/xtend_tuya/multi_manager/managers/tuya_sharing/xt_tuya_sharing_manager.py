@@ -41,6 +41,9 @@ from ...shared.shared_classes import (
     XTDevice,
     XTDeviceMap,
 )
+from ...shared.merging_manager import (
+    XTMergingManager,
+)
 import custom_components.xtend_tuya.multi_manager.managers.tuya_sharing.xt_tuya_sharing_device_repository as dr
 import custom_components.xtend_tuya.multi_manager.managers.tuya_sharing.xt_tuya_sharing_mq as mq
 
@@ -189,6 +192,28 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
         except Exception as e:
             LOGGER.error(f"on message error {msg=}")
             LOGGER.exception(e)
+
+    def _update_device_list_info_cache(self, ids: list[str]):
+        """Re-query devices without swapping the objects the maps hold.
+
+        The SDK assigns the re-queried CustomerDevice straight into the map.
+        On a BIZCODE_BIND_USER frame that object carries only the bare 2-DP
+        sharing descriptors, while the master map and every entity keep the
+        rich merged one — the device then silently stops updating (C20).
+        """
+        if self.device_repository is None:
+            return
+        for device in self.device_repository.query_devices_by_ids(ids):
+            XTMergingManager.put_device_keeping_object(
+                self.device_map,
+                device.id,
+                XTDevice.from_compatible_device(
+                    device,
+                    "Sharing _update_device_list_info_cache",
+                    device_source_priority=self.device_map.device_source_priority,
+                ),
+                self.multi_manager,
+            )
 
     def add_device_by_id(self, device_id: str):
         device_ids = [device_id]
