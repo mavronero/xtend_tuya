@@ -27,7 +27,15 @@ _helpers.device_registry = types.ModuleType("homeassistant.helpers.device_regist
 _helpers.entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
 
 _event = types.ModuleType("homeassistant.helpers.event")
-_event.async_call_later = lambda *a, **k: (lambda: None)
+DEFERRED: list = []
+
+
+def _async_call_later(hass, delay, action):
+    DEFERRED.append((delay, action))
+    return lambda: None
+
+
+_event.async_call_later = _async_call_later
 _event.async_track_state_change_event = lambda *a, **k: (lambda: None)
 
 _storage = types.ModuleType("homeassistant.helpers.storage")
@@ -83,9 +91,35 @@ T0 = datetime(2026, 9, 14, 6, 0, 0).astimezone()
 DEV = "bfa5f0fb057e0bcf5dw3ky"
 
 
-def store():
-    s = rs.RunsStore(None)
+class _FakeStates:
+    def __init__(self, values):
+        self.values = values
+
+    def get(self, entity_id):
+        v = self.values.get(entity_id)
+        return None if v is None else types.SimpleNamespace(state=v)
+
+
+def store(states=None):
+    s = rs.RunsStore(types.SimpleNamespace(states=_FakeStates(states or {})))
     return s
+
+
+D = {
+    "tuya_device_id": DEV,
+    "start_entity": "sensor.v_start",
+    "end_entity": "sensor.v_end",
+    "volume_entity": "sensor.v_volume",
+}
+
+
+def end_event(value):
+    return types.SimpleNamespace(
+        data={
+            "entity_id": D["end_entity"],
+            "new_state": types.SimpleNamespace(state=value),
+        }
+    )
 
 
 def demo():
@@ -143,6 +177,55 @@ def demo():
     for bad in ("0,1,65534,0,20260914061500", "0,1,40650,0,20260914061500", "415,211"):
         s._record_counter_csv({"tuya_device_id": DEV}, bad)
     assert s.runs.get(DEV, []) == []
+
+    # --- R5: a close paired with the previous cycle's start is garbage --
+    now = datetime.now().astimezone()
+    s = store(
+        {
+            D["start_entity"]: (now - timedelta(hours=9)).isoformat(),
+            D["end_entity"]: (now - timedelta(seconds=5)).isoformat(),
+            D["volume_entity"]: "120",
+        }
+    )
+    s._end_entity_to_device = {D["end_entity"]: D}
+    s._on_end_change(end_event(s.hass.states.get(D["end_entity"]).state))
+    assert s.runs.get(DEV, []) == [], s.runs
+
+    # ... while a 15-minute run on the same path is recorded at once.
+    s = store(
+        {
+            D["start_entity"]: (now - timedelta(minutes=15)).isoformat(),
+            D["end_entity"]: (now - timedelta(seconds=5)).isoformat(),
+            D["volume_entity"]: "130367",
+        }
+    )
+    s._end_entity_to_device = {D["end_entity"]: D}
+    s._on_end_change(end_event(s.hass.states.get(D["end_entity"]).state))
+    assert len(s.runs[DEV]) == 1
+    # The odometer reading is not a run total, so no liters are invented.
+    assert s.runs[DEV][0]["total_l"] is None
+
+    # --- R6: a close still in the future is deferred, not recorded now --
+    DEFERRED.clear()
+    close = now + timedelta(seconds=90)   # inside MAX_FUTURE_SLACK_SEC
+    s = store(
+        {
+            D["start_entity"]: (now - timedelta(seconds=90)).isoformat(),
+            D["end_entity"]: close.isoformat(),
+            D["volume_entity"]: "0",
+        }
+    )
+    s._end_entity_to_device = {D["end_entity"]: D}
+    s._on_end_change(end_event(close.isoformat()))
+    assert s.runs.get(DEV, []) == [], "recorded before the water flowed"
+    assert len(DEFERRED) == 1, DEFERRED
+    delay, action = DEFERRED[0]
+    assert 90 < delay <= 90 + rs.PREREPORT_SETTLE_SEC + 1, delay
+    # By the time it fires the counter has moved.
+    s.hass.states.values[D["volume_entity"]] = "9"
+    action(None)
+    assert len(s.runs[DEV]) == 1
+    assert s.runs[DEV][0]["total_l"] == 9.0
 
     print("ok: runs are recorded once, with liters that survive an odometer")
 

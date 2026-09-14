@@ -72,6 +72,11 @@ IDLE_CLOSE_SEC = 120
 # counter_custom row for the same run.
 RUN_DEDUPE_SLACK_SEC = 180
 
+# Grace after a pre-reported close before its liters are read (R6): the
+# counter publishes every ~10 s, so a few seconds past the scheduled close
+# is enough for the final value to have landed.
+PREREPORT_SETTLE_SEC = 15
+
 DOMAIN_KEY = "xtend_tuya_runs_store"
 
 
@@ -285,6 +290,34 @@ class RunsStore:
         start = _parse_iso(start_state.state) if start_state else None
         if start is None or end <= start:
             return
+        # A close pushed before its own start pairs with the PREVIOUS cycle's
+        # start; the other two recording paths cap at 6 h, this one only
+        # required end > start and let the bogus row into the export (R5).
+        if (end - start).total_seconds() > MAX_RUN_SECONDS:
+            _LOGGER.debug(
+                "runs_store: skipping run %s %s→%s, over the %d s cap",
+                d["tuya_device_id"], start, end, MAX_RUN_SECONDS,
+            )
+            return
+        if end > now:
+            # Pre-reported close that happens to fall INSIDE the slack: the
+            # firmware writes the scheduled close the moment a run starts,
+            # so on a timer of 2 minutes or less — and the T3 fleet already
+            # runs 180 s timers — the run was recorded at its start, with
+            # liters read from a counter that had not moved yet, and stored
+            # as ~0 L forever (audit R6). Wait for the water instead.
+            async_call_later(
+                self.hass,
+                (end - now).total_seconds() + PREREPORT_SETTLE_SEC,
+                partial(self._record_end, d, start, end),
+            )
+            return
+        self._record_end(d, start, end, None)
+
+    @callback
+    def _record_end(
+        self, d: dict[str, Any], start: datetime, end: datetime, _now: Any
+    ) -> None:
         total_l = self._run_liters(d, (end - start).total_seconds())
         if self.add_run(d["tuya_device_id"], start, end, total_l):
             self.async_schedule_save()

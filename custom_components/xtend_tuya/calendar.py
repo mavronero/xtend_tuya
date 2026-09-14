@@ -611,7 +611,12 @@ def _compute_averages(
     totals = []
     for r in runs:
         dur_min = r["duration_seconds"] / 60.0
-        if r["total_l"] is None or dur_min <= 0:
+        # 0 L rows are real records of a valve that opened and delivered
+        # nothing (709's 2 s / 0 L, 704 and 706's failed runs). Averaging
+        # them in drags avg_lpm toward zero, and _expand_slot divides by it
+        # to size volume-mode planned events — a near-zero rate made those
+        # events absurdly long (audit R12).
+        if not r["total_l"] or dur_min <= 0:
             continue
         lpms.append(r["total_l"] / dur_min)
         totals.append(r["total_l"])
