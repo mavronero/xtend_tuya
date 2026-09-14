@@ -28,7 +28,6 @@ from ....const import (
 # from paho.mqtt.properties import (
 #     Properties as mqtt_Properties,
 # )
-from urllib.parse import urlsplit
 
 class XTMQConfig(SharingMQConfig):
     def __init__(self, mqConfigResponse: dict[str, Any] = {}) -> None:
@@ -65,7 +64,6 @@ class XTSharingMQ(SharingMQ):
             device,  # type: ignore
         )
         self.manager = manager
-        self.shutting_down = False
 
     def subscribe_device(self, dev_id: str, device: CustomerDevice):
         if device is None:
@@ -85,33 +83,16 @@ class XTSharingMQ(SharingMQ):
                 XTDeviceWatcherCategory.MQTT,
             )
 
-    def _start(self, mq_config: SharingMQConfig) -> mqtt.Client:
-        # mqttc = mqtt.Client(callback_api_version=mqtt_CallbackAPIVersion.VERSION2, client_id=mq_config.client_id)
-        mqttc = mqtt.Client(client_id=mq_config.client_id)
-        mqttc.username_pw_set(mq_config.username, mq_config.password)
-        mqttc.user_data_set({"mqConfig": mq_config})
-        mqttc.on_connect = self._on_connect
-        mqttc.on_message = self._on_message
-        mqttc.on_subscribe = self._on_subscribe
-        # mqttc.on_publish = self._on_publish
-        mqttc.on_log = self._on_log
-        mqttc.on_disconnect = self._on_disconnect
-
-        url = urlsplit(mq_config.url)
-        if url.scheme == "ssl":
-            mqttc.tls_set()
-
-        mqttc.connect(url.hostname, url.port)
-
-        mqttc.loop_start()
-        return mqttc
-
-    def _on_disconnect(self, client, userdata, rc):
-        if rc != 0:
-            if self.shutting_down is False:
-                self.shutting_down = True
-                LOGGER.warning("Unexpected disconnection. Reconnecting...")
-                self.manager.refresh_mq()
+    # _start and _on_disconnect are deliberately NOT overridden: the SDK's
+    # own versions build the client with reconnect_on_failure=False and have
+    # an unclean disconnect wake its run() loop, which reconnects with freshly
+    # issued credentials under a 1->60 s backoff. The fork used to build the
+    # client without that flag and call manager.refresh_mq() synchronously
+    # from the paho network thread, so paho's auto-reconnect (re-authenticating
+    # with a now-stale fixed client_id), the SDK's run() loop and the fork's
+    # un-throttled refresh all raced. Tuya evicts duplicate client_ids, which
+    # produces another disconnect: a self-feeding loop, one
+    # POST /v1.0/m/life/ha/access/config per turn (audit C1).
 
     def _on_message(self, mqttc: mqtt.Client, user_data: Any, msg: mqtt.MQTTMessage):
         msg_dict = json.loads(msg.payload.decode("utf8"))
