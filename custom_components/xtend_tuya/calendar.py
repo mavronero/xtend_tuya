@@ -532,6 +532,11 @@ def _build_in_progress_event(
         start=run["start"],
         end=estimated_end,
         summary=title,
+        # Per-device UID component: both calendars merge the whole fleet into
+        # ONE entity, so an ICS UID of entity_id + start collided for every
+        # valve starting in the same second and Google silently kept one of
+        # them (audit R8). _render_ics appends the start time.
+        uid=registry_entity_id,
         description=description,
     )
 
@@ -1035,6 +1040,7 @@ class IrrigationPlannedCalendar(CalendarEntity):
                             start=start_dt,
                             end=end_dt,
                             summary=title,
+                            uid=f"{registry_entity_id}#{slot.get('slot', 0)}",
                             description=description,
                         )
                     )
@@ -1174,6 +1180,7 @@ class IrrigationCompletedCalendar(CalendarEntity):
                         start=r["start"],
                         end=r["end"],
                         summary=title,
+                        uid=d["registry_entity_id"],
                         description=description,
                     )
                 )
@@ -1354,7 +1361,8 @@ def _render_ics(entity_id: str, events: list[CalendarEvent]) -> bytes:
             ie.add("description", ev.description)
         ie.add("dtstart", ev.start)
         ie.add("dtend", ev.end)
-        uid = f"{entity_id}:{_dt_to_uid(ev.start)}@{DOMAIN}"
+        # ev.uid carries the per-device component; see the R8 note above.
+        uid = f"{ev.uid or entity_id}:{_dt_to_uid(ev.start)}@{DOMAIN}"
         ie.add("uid", uid)
         cal.add_component(ie)
     return cal.to_ical()

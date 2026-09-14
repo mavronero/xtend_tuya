@@ -751,16 +751,6 @@ class DPCodeCounterCustomWrapper(XTDPCodeRawStatusWrapper):
             return None
 
 
-class DPCodeCounterCustomVolumeWrapper(DPCodeCounterCustomWrapper):
-    """Last completed-run volume (L). Skips the 0xFFFE aborted sentinel."""
-
-    def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
-        p = self._parse(device)
-        if not p or p["duration"] == 65534:
-            return None
-        return str(p["volume"])
-
-
 class DPCodeCounterCustomLastRunWrapper(DPCodeCounterCustomWrapper):
     """Raw counter_custom CSV as the state. The runs_store listens on this
     entity to record T3 completed runs (the old-valve path keys off

@@ -39,13 +39,6 @@ def flow_volume(b):      # DPCodeFlowStaVolumeWrapper
     return int.from_bytes(b[1:5], "big") if len(b) >= 5 else None
 
 
-def counter_volume(csv):  # DPCodeCounterCustomVolumeWrapper
-    p = csv.split(",")
-    if len(p) < 5 or int(p[2]) == 65534:
-        return None
-    return int(p[3])
-
-
 def time_task(b):  # DPCodeT3TimeTaskWrapper.update_data
     if len(b) < 12:
         return None
@@ -97,9 +90,6 @@ def demo():
     assert flow_volume(d("AAAAAHEAAAJY//////////8A")) == 113
     # flow_sta_0 mid-run frame: 90 L
     assert flow_volume(d("AAAAAFoAAAAADhAAAA4QCgAA")) == 90
-    # counter_custom: last run 113 L; aborted (65534) -> None
-    assert counter_volume("0,1,600,113,20260714161000") == 113
-    assert counter_volume("0,1,65534,9,20260714155958") is None
     # runs_store T3 run-record filters (mirror of _on_counter_change)
     assert counter_run("0,1,900,151,20260807144500") == (900, 151.0)
     assert counter_run("0,1,65534,9,20260714155958") is None   # aborted sentinel

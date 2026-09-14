@@ -110,6 +110,11 @@ if TYPE_CHECKING:
 
 COMPOUND_KEY: list[str | tuple[str, ...]] = ["key", "dpcode"]
 
+# Unit strings that mean "this DP has no unit". The Tuya data model hands
+# back the Chinese "无" for unitless DPs; descriptors here use "".
+_NO_UNIT = {"", "无", "none"}
+
+
 def cur_cap_liters(value: object) -> int | None:
     """Return cur_cap as int — the raw counter, no ceiling.
 
@@ -2389,6 +2394,19 @@ class XTSensorEntity(XTEntity, TuyaSensorEntity, RestoreSensor):  # type: ignore
                     function_code=description.dpcode or description.key,
                     scale_threshold=description.recalculate_scale_for_percentage_threshold,
                 )
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:  # type: ignore[override]
+        """Drop the Tuya data model's placeholder units.
+
+        Unitless DPs come back from the cloud carrying the Chinese string
+        "无" ("none"), which HA then prints in the UI and treats as a real
+        unit — blocking unit conversion and long-term statistics on that
+        sensor (audit D14, e.g. sensor.*_watering_task). The derived
+        flow-rate entity already works around this by hard-coding its unit.
+        """
+        unit = super().native_unit_of_measurement
+        return None if unit is None or str(unit).strip() in _NO_UNIT else unit
 
     @property
     def available(self) -> bool:  # type: ignore[override]
