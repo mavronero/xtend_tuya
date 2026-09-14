@@ -33,6 +33,13 @@ def load_failure_action(err):
     return "retry"
 
 
+def entry_still_loading(state, domain, entry_id, load_done, our_domain="xtend_tuya"):
+    """Mirror of __init__._entry_still_loading (4.4.250)."""
+    if state == "setup_in_progress":
+        return True
+    return domain == our_domain and state == "loaded" and entry_id not in load_done
+
+
 def unload_ok(results):
     """Mirror of the per-platform unload tolerance in async_unload_entry."""
     return all(r is True or isinstance(r, ValueError) for r in results)
@@ -46,6 +53,16 @@ def demo():
     # transient (Tuya entry not ready, cloud hiccup, bug): reload later
     assert load_failure_action(ConfigEntryNotReady("tuya mid-setup")) == "retry"
     assert load_failure_action(RuntimeError("boom")) == "retry"
+
+    # 4.4.250: HA says LOADED the moment async_setup_entry returns, but the
+    # device map only exists once the background load finished. Registry
+    # cleanups must wait for that or they delete the other hub's devices.
+    assert entry_still_loading("setup_in_progress", "xtend_tuya", "a", set())
+    assert entry_still_loading("loaded", "xtend_tuya", "a", set())
+    assert not entry_still_loading("loaded", "xtend_tuya", "a", {"a"})
+    assert not entry_still_loading("setup_error", "xtend_tuya", "a", set())
+    # core tuya entries have no background load; LOADED means loaded
+    assert not entry_still_loading("loaded", "tuya", "t", set())
 
     # platforms never forwarded -> EntityComponent raises ValueError; tolerated
     assert unload_ok([True, ValueError("Config entry was never loaded!"), True])

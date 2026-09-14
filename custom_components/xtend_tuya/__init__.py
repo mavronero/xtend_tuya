@@ -127,6 +127,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
     # handler with it). Three cancelled setups in a row on 2026-09-14. Now the
     # entry reports loaded immediately and the heavy part runs in a task the
     # entry owns, so only a real unload/reload can cancel it.
+    # Store the managers before the background load so an unload during the
+    # load can still stop MQ threads and listeners (device_map is empty until
+    # the load has run; readers already treat that like "not set up yet").
+    entry.runtime_data = HomeAssistantXTData(
+        multi_manager=multi_manager,
+        listener=multi_manager.multi_device_listener,
+        service_manager=service_manager,
+    )
+    _LOAD_DONE.discard(entry.entry_id)
     _LOAD_TASKS[entry.entry_id] = entry.async_create_background_task(
         hass,
         _async_load_entry(hass, entry, multi_manager, service_manager),
@@ -139,6 +148,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
 # already a logged ERROR every 2 min; add backoff if it ever spams.
 LOAD_RETRY_SECONDS = 120
 _LOAD_TASKS: dict[str, asyncio.Task] = {}
+# Entries whose background load finished with a populated device map. HA's
+# own LOADED state is set as soon as async_setup_entry returns, which is now
+# before the device map exists; the registry cleanups below must not treat a
+# still-loading hub's devices as orphans (they would delete them).
+_LOAD_DONE: set[str] = set()
 
 
 def _load_failure_action(err: BaseException) -> str:
@@ -161,6 +175,7 @@ async def _async_load_entry(
 ) -> None:
     try:
         await _async_load_entry_body(hass, entry, multi_manager, service_manager)
+        _LOAD_DONE.add(entry.entry_id)
     except BaseException as err:  # noqa: BLE001 - routed below
         action = _load_failure_action(err)
         if action == "propagate":
@@ -200,13 +215,6 @@ async def _async_load_entry_body(
         XTDeviceWatcherCategory.XT_PERFORMANCE,
         None,
         False,
-    )
-
-    # Connection is successful, store the manager & listener
-    entry.runtime_data = HomeAssistantXTData(
-        multi_manager=multi_manager,
-        listener=multi_manager.multi_device_listener,
-        service_manager=service_manager,
     )
 
     # Cleanup device registry
@@ -427,8 +435,8 @@ async def cleanup_duplicated_devices(
 ) -> None:
     if not is_config_entry_master(hass, DOMAIN, current_entry):
         return
-    while not are_all_domain_config_loaded(hass, DOMAIN, current_entry):
-        await asyncio.sleep(0.1)
+    if not await _wait_all_domain_config_loaded(hass, DOMAIN, current_entry):
+        return
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
     duplicate_check_table: dict[str, list] = {}
@@ -473,10 +481,10 @@ async def cleanup_device_registry(
     """Remove deleted device registry entry if there are no remaining entities."""
     if not is_config_entry_master(hass, DOMAIN, current_entry):
         return
-    while not are_all_domain_config_loaded(hass, DOMAIN_ORIG, None):
-        await asyncio.sleep(0.1)
-    while not are_all_domain_config_loaded(hass, DOMAIN, current_entry):
-        await asyncio.sleep(0.1)
+    if not await _wait_all_domain_config_loaded(hass, DOMAIN_ORIG, None):
+        return
+    if not await _wait_all_domain_config_loaded(hass, DOMAIN, current_entry):
+        return
     device_registry = dr.async_get(hass)
     for dev_id, device_entry in list(device_registry.devices.items()):
         for item in device_entry.identifiers:
@@ -492,6 +500,13 @@ async def cleanup_device_registry(
                 break
 
 
+def _entry_still_loading(state: ConfigEntryState, domain: str, entry_id: str) -> bool:
+    """Mirrored in tests/test_background_load.py — keep in sync."""
+    if state == ConfigEntryState.SETUP_IN_PROGRESS:
+        return True
+    return domain == DOMAIN and state == ConfigEntryState.LOADED and entry_id not in _LOAD_DONE
+
+
 def are_all_domain_config_loaded(
     hass: HomeAssistant, domain: str, current_entry: ConfigEntry | None
 ) -> bool:
@@ -502,8 +517,29 @@ def are_all_domain_config_loaded(
             and config_entry.entry_id == current_entry.entry_id
         ):
             continue
-        if config_entry.state == ConfigEntryState.SETUP_IN_PROGRESS:
+        if _entry_still_loading(config_entry.state, domain, config_entry.entry_id):
             return False
+    return True
+
+
+# ponytail: 15 min covers the slowest hub load seen (4 min); a hub that never
+# finishes loading gets its devices left alone rather than deleted.
+_CLEANUP_WAIT_SECONDS = 900
+
+
+async def _wait_all_domain_config_loaded(
+    hass: HomeAssistant, domain: str, current_entry: ConfigEntry | None
+) -> bool:
+    deadline = _monotonic() + _CLEANUP_WAIT_SECONDS
+    while not are_all_domain_config_loaded(hass, domain, current_entry):
+        if _monotonic() > deadline:
+            LOGGER.warning(
+                "Skipping device registry cleanup: another %s entry is still loading after %s s",
+                domain,
+                _CLEANUP_WAIT_SECONDS,
+            )
+            return False
+        await asyncio.sleep(0.5)
     return True
 
 
@@ -525,6 +561,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
     # just makes sure a still-running load stops before platforms go away.
     if task := _LOAD_TASKS.pop(entry.entry_id, None):
         task.cancel()
+    _LOAD_DONE.discard(entry.entry_id)
     # The background load may not have forwarded the platforms yet (or was
     # cancelled halfway); EntityComponent raises ValueError("Config entry was
     # never loaded!") for those, which must not fail the unload.
@@ -536,12 +573,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
     if unload_ok:
         tuya = getattr(entry, "runtime_data", None)
         if tuya is not None and tuya.manager is not None:
-            if tuya.manager.mq is not None:
-                tuya.manager.mq.stop()
-            tuya.manager.remove_device_listeners()
-            await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-                tuya.manager.unload
-            )
+            try:
+                if tuya.manager.mq is not None:
+                    tuya.manager.mq.stop()
+                tuya.manager.remove_device_listeners()
+                await XTEventLoopProtector.execute_out_of_event_loop_and_return(
+                    tuya.manager.unload
+                )
+            except Exception:  # noqa: BLE001 - a half-loaded manager must not wedge the unload
+                LOGGER.warning("Xtended Tuya %s: manager teardown failed", entry.title, exc_info=True)
     return unload_ok
 
 
