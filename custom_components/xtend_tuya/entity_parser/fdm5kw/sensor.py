@@ -939,6 +939,7 @@ class Fdm5kwSensor:
                 translation_key="last_report",
                 name="Last report",
                 device_class=SensorDeviceClass.TIMESTAMP,
+                native_unit_of_measurement="",  # TIMESTAMP has no unit table entry; "" keeps the lib lookup away (see start_time)
                 entity_category=EntityCategory.DIAGNOSTIC,
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,
@@ -950,6 +951,7 @@ class Fdm5kwSensor:
                 translation_key="last_report",
                 name="Last report",
                 device_class=SensorDeviceClass.TIMESTAMP,
+                native_unit_of_measurement="",  # TIMESTAMP has no unit table entry; "" keeps the lib lookup away (see start_time)
                 entity_category=EntityCategory.DIAGNOSTIC,
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,
@@ -1073,6 +1075,7 @@ class Fdm5kwSensor:
                 translation_key="next_watering",
                 name="Next watering",
                 device_class=SensorDeviceClass.TIMESTAMP,
+                native_unit_of_measurement="",  # TIMESTAMP has no unit table entry; "" keeps the lib lookup away (see start_time)
                 icon="mdi:clock-outline",
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,

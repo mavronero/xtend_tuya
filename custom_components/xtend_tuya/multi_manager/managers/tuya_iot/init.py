@@ -273,7 +273,12 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
         if self.iot_account is None:
             return None
         self.iot_account.device_manager.refresh_mq()
-        self.iot_account.mq = self.iot_account.device_manager.mq
+        # TuyaIOTData is a NamedTuple: rebuild it instead of assigning a field
+        # (4.4.251 did `self.iot_account.mq = ...` and every load died with
+        # "can't set attribute").
+        self.iot_account = self.iot_account._replace(
+            mq=self.iot_account.device_manager.mq
+        )
 
     def remove_device_listeners(self) -> None:
         if self.iot_account is None:
