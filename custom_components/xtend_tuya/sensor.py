@@ -2395,6 +2395,24 @@ class XTSensorEntity(XTEntity, TuyaSensorEntity, RestoreSensor):  # type: ignore
                     scale_threshold=description.recalculate_scale_for_percentage_threshold,
                 )
 
+    def _validate_device_class_unit(self, tuya_uom: str | None) -> None:
+        """Timestamp/date sensors carry no unit; skip the core check.
+
+        HA core's TuyaSensorEntity does `DEVICE_CLASS_UNITS[device_class]`
+        and that table has no TIMESTAMP/DATE key (2026.9.2), so every
+        TIMESTAMP descriptor raised KeyError and took the whole sensor
+        platform down with it (4.4.251/252 outage).
+        """
+        if self.entity_description.device_class in (
+            SensorDeviceClass.TIMESTAMP,
+            SensorDeviceClass.DATE,
+        ):
+            self._attr_native_unit_of_measurement = None
+            return
+        parent = getattr(super(), "_validate_device_class_unit", None)
+        if parent is not None:
+            parent(tuya_uom)
+
     @property
     def native_unit_of_measurement(self) -> str | None:  # type: ignore[override]
         """Drop the Tuya data model's placeholder units.

@@ -854,7 +854,9 @@ class XTEntity(TuyaEntity):
                     device_class_from_uom_dict[dpcode_information.unit],  # type: ignore
                     device,
                 )
-        if dpcode_information.unit is not None:
+        # "无" ("none") and "" are Tuya's placeholders for unitless DPs, not
+        # unknown units (audit D14) — 90 warnings per boot otherwise.
+        if dpcode_information.unit not in (None, "", "无", "none"):
             LOGGER.warning(
                 f"Unit {dpcode_information.unit} not known, device is {device.name} ({dpcode_information.dpcode}), please report to developer."
             )
