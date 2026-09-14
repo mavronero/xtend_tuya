@@ -942,6 +942,13 @@ class Fdm5kwSensor:
                 name="Watering volume",
                 device_class=SensorDeviceClass.WATER,
                 native_unit_of_measurement=UnitOfVolume.LITERS,
+                # Per-run counter that resets to 0 when the next run starts
+                # — TOTAL_INCREASING, same as the QT-08W cur_cap twin. Without
+                # a state_class HA keeps no long-term statistics, so the
+                # per-valve "Hourly water" statistics-graph card (stat_types
+                # ["change"], which only exists for TOTAL/TOTAL_INCREASING)
+                # was permanently empty on every T3 (audit D2).
+                state_class=SensorStateClass.TOTAL_INCREASING,
                 icon="mdi:water",
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,
