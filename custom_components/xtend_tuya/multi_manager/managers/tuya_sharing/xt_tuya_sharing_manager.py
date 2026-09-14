@@ -5,6 +5,7 @@ This file contains all the code that inherit from Tuya integration
 from __future__ import annotations
 from typing import Any, cast
 import json
+import time
 from tuya_sharing.manager import (
     Manager,
     SceneRepository,
@@ -367,6 +368,10 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
         updated_status_properties: list[str] | None = None,
         dp_timestamps: dict | None = None,
     ):
+        if updated_status_properties:
+            # Report recency, wall clock: the device's own `t` is ms on one
+            # source and seconds on the other (C19) and its clock drifts.
+            device.last_report_ts = time.time()
         for listener in self.device_listeners:
             listener.update_device(device, updated_status_properties, dp_timestamps)
 

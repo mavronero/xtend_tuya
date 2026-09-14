@@ -321,6 +321,13 @@ class XTDevice(TuyaDevice):
         self.set_up: bool | None = False
         self.support_local: bool | None = False
 
+        # Wall-clock epoch seconds of the last status update this device got
+        # from either source (MQ report, or the device-list fetch at load).
+        # Entity availability is otherwise a pure function of the cloud
+        # `online` flag, so a valve that stops reporting keeps serving frozen
+        # values and still looks healthy (audit C23). 0.0 = never seen.
+        self.last_report_ts: float = 0.0
+
         self.local_strategy = {}
         self.status = {}
         self.function = {}  # type: ignore

@@ -445,6 +445,10 @@ class XTIOTDeviceManager(TuyaDeviceManager):
         updated_status_properties: list[str] | None = None,
         dp_timestamps: dict | None = None,
     ):
+        if updated_status_properties:
+            # Report recency, wall clock: the device's own `t` is ms on one
+            # source and seconds on the other (C19) and its clock drifts.
+            device.last_report_ts = time.time()
         for listener in self.device_listeners:
             listener.update_device(device, updated_status_properties, dp_timestamps)
 

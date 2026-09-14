@@ -1,5 +1,6 @@
 from __future__ import annotations
 import copy
+import time
 import importlib
 import os
 import inspect
@@ -265,7 +266,11 @@ class MultiManager(TuyaManager):
             # Now let's aggregate all of these devices into a single
             # "All functionnality" device
             self._merge_devices_from_multiple_sources()
+            fetch_ts = time.time()
             for device in self.device_map.values():
+                # The device-list fetch is itself a report: it carries the
+                # cloud's current status for the device (audit C23).
+                device.last_report_ts = fetch_ts
                 # Applied twice because some parts at the end of apply_fix would change values of previous calls
                 CloudFixes.apply_fixes(device, self)
                 CloudFixes.apply_fixes(device, self)
