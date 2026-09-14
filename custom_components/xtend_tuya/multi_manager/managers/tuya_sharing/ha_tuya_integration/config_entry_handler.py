@@ -3,16 +3,12 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from .....ha_tuya_integration.tuya_integration_imports import (
     tuya_coordinator,
-    TuyaCustomerDevice,
 )
 from ....multi_manager import (
     XTConfigEntry,
 )
 from ..xt_tuya_sharing_manager import (
     XTSharingDeviceManager,
-)
-from ....shared.shared_classes import (
-    XTDeviceMap,
 )
 from .....const import (
     LOGGER,
@@ -32,12 +28,6 @@ class XTHATuyaIntegrationConfigEntryManager:
     
     def on_tuya_on_message(self, msg: dict):
         LOGGER.warning("Received UNEXPECTED Tuya MQ Message: %s", msg)
-
-    def on_tuya_device_attribute_change(
-        self, before_call: bool, base_object: TuyaCustomerDevice, attr, value
-    ):
-        if not before_call:
-            XTDeviceMap.set_device_key_value_multimap(base_object.id, attr, value)
 
     async def on_tuya_setup_entry(
         self,

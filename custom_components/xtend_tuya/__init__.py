@@ -85,12 +85,24 @@ def _getaddrinfo_ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
 socket.getaddrinfo = _getaddrinfo_ipv4_only
 
 
-# Suppress logs from the library, it logs unneeded on error
-logging.getLogger("tuya_sharing").setLevel(logging.CRITICAL)
+# The library is chatty on error, but CRITICAL silenced it process-wide —
+# including its reconnect diagnostics, _get_mqtt_config errors and device-query
+# failures, which is a large part of why the Aug 2026 DP-collapse call site was
+# never identified (audit C12).
+logging.getLogger("tuya_sharing").setLevel(logging.WARNING)
+
+
+# entry_id -> the options dict the entry was last loaded with. HA fires the
+# update listener for any entry write, not only an options change, and each
+# reload costs ~5 cloud calls per device; reloading on a no-op write is how a
+# reload storm starts.
+_LOADED_OPTIONS: dict[str, dict] = {}
 
 
 async def update_listener(hass: HomeAssistant, entry: XTConfigEntry):
-    """Handle options update."""
+    """Reload the entry when its options actually changed."""
+    if _LOADED_OPTIONS.get(entry.entry_id) == dict(entry.options):
+        return
     hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
@@ -135,6 +147,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
         listener=multi_manager.multi_device_listener,
         service_manager=service_manager,
     )
+    # Options changes (credentials, endpoint, plugin selection) used to need a
+    # restart or a manual reload: the listener existed but was never
+    # registered (audit C14).
+    _LOADED_OPTIONS[entry.entry_id] = dict(entry.options)
+    entry.async_on_unload(entry.add_update_listener(update_listener))
     _LOAD_DONE.discard(entry.entry_id)
     _LOAD_TASKS[entry.entry_id] = entry.async_create_background_task(
         hass,

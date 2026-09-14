@@ -26,6 +26,7 @@ from ....const import (
 from homeassistant.helpers.issue_registry import (
     IssueSeverity,
     async_create_issue,
+    async_delete_issue,
 )
 
 
@@ -275,6 +276,26 @@ class XTDeviceManagerMultiManagerManagementInterface(ABC):
         except Exception as e:
             # Prevent failure for any reason on this method
             LOGGER.error(f"Exception raised during raise_issue: {e}")
+
+    async def clear_issue(
+        self,
+        hass: HomeAssistant,
+        config_entry: XTConfigEntry,
+        translation_key: str,
+    ):
+        """Drop a repair issue whose condition is healthy again.
+
+        Issues were only ever created. Prod carried six open xtend issues,
+        including tuya_iot_failed_request on both hubs while both were running
+        dual-mode — so the repairs panel was pure noise and a real outage
+        would not have been noticed (audit C15).
+        """
+        try:
+            async_delete_issue(
+                hass, DOMAIN, f"{config_entry.entry_id}_{translation_key}"
+            )
+        except Exception as e:
+            LOGGER.error(f"Exception raised during clear_issue: {e}")
 
 
 class XTDeviceManagerInterface(

@@ -235,6 +235,14 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                 learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/renew_cloud_credentials.md",
             )
             return None
+        # The hub is configured, reachable and authenticated: drop any repair
+        # issue left over from an earlier failure (audit C15).
+        for stale in (
+            "tuya_iot_not_configured",
+            "tuya_iot_failed_request",
+            "tuya_iot_failed_login",
+        ):
+            await self.clear_issue(hass, config_entry, stale)
         device_manager = XTIOTDeviceManager(self.multi_manager, api, non_user_api)
         device_ids: list[str] = list()
         home_manager = XTIOTHomeManager(api, device_manager, self.multi_manager)
@@ -434,6 +442,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                         },
                         learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_locks.md",
                     )
+                else:
+                    await self.clear_issue(hass, config_entry, "tuya_iot_lock_not_subscribed")
         if camera_device_id := multi_manager.get_general_property(
             XTMultiManagerProperties.CAMERA_DEVICE_ID, None
         ):
@@ -457,6 +467,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                         },
                         learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_cameras.md",
                     )
+                else:
+                    await self.clear_issue(hass, config_entry, "tuya_iot_camera_not_subscribed")
 
         if ir_hub_device_id := multi_manager.get_general_property(
             XTMultiManagerProperties.IR_DEVICE_ID, None
@@ -481,6 +493,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                         },
                         learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_ir.md",
                     )
+                else:
+                    await self.clear_issue(hass, config_entry, "tuya_iot_ir_not_subscribed")
 
         if energy_sensor_entities := multi_manager.get_general_property(
             XTMultiManagerProperties.ENERGY_SENSOR, None
@@ -506,6 +520,8 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
                             },
                             learn_more_url="https://github.com/azerty9971/xtend_tuya/blob/main/docs/configure_energy_sensor_statistics.md",
                         )
+                    else:
+                        await self.clear_issue(hass, config_entry, "tuya_iot_sensor_energy_stat_not_subscribed")
                 break
 
     def get_ir_hub_information(self, device: XTDevice) -> XTIRHubInformation | None:
