@@ -27,6 +27,7 @@ from ...ha_tuya_integration.tuya_integration_imports import (
     TuyaDPCodeRawWrapper,
     TuyaRawTypeInformation,
 )
+from ...water_math import plausible_delta
 from ...const import XTDPCode
 from . import location_service
 
@@ -38,11 +39,6 @@ DP_TIME_TASK = "time_task"
 DP_RUN_TASK_STA = "run_task_sta"
 DP_CUR_CAP = "cur_cap"
 DP_START_TIME = "start_time"
-
-# Liters ceiling for one cur_cap reading (25 L/min impeller * 6 h cap). The
-# cur_cap DP occasionally emits a garbage spike (e.g. 177610 L); a spike would
-# otherwise produce an impossible derived flow burst (e.g. 260000 L/min).
-SANE_CUR_CAP_MAX = 9000
 
 # How often to re-publish the flow-rate sensor state while a run is active.
 # Pure local recomputation (no API call) — cost is one recorder row per tick
@@ -530,12 +526,6 @@ class Fdm5kwFlowRateEntity(XTSensorEntity):
             self._was_running = False
             return changed
 
-        if cur_cap > SANE_CUR_CAP_MAX:
-            # Glitch spike in the cur_cap DP — ignore this sample so the
-            # derived rate doesn't show an impossible burst. Keep the last
-            # baseline; the next real reading resumes a sane delta.
-            return False
-
         if not self._was_running or self._last_ts is None or self._last_cur_cap is None:
             # Run just started: capture baseline, emit 0 once.
             self._last_cur_cap = cur_cap
@@ -548,7 +538,14 @@ class Fdm5kwFlowRateEntity(XTSensorEntity):
         delta_t = (now - self._last_ts).total_seconds()
         if delta_t <= 0:
             return False
-        delta_cap = max(0, cur_cap - self._last_cur_cap)
+        # Glitch spikes are rejected per-DELTA, not per-absolute-value: on the
+        # valves whose cur_cap is a lifetime odometer an absolute ceiling
+        # latches and pins this rate at 0 forever (audit D3/R16). None = the
+        # jump is impossible — drop the sample and keep the old baseline, so
+        # the next real reading resumes a sane delta.
+        delta_cap = plausible_delta(self._last_cur_cap, cur_cap, delta_t)
+        if delta_cap is None:
+            return False
         self._current_flow = round(delta_cap * 60.0 / delta_t, 2)
         self._last_cur_cap = cur_cap
         self._last_ts = now
@@ -629,10 +626,8 @@ class DPCodeFlowStaVolumeWrapper(XTDPCodeRawStatusWrapper):
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
         decoded = super().read_device_status(device)
         if decoded and len(decoded) >= 5:
-            vol = int.from_bytes(decoded[1:5], "big")
-            if vol > SANE_CUR_CAP_MAX:
-                return None  # glitch guard, same ceiling as cur_cap
-            return str(vol)
+            # Raw counter, no ceiling — see water_math (audit D3/R16).
+            return str(int.from_bytes(decoded[1:5], "big"))
         return None
 
 

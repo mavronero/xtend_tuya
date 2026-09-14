@@ -1032,36 +1032,43 @@ class IrrigationValveMatrix extends HTMLElement {
     }
   }
 
-  // Total liters delivered within the window. The volume sensor mirrors the
-  // device's per-cycle counter (cur_cap): it ramps up during a watering and
-  // resets when the next one starts. Summing only the positive increments
-  // counts every cycle once and is equally correct if a firmware reports a
-  // cumulative, ever-growing total instead.
+  // Total liters delivered within the window. Mirror of the Python
+  // water_math.sum_plausible_deltas — keep the two in step.
+  //
+  // The volume sensor is the device's raw liters counter, and the fleet
+  // runs it in two shapes: most valves reset it to 0 at the start of every
+  // cycle, some run it as a lifetime odometer (audit D3/R16). Summing
+  // plausible positive deltas counts every cycle exactly once either way.
+  //
+  // The old absolute 9000 L ceiling ("no valve can deliver more in one
+  // run") dropped EVERY sample from an odometer valve, so those rows read
+  // 0 L forever. Plausibility belongs on the delta: the impeller's limit is
+  // a flow rate, not a total. Rate check (4.4.212): valve 824 summed
+  // 10,303 L over 1.5 h runtime (~114 L/min) from sub-ceiling garbage, so
+  // reject any delta implying more than 50 L/min (2× the meter's spec,
+  // margin for the ~10 s publish jitter), floored at 50 L so a burst
+  // arriving in the same second isn't rejected by a ~0 elapsed time. An
+  // impossible sample is DISCARDED rather than becoming `prev`, so the drop
+  // back off a spike isn't mistaken for a cycle reset.
   private _sumPositiveDeltas(points: HistoryPoint[]): number {
-    // Physical ceiling (4.4.206): cur_cap intermittently emits garbage
-    // spikes (15237, 177610 …) far above what a valve can deliver
-    // (25 L/min × max run ≈ 9000 L). Drop those samples entirely so a
-    // single spike can't inflate the windowed total.
-    const MAX_PLAUSIBLE_L = 9000;
-    // Rate check (4.4.212): sub-ceiling garbage still slipped through —
-    // valve 824 summed 10,303 L over 1.5 h runtime (~114 L/min; the meter
-    // maxes at 25 L/min). cur_cap publishes every ~10 s during a run, so a
-    // real sample-to-sample delta is a few liters; reject any delta whose
-    // implied flow beats 50 L/min (2× spec, margin for update jitter).
-    // The sample still becomes `prev`, so a stuck garbage value contributes
-    // nothing further and the next cycle's reset re-anchors cleanly.
     const MAX_RATE_L_PER_MIN = 50;
+    const MIN_PLAUSIBLE_DELTA_L = 50;
     let total = 0;
     let prev: number | null = null;
     let prevLu = 0;
     for (const p of points) {
       const v = parseFloat(p.s);
-      if (!Number.isFinite(v) || v > MAX_PLAUSIBLE_L) continue;
-      if (prev !== null && v > prev) {
-        const dtMin = (p.lu - prevLu) / 60;
-        if (dtMin > 0 && (v - prev) / dtMin <= MAX_RATE_L_PER_MIN) {
-          total += v - prev;
-        }
+      if (!Number.isFinite(v)) continue;
+      if (prev !== null) {
+        // A drop = the counter reset at a cycle start, so everything it has
+        // climbed back to since the reset is this cycle's water.
+        const delta = v >= prev ? v - prev : v;
+        const ceiling = Math.max(
+          MIN_PLAUSIBLE_DELTA_L,
+          (MAX_RATE_L_PER_MIN * Math.max(p.lu - prevLu, 0)) / 60
+        );
+        if (delta > ceiling) continue;
+        if (delta > 0) total += delta;
       }
       prev = v;
       prevLu = p.lu;

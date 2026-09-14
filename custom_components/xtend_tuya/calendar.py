@@ -43,6 +43,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView
 
 from .const import DOMAIN, DOMAIN_ORIG
+from .water_math import sum_plausible_deltas
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -84,51 +85,23 @@ LAST_N_FOR_AVERAGES = 10
 # either a stale registry slot or a broken start/end recorder pairing
 # and must not bleed into the calendar UI.
 MAX_SANE_RUN_SECONDS = 6 * 3600
-# Cap on liters delivered in one cycle. The QT-08W impeller tops out at
-# 25 L/min, so even the longest sane run can't exceed 25 * (cap minutes).
-# A derived per-run volume above this means the cur_cap delta is garbage
-# (e.g. an odometer reset mid-run) and must be dropped, not shown.
-MAX_SANE_RUN_LITERS = 25 * (MAX_SANE_RUN_SECONDS / 60)
 
 
 def _run_volume(
     vol_series: list[tuple[datetime, float]],
     start_lu: datetime,
     end_lu: datetime,
-    run_minutes: float | None = None,
 ) -> float | None:
-    """Per-run liters = peak cur_cap in the run window, ignoring spikes.
+    """Per-run liters = the plausible cur_cap climb inside the run window.
 
-    cur_cap resets to 0 at cycle start and ramps up as water flows, so the
-    peak inside the run window is the liters delivered. But the DP glitches:
-    it intermittently reports a garbage value (e.g. 15237, 177610 L —
-    observed on ~2 of 488 samples, 2026-07-06) that sticks as the idle
-    resting value between runs. A plain max() picks up that spike and shows
-    an impossible per-run total. Dropping any sample above MAX_SANE_RUN_LITERS
-    filters the spikes while keeping the real ramp.
+    This used to take the peak sample and reject anything above an absolute
+    9000 L ceiling. That is only correct while cur_cap is a per-cycle
+    counter; on the valves that run it as a lifetime odometer the peak is
+    the odometer and every sample is above the ceiling, so the run recorded
+    no liters at all (audit D3/R16). Summing plausible deltas is exact for
+    both shapes, and spikes are rejected by rate instead of by magnitude.
     """
-    # Scale the ceiling to the ACTUAL run duration, not the 6 h cap:
-    # a 5-minute run physically tops out around 125 L, so a 2,000 L
-    # sample inside it is garbage even though it clears the absolute
-    # ceiling. 50 L/min = 2× the meter's 25 L/min spec — margin for
-    # cur_cap's ~10 s update lag; 50 L floor keeps sub-minute runs from
-    # rejecting their own real ramp. (Valve 824 emitted exactly this
-    # class of sub-ceiling garbage, 2026-07-06.)
-    # run_minutes is passed explicitly when the sampling window is wider
-    # than the actual run (see the pairing loop) — the spike ceiling must
-    # scale with the real watering duration, not the window size.
-    if run_minutes is None:
-        run_minutes = max((end_lu - start_lu).total_seconds() / 60, 0.0)
-    sane_cap = min(MAX_SANE_RUN_LITERS, max(50.0, 50.0 * run_minutes))
-    peak: float | None = None
-    for ts, v in vol_series:
-        if ts < start_lu or ts > end_lu:
-            continue
-        if v > sane_cap:
-            continue  # glitch spike — not a real reading
-        if peak is None or v > peak:
-            peak = v
-    return peak
+    return sum_plausible_deltas(vol_series, start_lu, end_lu)
 
 
 async def async_setup_entry(
@@ -830,13 +803,12 @@ def _pair_runs(
         # a [start_row, end_row] window contains no samples and every
         # event showed "—" liters (ticket 9W8FXA4l, "liters missing in
         # most entries"). Between cycles cur_cap rests at the final run
-        # total, so extending to the next start stays exact; the spike
-        # ceiling is scaled by the real run duration.
+        # total, so extending to the next start adds no further deltas and
+        # stays exact.
         total_l = _run_volume(
             vol_series,
             s_last_updated,
             next_start_lu or datetime.now().astimezone(),
-            run_minutes=duration_seconds / 60,
         )
 
         runs.append(
