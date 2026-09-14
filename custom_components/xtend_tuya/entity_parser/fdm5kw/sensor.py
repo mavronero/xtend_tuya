@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
 
-from homeassistant.const import UnitOfVolumeFlowRate, UnitOfVolume, PERCENTAGE
+from homeassistant.const import (
+    EntityCategory,
+    UnitOfVolumeFlowRate,
+    UnitOfVolume,
+    PERCENTAGE,
+)
 from homeassistant.components.sensor import SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util.dt import DEFAULT_TIME_ZONE
@@ -99,6 +104,31 @@ class XTDPCodeRawStatusWrapper(TuyaDPCodeRawWrapper):
                     ),
                 )
         return None
+
+
+class DPCodeLastReportWrapper(XTDPCodeRawStatusWrapper):
+    """When this device last reported anything — NOT a DP value.
+
+    Entity availability across the whole integration is the cloud `online`
+    flag and nothing else, so a valve that stopped reporting keeps showing
+    frozen values and looks perfectly healthy. That is the mechanism behind
+    "HA disagrees with the SmartLife app" (audit C23). The multi-manager
+    stamps `last_report_ts` (epoch seconds, 0.0 when unknown) on every
+    XTDevice as reports arrive; this surfaces it.
+
+    It is bound to a DP purely because entity creation is DP-presence-gated
+    — the DP's own value is never read. A device whose manager predates the
+    stamp simply reports unknown.
+    """
+
+    def read_device_status(self, device: TuyaCustomerDevice) -> datetime | None:
+        try:
+            ts = float(getattr(device, "last_report_ts", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if ts <= 0:
+            return None
+        return datetime.fromtimestamp(ts, tz=DEFAULT_TIME_ZONE)
 
 
 class DPCodeTimestampWrapper(XTDPCodeRawStatusWrapper):
@@ -907,6 +937,33 @@ class Fdm5kwSensor:
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,
                 wrapper_class=(DPCodeTimestampWrapper,),
+            ),
+            # --- Staleness (C23) ---
+            # Two descriptors, one per product family, because entity spawn
+            # is DP-presence-gated and the QT-08W and the T3 share no DP.
+            # They carry the same translation_key, exactly like the two
+            # irrigation_timer_registry descriptors below.
+            Fdm5kwSensorEntityDescription(
+                key=f"{DP_CUR_CAP}_last_report",
+                dpcode=DP_CUR_CAP,
+                translation_key="last_report",
+                name="Last report",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=True,
+                ignore_other_dp_code_handler=True,
+                wrapper_class=(DPCodeLastReportWrapper,),
+            ),
+            Fdm5kwSensorEntityDescription(
+                key=f"{DP_T3_SAT}_last_report",
+                dpcode=DP_T3_SAT,
+                translation_key="last_report",
+                name="Last report",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=True,
+                ignore_other_dp_code_handler=True,
+                wrapper_class=(DPCodeLastReportWrapper,),
             ),
             # --- One-shot control status ---
             Fdm5kwSensorEntityDescription(

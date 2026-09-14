@@ -115,6 +115,8 @@ interface ValveEntities {
   mode_sensor?: string;
   value_sensor?: string;
   battery_level?: string;
+  /** Diagnostic TIMESTAMP of the device's last report (audit C23). */
+  last_report?: string;
   sleep_mode?: string;
   rain_snow_delay?: string;
 }
@@ -136,6 +138,7 @@ const TRANSLATION_KEY_TO_FIELD: Record<string, keyof ValveEntities> = {
   watering_volume: "volume_sensor",
   watering_flow_rate: "flow_rate_sensor",
   battery_level: "battery_level",
+  last_report: "last_report",
   watering_duration: "duration",
   rain_snow_delay: "rain_snow_delay",
   // QT-08W-T3 valves expose the same concepts under indexed / differently
@@ -468,6 +471,7 @@ function buildOverviewView(
     switch: v.switch,
     battery: v.battery_level,
     volume: v.volume_sensor,
+    last_report: v.last_report,
     path: v.view_path,
     home: v.valve_home ?? null,
     room: v.valve_room ?? null,
@@ -871,6 +875,8 @@ interface MatrixRow {
   switch?: string;
   battery?: string;
   volume?: string;
+  /** Diagnostic "last report" sensor, for the stale marker (audit C23). */
+  last_report?: string;
   path?: string;
   /** SmartLife home / room for list grouping (4.4.207). */
   home?: string | null;
@@ -907,6 +913,10 @@ interface HistoryPoint {
 }
 
 const MATRIX_REFRESH_MS = 60_000;
+// A valve that has not reported for this long while still flagged online is
+// showing frozen values, not healthy ones (audit C23). ponytail: one figure
+// for the whole fleet — split it per product if the T3's cadence differs.
+const STALE_AFTER_HOURS = 36;
 
 function escapeHtml(s: string): string {
   return s.replace(
@@ -1271,6 +1281,26 @@ class IrrigationValveMatrix extends HTMLElement {
     return `${Math.round(n)}${unit}`;
   }
 
+  // "Online" is the cloud flag and nothing else, so a valve that stopped
+  // reporting keeps its last values and looks healthy — the mechanism
+  // behind "HA disagrees with the app" (audit C23). Flag a row whose
+  // diagnostic last-report stamp has gone quiet while the valve still
+  // claims to be online.
+  private _staleMarker(v: MatrixRow): string {
+    if (!v.last_report || !this._hass) return "";
+    const sw = v.switch ? this._hass.states[v.switch] : undefined;
+    if (!sw || sw.state === "unavailable" || sw.state === "unknown") return "";
+    const s = this._hass.states[v.last_report];
+    if (!s || s.state === "unavailable" || s.state === "unknown") return "";
+    const last = Date.parse(s.state);
+    if (!Number.isFinite(last)) return "";
+    const hours = (Date.now() - last) / 3_600_000;
+    if (hours < STALE_AFTER_HOURS) return "";
+    return `<span class="stale" title="Online, but last reported ${Math.round(
+      hours
+    )} h ago">⚠</span>`;
+  }
+
   private _batteryClass(entity?: string): string {
     if (!entity || !this._hass) return "muted";
     const e = this._hass.states[entity];
@@ -1411,7 +1441,7 @@ class IrrigationValveMatrix extends HTMLElement {
       }" data-path="${escapeHtml(v.path || "")}">
           <div class="name" title="${escapeHtml(v.name)}">${escapeHtml(
             v.name
-          )}</div>
+          )}${this._staleMarker(v)}</div>
           <div class="bar">${bars}</div>
           <div class="metric ${this._metricClass(run)}">${escapeHtml(run)}</div>
           <div class="metric ${this._metricClass(water)}">${escapeHtml(
@@ -1470,6 +1500,7 @@ class IrrigationValveMatrix extends HTMLElement {
         .row.clickable { cursor: pointer; }
         .row.clickable:hover { background: var(--secondary-background-color); }
         .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+        .stale { color: var(--warning-color, #ffa600); margin-left: 5px; cursor: help; }
         /* Track is EMPTY (no fill) — a no-data / unreachable period renders
            as bare background, so a gap is unmistakable. Reported states draw
            colour: idle = light blue ("online, closed"), watering = amber.
