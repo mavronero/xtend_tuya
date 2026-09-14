@@ -649,6 +649,24 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     if cloud_keys is None:
         return {"success": False, "error": "cloud_get_failed"}
 
+    # A GET that succeeds but comes back empty is not proof that every timer
+    # is an orphan: a degraded-but-successful response (device offline,
+    # project moved, registry not yet consistent) would have us clear every
+    # enabled slot on the valve and burn a control write per slot, with no
+    # way back — the DP is overwritten (audit C7). A device with timers and
+    # an empty cloud registry is a cloud problem, not an orphan problem.
+    enabled_slots = [idx for idx, s in slots.items() if s and s.get("enabled")]
+    if not cloud_keys and enabled_slots:
+        _LOGGER.warning(
+            "resync: the cloud reports zero timers for %s while HA holds %d "
+            "enabled slot(s) %s — that is a cloud/registry problem, not "
+            "orphans; nothing cleared",
+            device_id,
+            len(enabled_slots),
+            enabled_slots,
+        )
+        return {"success": False, "error": "cloud_registry_empty"}
+
     multi_manager = _find_multi_manager(hass, device_id)
     locked_out = _is_quota_locked_out()
 
