@@ -956,7 +956,6 @@ class IrrigationValveMatrix extends HTMLElement {
   private _segments: Record<string, MatrixSegment[]> = {};
   // Per-switch minutes open and per-volume-sensor liters within the
   // history window — both derived from the same history fetch as the bars.
-  private _runtimeMin: Record<string, number> = {};
   private _waterL: Record<string, number> = {};
   // Recorded runs from the runs store, keyed by TUYA DEVICE ID. These are
   // the amber bars and the TIME column; the switch history only supplies
@@ -1052,24 +1051,14 @@ class IrrigationValveMatrix extends HTMLElement {
         no_attributes: true,
       });
       const nextSegs: Record<string, MatrixSegment[]> = {};
-      const nextRun: Record<string, number> = {};
       for (const entity of switches) {
-        const segs = this._buildSegments(raw[entity] ?? [], start, now);
-        nextSegs[entity] = segs;
-        // No segments = the valve never reported in the window (offline) —
-        // leave the runtime unset so the column shows "–", not "0 min".
-        if (segs.length === 0) continue;
-        const onFraction = segs
-          .filter((s) => s.kind === "on")
-          .reduce((acc, s) => acc + s.width, 0);
-        nextRun[entity] = (onFraction * (now - start)) / 60_000;
+        nextSegs[entity] = this._buildSegments(raw[entity] ?? [], start, now);
       }
       const nextWater: Record<string, number> = {};
       for (const entity of volumes) {
         nextWater[entity] = this._sumPositiveDeltas(raw[entity] ?? []);
       }
       this._segments = nextSegs;
-      this._runtimeMin = nextRun;
       this._waterL = nextWater;
       await this._fetchRuns(start, now);
       this._render();
@@ -1219,16 +1208,39 @@ class IrrigationValveMatrix extends HTMLElement {
 
   // Light-blue "reporting and closed" lane from the switch history, with
   // the recorded runs painted over it in amber.
+  // Amber = union of the switch's "on" history and the recorded runs.
+  // Old-gen valves report their switch honestly, and that is the ONLY
+  // signal for a valve that is open right now or stuck open (824 sat open
+  // 16.8 h on 2026-09-14; the runs store, which records only completed
+  // cycles, showed 10 min). T3 valves never flip the switch, so their amber
+  // comes from the runs store alone. Overlaps are merged so a run recorded
+  // by both sources is not drawn or counted twice.
+  private _onSegments(v: MatrixRow): MatrixSegment[] {
+    const fromSwitch = (v.switch ? this._segments[v.switch] ?? [] : []).filter(
+      (s) => s.kind === "on"
+    );
+    const fromRuns = v.device_id ? this._runSegments[v.device_id] ?? [] : [];
+    const all = [...fromSwitch, ...fromRuns].sort((a, b) => a.startMs - b.startMs);
+    const merged: MatrixSegment[] = [];
+    for (const seg of all) {
+      const last = merged[merged.length - 1];
+      if (last && seg.startMs <= last.endMs) {
+        if (seg.endMs > last.endMs) {
+          last.endMs = seg.endMs;
+          last.width = last.width + (seg.left + seg.width - (last.left + last.width));
+        }
+        continue;
+      }
+      merged.push({ ...seg });
+    }
+    return merged;
+  }
+
   private _rowSegments(v: MatrixRow): MatrixSegment[] {
     const reporting = (v.switch ? this._segments[v.switch] ?? [] : []).filter(
       (s) => s.kind === "off"
     );
-    const runs = v.device_id ? this._runSegments[v.device_id] ?? [] : [];
-    if (runs.length > 0) return [...reporting, ...runs];
-    // No device_id (dashboard config saved before 4.4.251) — keep the old
-    // switch-derived amber so a frozen board doesn't lose its bars.
-    if (!v.device_id && v.switch) return this._segments[v.switch] ?? [];
-    return reporting;
+    return [...reporting, ...this._onSegments(v)];
   }
 
   // "min / liter" columns (Simon 2026-06-06): how long each valve ran and
@@ -1236,20 +1248,16 @@ class IrrigationValveMatrix extends HTMLElement {
   // means no data source (no switch / no flow meter on that valve).
   private _runText(v: MatrixRow): string {
     // Recorded runs first — see _fetchRuns.
-    const dev = v.device_id;
+    const reporting = (v.switch ? this._segments[v.switch] ?? [] : []).length > 0;
+    const on = this._onSegments(v);
+    // Only claim "0 min" when the valve is actually reporting; a silent
+    // valve keeps the "–" that marks it as having no data at all.
     const min =
-      dev && dev in this._runMin
-        ? this._runMin[dev]
-        : dev
-          ? // The runs store answered and holds nothing for this valve. Only
-            // claim "0 min" when the valve is actually reporting; a silent
-            // valve keeps the "–" that marks it as having no data at all.
-            (v.switch ? this._segments[v.switch] ?? [] : []).length > 0
-            ? 0
-            : undefined
-          : v.switch
-            ? this._runtimeMin[v.switch]
-            : undefined;
+      on.length > 0
+        ? on.reduce((acc, s) => acc + (s.endMs - s.startMs), 0) / 60_000
+        : reporting || (v.device_id && v.device_id in this._runMin)
+          ? 0
+          : undefined;
     if (min === undefined) return "–";
     if (min <= 0) return "0 min";
     if (min < 1) return "<1 min";
@@ -1588,7 +1596,6 @@ class IrrigationValveMatrix extends HTMLElement {
         // Old-window data would render mislabeled while the fetch runs —
         // clear it so lanes go empty, then refill for the new window.
         this._segments = {};
-        this._runtimeMin = {};
         this._waterL = {};
         this._render();
         void this._fetchHistory();
