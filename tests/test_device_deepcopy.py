@@ -36,7 +36,7 @@ def make_device(i):
     return d
 
 
-XTDeviceMap.clear_master_device_map()
+XTDeviceMap.master_device_map = []
 devices = {d.id: d for d in (make_device(i) for i in range(240))}
 dev_map = XTDeviceMap(devices)  # sets device_map on every member
 first = next(iter(devices.values()))

@@ -711,19 +711,19 @@ class XTDeviceMap(UserDict[str, XTDevice]):
             )
         super().clear()
 
-    @staticmethod
-    def clear_master_device_map():
-        XTDeviceMap.master_device_map = []
-
+    # Identity, not equality: XTDeviceMap is a UserDict, so `in` / `remove`
+    # would compare *contents* and two empty maps would look like the same
+    # registration.
     @staticmethod
     def register_device_map(device_map: XTDeviceMap):
-        if device_map not in XTDeviceMap.master_device_map:
+        if not any(m is device_map for m in XTDeviceMap.master_device_map):
             XTDeviceMap.master_device_map.append(device_map)
 
     @staticmethod
     def unregister_device_map(device_map: XTDeviceMap):
-        if device_map in XTDeviceMap.master_device_map:
-            XTDeviceMap.master_device_map.remove(device_map)
+        XTDeviceMap.master_device_map = [
+            m for m in XTDeviceMap.master_device_map if m is not device_map
+        ]
 
     @staticmethod
     def set_device_key_value_multimap(device_id: str, key: str, value: Any):

@@ -244,7 +244,7 @@ class MultiManager(TuyaManager):
         # entities stay `unavailable` despite live MQTT traffic.
         self.is_ready_for_messages = False
         try:
-            XTDeviceMap.clear_master_device_map()
+            self._disable_multi_map_device_alignment()
             concurrency_manager = XTConcurrencyManager()
 
             async def update_manager_device_cache(
@@ -450,6 +450,19 @@ class MultiManager(TuyaManager):
         XTDeviceMap.register_device_map(self.device_map)
         self._align_multi_map_devices()
 
+    def _disable_multi_map_device_alignment(self):
+        """Take THIS entry's maps out of the cross-source mirror.
+
+        The registry is process-wide; it used to be wiped wholesale at the
+        start of every cache update, so reloading hub A de-registered hub B's
+        maps and B's IOT and sharing copies of a device stopped tracking each
+        other until B was reloaded too — silent, per-device disagreement with
+        the app (audit C9). Only unregister what this entry owns.
+        """
+        for device_map in self.__get_available_device_maps():
+            XTDeviceMap.unregister_device_map(device_map)
+        XTDeviceMap.unregister_device_map(self.device_map)
+
     def _align_multi_map_devices(self):
         # Refresh all master device variables with themselves to trigger alignment
         for device in self.device_map.values():
@@ -458,6 +471,7 @@ class MultiManager(TuyaManager):
 
     def unload(self):
         self.release_devices()
+        self._disable_multi_map_device_alignment()
         for manager in self.accounts.values():
             manager.unload()
 
