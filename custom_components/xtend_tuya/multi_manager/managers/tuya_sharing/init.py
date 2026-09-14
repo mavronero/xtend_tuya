@@ -396,9 +396,21 @@ class XTTuyaSharingDeviceManagerInterface(XTDeviceManagerInterface):
 
         try:
             if regular_commands:
-                self.sharing_account.device_manager.send_commands(
+                response = self.sharing_account.device_manager.send_commands(
                     device_id, regular_commands
                 )
+                # The SDK does not raise on an API-level failure, it returns
+                # the body — so quota-rejected, permission-denied and
+                # offline-device commands used to be reported as success and
+                # counted against the quota tracker (audit C11).
+                if response is not None and not response.get("success", False):
+                    self.multi_manager.device_watcher.report_message(
+                        device_id,
+                        f"[Sharing]Send command refused: {regular_commands} => {response}",
+                        XTDeviceWatcherCategory.SHARING_API,
+                        device=device,
+                    )
+                    return False
             return True
         except Exception as e:
             self.multi_manager.device_watcher.report_message(
@@ -447,9 +459,11 @@ class XTTuyaSharingDeviceManagerInterface(XTDeviceManagerInterface):
             case "GET":
                 return self.sharing_account.device_manager.customer_api.get(url, params)
             case "POST":
-                return self.sharing_account.device_manager.customer_api.post(
+                response = self.sharing_account.device_manager.customer_api.post(
                     url, params
                 )
+                self.multi_manager.note_cloud_write(method, url, response)
+                return response
         return None
 
     def trigger_scene(self, home_id: str, scene_id: str) -> bool:

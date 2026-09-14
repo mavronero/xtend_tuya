@@ -166,4 +166,11 @@ class XTSharingDeviceRepository(DeviceRepository):
         self.multi_manager.virtual_state_handler.apply_init_virtual_states(device)  # type: ignore
 
     def send_commands(self, device_id: str, commands: list[dict[str, Any]]):
-        return super().send_commands(device_id, commands)
+        # The SDK's version discards the API response, so a quota-rejected,
+        # permission-denied or offline-device command reached HA as a success
+        # (audit C11). Same request, response handed back to the caller.
+        if not self.filter.call(device_id, commands):
+            return None
+        return self.api.post(
+            f"/v1.1/m/thing/{device_id}/commands", None, {"commands": commands}
+        )

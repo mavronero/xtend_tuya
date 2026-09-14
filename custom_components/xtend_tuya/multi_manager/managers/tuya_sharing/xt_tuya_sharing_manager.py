@@ -381,10 +381,11 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
             f"Sending Tuya commands: {commands}",
             XTDeviceWatcherCategory.SHARING_API,
         )
+        # Hand the API response back so the caller can tell a refused command
+        # from an accepted one (audit C11).
         if other_manager := self.get_overriden_device_manager():
-            other_manager.send_commands(device_id, commands)
-            return
-        super().send_commands(device_id, commands)
+            return other_manager.send_commands(device_id, commands)
+        return super().send_commands(device_id, commands)
 
     def send_lock_unlock_command(
         self,

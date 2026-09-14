@@ -790,14 +790,20 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
         params: dict[str, Any] | None = None
         if payload:
             params = json.loads(payload)
+        api = self.iot_account.device_manager.api
         match method:
             case "GET":
-                return self.iot_account.device_manager.api.get(url, params)
+                return api.get(url, params)
             case "POST":
-                return self.iot_account.device_manager.api.post(url, params)
+                response = api.post(url, params)
             case "DELETE":
-                return self.iot_account.device_manager.api.delete(url, params)
-        return None
+                response = api.delete(url, params)
+            case _:
+                return None
+        # Timer POST/DELETE burns the project's controllable-device
+        # allowance exactly like a command does (audit C6).
+        self.multi_manager.note_cloud_write(method, url, response)
+        return response
 
     def get_webrtc_sdp_answer(
         self, device_id: str, session_id: str, sdp_offer: str, channel: str
