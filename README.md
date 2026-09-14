@@ -2,6 +2,15 @@
 
 Extended Tuya integration for Home Assistant.
 
+## About this fork
+
+Maintained by [Mavronero](https://mavronero.cy/), a research farm in Cyprus. This fork adds
+solar irrigation valve support (QOTO QT-08W / QT-08W-T3), an irrigation dashboard and calendar,
+and cloud-timer synchronisation on top of the upstream integration by
+[azerty9971](https://github.com/azerty9971/xtend_tuya). Portions are submitted upstream as they mature.
+
+Install via HACS as a custom repository: `https://github.com/mavronero/xtend_tuya`.
+
 ## Purpose
 
 This custom integration is there to add the missing entities on the [official Tuya integration](https://www.home-assistant.io/integrations/tuya/).

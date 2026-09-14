@@ -1,6 +1,6 @@
 # Migration strategy: away from Tuya cloud
 
-Captured 2026-05-07. Owner: raukaute fork (FDM5KW solar irrigation valves, 21-unit fleet, growing past 50).
+Captured 2026-05-07. Owner: Mavronero fork (FDM5KW solar irrigation valves, 21-unit fleet, growing past 50).
 
 ## Problem
 

@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite it as below."
+title: "Xtend Tuya (Mavronero fork): Home Assistant integration for Tuya solar irrigation valves"
+type: software
+authors:
+  - name: "Mavronero"
+    website: "https://mavronero.cy/"
+  - family-names: "Krause"
+    given-names: "Ulrich"
+repository-code: "https://github.com/mavronero/xtend_tuya"
+license: GPL-3.0

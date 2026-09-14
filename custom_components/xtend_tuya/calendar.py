@@ -1360,7 +1360,7 @@ def _render_ics(entity_id: str, events: list[CalendarEvent]) -> bytes:
     from icalendar import Calendar, Event
 
     cal = Calendar()
-    cal.add("prodid", f"-//raukaute//{DOMAIN}//irrigation-calendar//EN")
+    cal.add("prodid", f"-//mavronero//{DOMAIN}//irrigation-calendar//EN")
     cal.add("version", "2.0")
     cal.add("x-wr-calname", entity_id)
     for ev in events:

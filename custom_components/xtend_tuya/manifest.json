@@ -1,6 +1,6 @@
 {
   "domain": "xtend_tuya",
-  "name": "Xtend Tuya (raukaute fork)",
+  "name": "Xtend Tuya (Mavronero fork)",
   "after_dependencies": [
     "tuya"
   ],
@@ -62,5 +62,5 @@
     "yappi==1.7.3",
     "icalendar>=5.0.0"
   ],
-  "version": "4.4.247"
+  "version": "4.4.248"
 }
