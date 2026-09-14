@@ -115,6 +115,8 @@ interface ValveEntities {
   mode_sensor?: string;
   value_sensor?: string;
   battery_level?: string;
+  /** Diagnostic TIMESTAMP of the device's last report (audit C23). */
+  last_report?: string;
   sleep_mode?: string;
   rain_snow_delay?: string;
 }
@@ -136,6 +138,7 @@ const TRANSLATION_KEY_TO_FIELD: Record<string, keyof ValveEntities> = {
   watering_volume: "volume_sensor",
   watering_flow_rate: "flow_rate_sensor",
   battery_level: "battery_level",
+  last_report: "last_report",
   watering_duration: "duration",
   rain_snow_delay: "rain_snow_delay",
   // QT-08W-T3 valves expose the same concepts under indexed / differently
@@ -302,6 +305,10 @@ function collectValveEntities(
     }
   };
 
+  // Second-choice valve switch, used only if nothing matched the primary
+  // rules below — see the switch_1 note there.
+  let switchFallback: string | undefined;
+
   for (const e of Object.values(hass.entities)) {
     if (e.device_id !== haDeviceId) continue;
 
@@ -328,6 +335,18 @@ function collectValveEntities(
         e.entity_id.endsWith("_valve"))
     ) {
       if (!v.switch) v.switch = e.entity_id;
+      continue;
+    }
+    // QT-08W-T3 valves: the valve sits on the indexed DP switch_1 and the
+    // cross-category table used to name it "Switch 1", so none of the rules
+    // above matched and v.switch stayed undefined on all 11 T3 valves — no
+    // control card, no bars, counted offline (audit D4/R1). The integration
+    // now gives sfkzq's switch_1 the "valve" key, but registries written by
+    // an older build still carry "switch_1", so accept it too. Second
+    // choice on purpose: a device that really does have both keeps its
+    // proper valve entity.
+    if (e.entity_id.startsWith("switch.") && e.translation_key === "switch_1") {
+      if (!switchFallback) switchFallback = e.entity_id;
       continue;
     }
     if (
@@ -357,6 +376,8 @@ function collectValveEntities(
       }
     }
   }
+
+  if (!v.switch && switchFallback) v.switch = switchFallback;
 
   return v;
 }
@@ -444,9 +465,13 @@ function buildOverviewView(
   // valve's detail view on click.
   const matrixValves = valves.map((v) => ({
     name: v.valve_name,
+    // Tuya device id — the key the runs store records runs under, and the
+    // only source of truth the T3 valves have for "was it watering?".
+    device_id: v.device_id,
     switch: v.switch,
     battery: v.battery_level,
     volume: v.volume_sensor,
+    last_report: v.last_report,
     path: v.view_path,
     home: v.valve_home ?? null,
     room: v.valve_room ?? null,
@@ -843,9 +868,15 @@ if (!customElements.get("irrigation-refresh-button")) {
 
 interface MatrixRow {
   name: string;
+  /** Tuya device id, used to look this valve's runs up in the runs store.
+   * Absent in dashboard configs saved before 4.4.251 — those rows fall back
+   * to the switch-history timing until the board is re-synced. */
+  device_id?: string;
   switch?: string;
   battery?: string;
   volume?: string;
+  /** Diagnostic "last report" sensor, for the stale marker (audit C23). */
+  last_report?: string;
   path?: string;
   /** SmartLife home / room for list grouping (4.4.207). */
   home?: string | null;
@@ -868,12 +899,24 @@ interface MatrixSegment {
   startMs: number;
   endMs: number;
 }
+
+/** One row of GET /api/xtend_tuya/runs (frozen export contract). */
+interface StoredRun {
+  device_id: string;
+  start: string;
+  end: string;
+  duration_seconds: number;
+}
 interface HistoryPoint {
   s: string;
   lu: number;
 }
 
 const MATRIX_REFRESH_MS = 60_000;
+// A valve that has not reported for this long while still flagged online is
+// showing frozen values, not healthy ones (audit C23). ponytail: one figure
+// for the whole fleet — split it per product if the T3's cadence differs.
+const STALE_AFTER_HOURS = 36;
 
 function escapeHtml(s: string): string {
   return s.replace(
@@ -915,6 +958,11 @@ class IrrigationValveMatrix extends HTMLElement {
   // history window — both derived from the same history fetch as the bars.
   private _runtimeMin: Record<string, number> = {};
   private _waterL: Record<string, number> = {};
+  // Recorded runs from the runs store, keyed by TUYA DEVICE ID. These are
+  // the amber bars and the TIME column; the switch history only supplies
+  // the light-blue "reporting" lane underneath them (audit R2/R3).
+  private _runSegments: Record<string, MatrixSegment[]> = {};
+  private _runMin: Record<string, number> = {};
   private _root: ShadowRoot;
   private _refreshHandle: number | null = null;
   private _fetching = false;
@@ -1023,6 +1071,7 @@ class IrrigationValveMatrix extends HTMLElement {
       this._segments = nextSegs;
       this._runtimeMin = nextRun;
       this._waterL = nextWater;
+      await this._fetchRuns(start, now);
       this._render();
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -1032,41 +1081,106 @@ class IrrigationValveMatrix extends HTMLElement {
     }
   }
 
-  // Total liters delivered within the window. The volume sensor mirrors the
-  // device's per-cycle counter (cur_cap): it ramps up during a watering and
-  // resets when the next one starts. Summing only the positive increments
-  // counts every cycle once and is equally correct if a firmware reports a
-  // cumulative, ever-growing total instead.
+  // Total liters delivered within the window. Mirror of the Python
+  // water_math.sum_plausible_deltas — keep the two in step.
+  //
+  // The volume sensor is the device's raw liters counter, and the fleet
+  // runs it in two shapes: most valves reset it to 0 at the start of every
+  // cycle, some run it as a lifetime odometer (audit D3/R16). Summing
+  // plausible positive deltas counts every cycle exactly once either way.
+  //
+  // The old absolute 9000 L ceiling ("no valve can deliver more in one
+  // run") dropped EVERY sample from an odometer valve, so those rows read
+  // 0 L forever. Plausibility belongs on the delta: the impeller's limit is
+  // a flow rate, not a total. Rate check (4.4.212): valve 824 summed
+  // 10,303 L over 1.5 h runtime (~114 L/min) from sub-ceiling garbage, so
+  // reject any delta implying more than 50 L/min (2× the meter's spec,
+  // margin for the ~10 s publish jitter), floored at 50 L so a burst
+  // arriving in the same second isn't rejected by a ~0 elapsed time. An
+  // impossible sample is DISCARDED rather than becoming `prev`, so the drop
+  // back off a spike isn't mistaken for a cycle reset.
   private _sumPositiveDeltas(points: HistoryPoint[]): number {
-    // Physical ceiling (4.4.206): cur_cap intermittently emits garbage
-    // spikes (15237, 177610 …) far above what a valve can deliver
-    // (25 L/min × max run ≈ 9000 L). Drop those samples entirely so a
-    // single spike can't inflate the windowed total.
-    const MAX_PLAUSIBLE_L = 9000;
-    // Rate check (4.4.212): sub-ceiling garbage still slipped through —
-    // valve 824 summed 10,303 L over 1.5 h runtime (~114 L/min; the meter
-    // maxes at 25 L/min). cur_cap publishes every ~10 s during a run, so a
-    // real sample-to-sample delta is a few liters; reject any delta whose
-    // implied flow beats 50 L/min (2× spec, margin for update jitter).
-    // The sample still becomes `prev`, so a stuck garbage value contributes
-    // nothing further and the next cycle's reset re-anchors cleanly.
     const MAX_RATE_L_PER_MIN = 50;
+    const MIN_PLAUSIBLE_DELTA_L = 50;
     let total = 0;
     let prev: number | null = null;
     let prevLu = 0;
     for (const p of points) {
       const v = parseFloat(p.s);
-      if (!Number.isFinite(v) || v > MAX_PLAUSIBLE_L) continue;
-      if (prev !== null && v > prev) {
-        const dtMin = (p.lu - prevLu) / 60;
-        if (dtMin > 0 && (v - prev) / dtMin <= MAX_RATE_L_PER_MIN) {
-          total += v - prev;
-        }
+      if (!Number.isFinite(v)) continue;
+      if (prev !== null) {
+        // A drop = the counter reset at a cycle start, so everything it has
+        // climbed back to since the reset is this cycle's water.
+        const delta = v >= prev ? v - prev : v;
+        const ceiling = Math.max(
+          MIN_PLAUSIBLE_DELTA_L,
+          (MAX_RATE_L_PER_MIN * Math.max(p.lu - prevLu, 0)) / 60
+        );
+        if (delta > ceiling) continue;
+        if (delta > 0) total += delta;
       }
       prev = v;
       prevLu = p.lu;
     }
     return total;
+  }
+
+  // Recorded runs, straight from the materialized runs store. This is the
+  // ONLY honest source of "was this valve watering?" on the whole fleet:
+  // the QT-08W-T3 never turns its switch entity on during a scheduled run
+  // (recorder-verified on 752 and 708), so a switch-history timeline shows
+  // liters with 0 min and no bars (audit R2/R3). Old-gen runs live in the
+  // same store, so pointing every row at it finally gives the dashboard,
+  // the calendars and the CSV export one shared truth.
+  //
+  // The view serves from memory and never touches the recorder, so this is
+  // cheap; it is deliberately fetched after the history call so a runs
+  // failure still leaves the reporting lane and the WATER column rendered.
+  private async _fetchRuns(startMs: number, endMs: number): Promise<void> {
+    const hass = this._hass;
+    if (!hass?.callApi) return;
+    const wanted = new Set(
+      (this._config?.valves ?? [])
+        .map((v) => v.device_id)
+        .filter((d): d is string => !!d)
+    );
+    if (wanted.size === 0) return;
+    const span = endMs - startMs;
+    const segs: Record<string, MatrixSegment[]> = {};
+    const mins: Record<string, number> = {};
+    try {
+      const r = await hass.callApi<{ runs?: StoredRun[] }>(
+        "GET",
+        `xtend_tuya/runs?since=${encodeURIComponent(
+          new Date(startMs).toISOString()
+        )}`
+      );
+      for (const run of r?.runs ?? []) {
+        if (!wanted.has(run.device_id)) continue;
+        const s = Date.parse(run.start);
+        const e = Date.parse(run.end);
+        if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
+        if (e < startMs || s > endMs) continue;
+        mins[run.device_id] =
+          (mins[run.device_id] ?? 0) + (run.duration_seconds ?? 0) / 60;
+        const left = Math.max(s, startMs);
+        const right = Math.min(e, endMs);
+        (segs[run.device_id] ??= []).push({
+          left: (left - startMs) / span,
+          // ponytail: 0.3% floor so a 3-minute run on a 30-day window is
+          // still a visible mark rather than a sub-pixel sliver.
+          width: Math.max((right - left) / span, 0.003),
+          kind: "on",
+          startMs: left,
+          endMs: right,
+        });
+      }
+      this._runSegments = segs;
+      this._runMin = mins;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("irrigation-valve-matrix: runs fetch failed", err);
+    }
   }
 
   private _buildSegments(
@@ -1103,12 +1217,40 @@ class IrrigationValveMatrix extends HTMLElement {
     return segs;
   }
 
+  // Light-blue "reporting and closed" lane from the switch history, with
+  // the recorded runs painted over it in amber.
+  private _rowSegments(v: MatrixRow): MatrixSegment[] {
+    const reporting = (v.switch ? this._segments[v.switch] ?? [] : []).filter(
+      (s) => s.kind === "off"
+    );
+    const runs = v.device_id ? this._runSegments[v.device_id] ?? [] : [];
+    if (runs.length > 0) return [...reporting, ...runs];
+    // No device_id (dashboard config saved before 4.4.251) — keep the old
+    // switch-derived amber so a frozen board doesn't lose its bars.
+    if (!v.device_id && v.switch) return this._segments[v.switch] ?? [];
+    return reporting;
+  }
+
   // "min / liter" columns (Simon 2026-06-06): how long each valve ran and
   // how much water flowed through within the visible history window. "–"
   // means no data source (no switch / no flow meter on that valve).
-  private _runText(entity?: string): string {
-    if (!entity || !(entity in this._runtimeMin)) return "–";
-    const min = this._runtimeMin[entity];
+  private _runText(v: MatrixRow): string {
+    // Recorded runs first — see _fetchRuns.
+    const dev = v.device_id;
+    const min =
+      dev && dev in this._runMin
+        ? this._runMin[dev]
+        : dev
+          ? // The runs store answered and holds nothing for this valve. Only
+            // claim "0 min" when the valve is actually reporting; a silent
+            // valve keeps the "–" that marks it as having no data at all.
+            (v.switch ? this._segments[v.switch] ?? [] : []).length > 0
+            ? 0
+            : undefined
+          : v.switch
+            ? this._runtimeMin[v.switch]
+            : undefined;
+    if (min === undefined) return "–";
     if (min <= 0) return "0 min";
     if (min < 1) return "<1 min";
     if (min >= 90) return `${(min / 60).toFixed(1)} h`;
@@ -1137,6 +1279,26 @@ class IrrigationValveMatrix extends HTMLElement {
     if (!Number.isFinite(n)) return e.state;
     const unit = (e.attributes?.unit_of_measurement as string) ?? "%";
     return `${Math.round(n)}${unit}`;
+  }
+
+  // "Online" is the cloud flag and nothing else, so a valve that stopped
+  // reporting keeps its last values and looks healthy — the mechanism
+  // behind "HA disagrees with the app" (audit C23). Flag a row whose
+  // diagnostic last-report stamp has gone quiet while the valve still
+  // claims to be online.
+  private _staleMarker(v: MatrixRow): string {
+    if (!v.last_report || !this._hass) return "";
+    const sw = v.switch ? this._hass.states[v.switch] : undefined;
+    if (!sw || sw.state === "unavailable" || sw.state === "unknown") return "";
+    const s = this._hass.states[v.last_report];
+    if (!s || s.state === "unavailable" || s.state === "unknown") return "";
+    const last = Date.parse(s.state);
+    if (!Number.isFinite(last)) return "";
+    const hours = (Date.now() - last) / 3_600_000;
+    if (hours < STALE_AFTER_HOURS) return "";
+    return `<span class="stale" title="Online, but last reported ${Math.round(
+      hours
+    )} h ago">⚠</span>`;
   }
 
   private _batteryClass(entity?: string): string {
@@ -1261,7 +1423,7 @@ class IrrigationValveMatrix extends HTMLElement {
     if (!this._config) return;
     const c = this._config;
     const rowOf = (v: MatrixRow): string => {
-      const segs = v.switch ? this._segments[v.switch] ?? [] : [];
+      const segs = this._rowSegments(v);
       const bars = segs
         .map(
           (s) =>
@@ -1272,14 +1434,14 @@ class IrrigationValveMatrix extends HTMLElement {
             )}%;width:${(s.width * 100).toFixed(3)}%"></span>`
         )
         .join("");
-      const run = this._runText(v.switch);
+      const run = this._runText(v);
       const water = this._waterText(v.volume);
       return `<div class="row ${
         v.path ? "clickable" : ""
       }" data-path="${escapeHtml(v.path || "")}">
           <div class="name" title="${escapeHtml(v.name)}">${escapeHtml(
             v.name
-          )}</div>
+          )}${this._staleMarker(v)}</div>
           <div class="bar">${bars}</div>
           <div class="metric ${this._metricClass(run)}">${escapeHtml(run)}</div>
           <div class="metric ${this._metricClass(water)}">${escapeHtml(
@@ -1338,6 +1500,7 @@ class IrrigationValveMatrix extends HTMLElement {
         .row.clickable { cursor: pointer; }
         .row.clickable:hover { background: var(--secondary-background-color); }
         .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+        .stale { color: var(--warning-color, #ffa600); margin-left: 5px; cursor: help; }
         /* Track is EMPTY (no fill) — a no-data / unreachable period renders
            as bare background, so a gap is unmistakable. Reported states draw
            colour: idle = light blue ("online, closed"), watering = amber.

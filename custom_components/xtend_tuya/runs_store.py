@@ -28,12 +28,18 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any, Callable
 
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
+)
 from homeassistant.helpers.storage import Store
+
+from .water_math import plausible_delta
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,9 +58,24 @@ MAX_FUTURE_SLACK_SEC = 120
 # times the run duration, floored at 50 L for sub-minute runs.
 MAX_LPM_CAP = 50.0
 
-# T3 counter_custom rows above this duration are stuck-open/garbage records,
-# not real watering cycles (mirrors calendar.MAX_SANE_RUN_SECONDS).
-T3_MAX_RUN_SECONDS = 6 * 3600
+# Runs longer than this are stuck-open/garbage records, not real watering
+# cycles (mirrors calendar.MAX_SANE_RUN_SECONDS). Applies to every path.
+MAX_RUN_SECONDS = 6 * 3600
+
+# A T3 run is over when its volume counter has stopped climbing for this
+# long. The firmware sends no close report, and counter_custom can go weeks
+# stale while water still flows (audit R4: valve 705's counter was 25 days
+# old while flow_sta_0 showed a 14:30→14:45 run).
+IDLE_CLOSE_SEC = 120
+
+# Slack for matching a flow-derived run against the authoritative
+# counter_custom row for the same run.
+RUN_DEDUPE_SLACK_SEC = 180
+
+# Grace after a pre-reported close before its liters are read (R6): the
+# counter publishes every ~10 s, so a few seconds past the scheduled close
+# is enough for the final value to have landed.
+PREREPORT_SETTLE_SEC = 15
 
 DOMAIN_KEY = "xtend_tuya_runs_store"
 
@@ -79,6 +100,12 @@ class RunsStore:
         self._end_entity_to_device: dict[str, dict[str, Any]] = {}
         # entity_id -> device record for T3 counter_custom last-run sensors
         self._counter_entity_to_device: dict[str, dict[str, Any]] = {}
+        # entity_id -> device record for the raw liters counter
+        self._vol_entity_to_device: dict[str, dict[str, Any]] = {}
+        # tuya device id -> live volume-counter accumulator, see _on_volume_change
+        self._vol: dict[str, dict[str, Any]] = {}
+        # tuya device id -> {end iso: row}, the dedupe index (see _index)
+        self._end_index: dict[str, dict[str, dict[str, Any]]] = {}
 
     # ------------------------------------------------------------- load/save
 
@@ -100,6 +127,7 @@ class RunsStore:
         rows = self.runs.get(device_id)
         if rows and rows[0]["end"] < cutoff:
             self.runs[device_id] = [r for r in rows if r["end"] >= cutoff]
+            self._end_index.pop(device_id, None)
 
     # ------------------------------------------------------------- recording
 
@@ -116,24 +144,38 @@ class RunsStore:
         rows = self.runs.setdefault(device_id, [])
         end_iso = end.isoformat()
         # Dedupe: DP redelivers and backfill overlaps land on the same end.
-        for r in reversed(rows[-20:]):
-            if r["end"] == end_iso:
-                # Prefer a row that has liters over one that doesn't.
-                if r.get("total_l") is None and total_l is not None:
-                    r["total_l"] = total_l
-                    return True
-                return False
-        rows.append(
-            {
-                "start": start.isoformat(),
-                "end": end_iso,
-                "duration_seconds": (end - start).total_seconds(),
-                "total_l": total_l,
-            }
-        )
+        # A full per-device index, not a scan of the newest 20 rows — the
+        # backfill and any re-import duplicated anything older than that
+        # (audit R10).
+        index = self._index(device_id)
+        if (existing := index.get(end_iso)) is not None:
+            # Prefer a row that has liters over one that doesn't. `0.0` is
+            # "recorded before the water was counted" (R6), not a real
+            # reading, so a later non-zero value must be allowed to replace
+            # it — `is None` alone never corrected those rows.
+            if total_l and not existing.get("total_l"):
+                existing["total_l"] = total_l
+                return True
+            return False
+        row = {
+            "start": start.isoformat(),
+            "end": end_iso,
+            "duration_seconds": (end - start).total_seconds(),
+            "total_l": total_l,
+        }
+        rows.append(row)
+        index[end_iso] = row
         rows.sort(key=lambda r: r["end"])
         self._prune(device_id)
         return True
+
+    def _index(self, device_id: str) -> dict[str, dict[str, Any]]:
+        """end-timestamp -> row, built on first use per device."""
+        index = self._end_index.get(device_id)
+        if index is None:
+            index = {r["end"]: r for r in self.runs.get(device_id, [])}
+            self._end_index[device_id] = index
+        return index
 
     # ------------------------------------------------------------- queries
 
@@ -174,42 +216,60 @@ class RunsStore:
 
     # ------------------------------------------------------------- listener
 
+    def release(self) -> None:
+        """Drop every state subscription this store holds.
+
+        `_unsub` used to be appended to and never called, so subscriptions
+        stacked up across every 15-minute re-arm and every config-entry
+        reload (audit R14).
+        """
+        while self._unsub:
+            self._unsub.pop()()
+        for acc in self._vol.values():
+            if acc.get("unsub") is not None:
+                acc["unsub"]()
+                acc["unsub"] = None
+
     def track_devices(self, devices: list[dict[str, Any]]) -> None:
-        """(Re)arm the end-sensor listener for the given device records
+        """(Re)arm the state listeners for the given device records
         (as produced by calendar._iter_fdm5kw_devices)."""
-        new_map: dict[str, dict[str, Any]] = {}
+        end_map: dict[str, dict[str, Any]] = {}
+        counter_map: dict[str, dict[str, Any]] = {}
+        vol_map: dict[str, dict[str, Any]] = {}
         for d in devices:
             if d.get("end_entity") and d.get("start_entity"):
-                new_map[d["end_entity"]] = d
-        added = set(new_map) - set(self._end_entity_to_device)
-        self._end_entity_to_device.update(new_map)
-        if added:
-            self._unsub.append(
-                async_track_state_change_event(
-                    self.hass, list(added), self._on_end_change
-                )
-            )
-        # T3 valves: no start/end sensors — record from the counter_custom
-        # last-run sensor (the device's own completed-run record).
-        counter_map: dict[str, dict[str, Any]] = {}
-        for d in devices:
+                end_map[d["end_entity"]] = d
+            # T3 valves: no start/end sensors — record from the
+            # counter_custom last-run sensor (the device's own record).
             if d.get("counter_entity"):
                 counter_map[d["counter_entity"]] = d
+            if d.get("volume_entity"):
+                vol_map[d["volume_entity"]] = d
         c_added = set(counter_map) - set(self._counter_entity_to_device)
-        self._counter_entity_to_device.update(counter_map)
-        if c_added:
-            self._unsub.append(
-                async_track_state_change_event(
-                    self.hass, list(c_added), self._on_counter_change
+        self._end_entity_to_device = end_map
+        self._counter_entity_to_device = counter_map
+        self._vol_entity_to_device = vol_map
+
+        self.release()
+        for entities, handler in (
+            (end_map, self._on_end_change),
+            (counter_map, self._on_counter_change),
+            (vol_map, self._on_volume_change),
+        ):
+            if entities:
+                self._unsub.append(
+                    async_track_state_change_event(
+                        self.hass, list(entities), handler
+                    )
                 )
-            )
-            # The counter DP retains the last completed run, so seed it on
-            # first arm — covers runs finished while no listener was armed
-            # (boot race, HA downtime). add_run's end-timestamp dedupe makes
-            # the replay idempotent.
-            for entity_id in c_added:
-                if state := self.hass.states.get(entity_id):
-                    self._record_counter_csv(counter_map[entity_id], state.state)
+
+        # The counter DP retains the last completed run, so seed it on
+        # first arm — covers runs finished while no listener was armed
+        # (boot race, HA downtime). add_run's end-timestamp dedupe makes
+        # the replay idempotent.
+        for entity_id in c_added:
+            if state := self.hass.states.get(entity_id):
+                self._record_counter_csv(counter_map[entity_id], state.state)
 
     @callback
     def _on_end_change(self, event: Event) -> None:
@@ -230,18 +290,47 @@ class RunsStore:
         start = _parse_iso(start_state.state) if start_state else None
         if start is None or end <= start:
             return
-        duration_min = (end - start).total_seconds() / 60.0
-        total_l: float | None = None
-        vol_entity = d.get("volume_entity")
-        if vol_entity and (vs := self.hass.states.get(vol_entity)):
-            try:
-                v = float(vs.state)
-            except (TypeError, ValueError):
-                v = None
-            # cur_cap rests at the run total at close; reject garbage
-            # spikes above the physical ceiling.
-            if v is not None and 0 <= v <= max(50.0, MAX_LPM_CAP * duration_min):
-                total_l = v
+        # A close pushed before its own start pairs with the PREVIOUS cycle's
+        # start; the other two recording paths cap at 6 h, this one only
+        # required end > start and let the bogus row into the export (R5).
+        if (end - start).total_seconds() > MAX_RUN_SECONDS:
+            _LOGGER.debug(
+                "runs_store: skipping run %s %s→%s, over the %d s cap",
+                d["tuya_device_id"], start, end, MAX_RUN_SECONDS,
+            )
+            return
+        if end > now:
+            # Pre-reported close that happens to fall INSIDE the slack: the
+            # firmware writes the scheduled close the moment a run starts,
+            # so on a timer of 2 minutes or less — and the T3 fleet already
+            # runs 180 s timers — the run was recorded at its start, with
+            # liters read from a counter that had not moved yet, and stored
+            # as ~0 L forever (audit R6). Wait for the water instead.
+            async_call_later(
+                self.hass,
+                (end - now).total_seconds() + PREREPORT_SETTLE_SEC,
+                partial(self._record_end, d, start, end, deferred=True),
+            )
+            return
+        self._record_end(d, start, end, None)
+
+    @callback
+    def _record_end(
+        self,
+        d: dict[str, Any],
+        start: datetime,
+        end: datetime,
+        _now: Any = None,
+        deferred: bool = False,
+    ) -> None:
+        if deferred and self._row_near(
+            d["tuya_device_id"], end, MAX_FUTURE_SLACK_SEC
+        ):
+            # The real close report landed while we were waiting — that one
+            # carries the true close time, so drop the scheduled stand-in
+            # instead of storing the same run twice.
+            return
+        total_l = self._run_liters(d, (end - start).total_seconds())
         if self.add_run(d["tuya_device_id"], start, end, total_l):
             self.async_schedule_save()
             _LOGGER.debug(
@@ -251,6 +340,134 @@ class RunsStore:
                 end,
                 total_l if total_l is not None else -1,
             )
+
+    # --------------------------------------------------- volume accumulator
+
+    @callback
+    def _on_volume_change(self, event: Event) -> None:
+        """Accumulate delivered liters from the raw volume counter.
+
+        The counter is per-cycle on some valves and a lifetime odometer on
+        others, so its value at close is NOT the run total (audit D3/R16);
+        summing plausible deltas is exact for both shapes.
+
+        On the T3 this doubles as the run detector: that firmware sends no
+        close report, and counter_custom can be weeks stale while water
+        flows (R4). A counter that climbed and then stopped climbing for
+        IDLE_CLOSE_SEC is a finished run.
+        """
+        d = self._vol_entity_to_device.get(event.data.get("entity_id"))
+        new_state = event.data.get("new_state")
+        if d is None or new_state is None:
+            return
+        try:
+            value = float(new_state.state)
+        except (TypeError, ValueError):
+            return
+        now = datetime.now().astimezone()
+        acc = self._vol.setdefault(d["tuya_device_id"], _new_accumulator(now))
+        prev, prev_ts = acc["last"], acc["last_ts"]
+        acc["last"], acc["last_ts"] = value, now
+        if prev is None:
+            return
+        delta = plausible_delta(prev, value, (now - prev_ts).total_seconds())
+        if delta is None:
+            # Impossible jump — discard the sample and keep the old baseline.
+            acc["last"], acc["last_ts"] = prev, prev_ts
+            return
+        if delta <= 0:
+            return
+        acc["delivered"] += delta
+        if acc["first_rise"] is None:
+            acc["first_rise"] = now
+        acc["last_rise"] = now
+        if d.get("end_entity"):
+            return  # old-gen valve: the close report closes the run
+        if acc["unsub"] is not None:
+            acc["unsub"]()
+        acc["unsub"] = async_call_later(
+            self.hass, IDLE_CLOSE_SEC, partial(self._close_idle_run, d)
+        )
+
+    @callback
+    def _close_idle_run(self, d: dict[str, Any], _now: Any) -> None:
+        """Record a run whose volume counter stopped climbing (T3, R4)."""
+        device_id = d["tuya_device_id"]
+        acc = self._vol.get(device_id)
+        if acc is None:
+            return
+        acc["unsub"] = None
+        end, first, liters = acc["last_rise"], acc["first_rise"], acc["last"]
+        acc["delivered"] = 0.0
+        acc["first_rise"] = acc["last_rise"] = None
+        if end is None or first is None:
+            return
+        # ponytail: the duration is the counter's own rise window, so it
+        # misses the impeller's spin-up and spin-down. flow_sta_0 bytes[5:9]
+        # carries the firmware's figure, but that is a raw DP and this store
+        # only sees entity states — expose it as a sensor if those few
+        # seconds ever matter. The counter_custom row overrides this one
+        # anyway whenever the device reports it.
+        duration = (end - first).total_seconds()
+        if duration <= 0 or duration > MAX_RUN_SECONDS:
+            return
+        if self._row_near(device_id, end, RUN_DEDUPE_SLACK_SEC) is not None:
+            return  # already recorded from counter_custom
+        start = end - timedelta(seconds=duration)
+        if self.add_run(device_id, start, end, _sane_liters(liters, duration)):
+            self.async_schedule_save()
+            _LOGGER.debug(
+                "runs_store: recorded flow-derived run %s %s→%s %.0f L",
+                device_id, start, end, liters if liters is not None else -1,
+            )
+
+    def delivered_since_rise(self, device_id: str) -> float | None:
+        """Liters counted so far in the run currently in progress, if any."""
+        acc = self._vol.get(device_id)
+        if acc is None or acc["delivered"] <= 0:
+            return None
+        return float(acc["delivered"])
+
+    def _run_liters(self, d: dict[str, Any], duration_s: float) -> float | None:
+        """Liters for a closing run.
+
+        Prefers the accumulated climb of the volume counter: reading the
+        counter's current value only works while it is a per-cycle counter,
+        and on the odometer valves that value was rejected outright, so
+        every one of their runs was stored with liters=null (D3/R16).
+        """
+        acc = self._vol.get(d["tuya_device_id"])
+        if acc is not None and acc["delivered"] > 0:
+            liters = float(acc["delivered"])
+            acc["delivered"] = 0.0
+            acc["first_rise"] = acc["last_rise"] = None
+            return _sane_liters(liters, duration_s)
+        vol_entity = d.get("volume_entity")
+        if vol_entity and (vs := self.hass.states.get(vol_entity)):
+            try:
+                return _sane_liters(float(vs.state), duration_s)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _row_near(
+        self, device_id: str, end: datetime, slack_sec: float
+    ) -> dict[str, Any] | None:
+        """The stored row whose end is within `slack_sec` of `end`, if any.
+
+        Rows are sorted by end, so scanning back from the tail stops after a
+        couple of comparisons for the recent ends this is used with.
+        ponytail: ISO string compare — correct while every row carries the
+        same UTC offset, which only a DST switch breaks (audit D15).
+        """
+        lower = (end - timedelta(seconds=slack_sec)).isoformat()
+        upper = (end + timedelta(seconds=slack_sec)).isoformat()
+        for r in reversed(self.runs.get(device_id, [])):
+            if r["end"] < lower:
+                return None
+            if r["end"] <= upper:
+                return r
+        return None
 
     @callback
     def _on_counter_change(self, event: Event) -> None:
@@ -277,16 +494,33 @@ class RunsStore:
             return
         # 0xFFFE = aborted sentinel; beyond 6 h = stuck-open/garbage record
         # (real T3 anomalies seen: 40650 s and 65471 s, both 0 L).
-        if duration <= 0 or duration == 65534 or duration > T3_MAX_RUN_SECONDS:
+        if duration <= 0 or duration == 65534 or duration > MAX_RUN_SECONDS:
             return
-        total_l = volume if 0 <= volume <= MAX_LPM_CAP * (duration / 60.0) + 50 else None
-        if self.add_run(
-            d["tuya_device_id"], end - timedelta(seconds=duration), end, total_l
-        ):
+        device_id = d["tuya_device_id"]
+        total_l = _sane_liters(volume, duration)
+        start = end - timedelta(seconds=duration)
+        near = self._row_near(device_id, end, RUN_DEDUPE_SLACK_SEC)
+        if near is not None and near["end"] != end.isoformat():
+            # _close_idle_run already logged this run from the counter's
+            # rise window. counter_custom is the firmware's own record, so
+            # it wins — correct the row in place instead of doubling it.
+            near.update(
+                {
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "duration_seconds": float(duration),
+                    "total_l": total_l,
+                }
+            )
+            self.runs[device_id].sort(key=lambda r: r["end"])
+            self._end_index.pop(device_id, None)
+            self.async_schedule_save()
+            return
+        if self.add_run(device_id, start, end, total_l):
             self.async_schedule_save()
             _LOGGER.debug(
                 "runs_store: recorded T3 run %s end=%s %.0f L",
-                d["tuya_device_id"],
+                device_id,
                 end,
                 total_l if total_l is not None else -1,
             )
@@ -305,6 +539,24 @@ class RunsStore:
             ):
                 added += 1
         return added
+
+
+def _new_accumulator(now: datetime) -> dict[str, Any]:
+    return {
+        "last": None,
+        "last_ts": now,
+        "delivered": 0.0,
+        "first_rise": None,
+        "last_rise": None,
+        "unsub": None,
+    }
+
+
+def _sane_liters(value: float | None, duration_s: float) -> float | None:
+    """Reject a per-run total no impeller could have delivered."""
+    if value is None or value < 0:
+        return None
+    return value if value <= max(50.0, MAX_LPM_CAP * duration_s / 60.0) else None
 
 
 def _parse_iso(raw: Any) -> datetime | None:

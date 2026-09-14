@@ -8,9 +8,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
 
-from homeassistant.const import UnitOfVolumeFlowRate, UnitOfVolume, PERCENTAGE
+from homeassistant.const import (
+    EntityCategory,
+    UnitOfVolumeFlowRate,
+    UnitOfVolume,
+    PERCENTAGE,
+)
 from homeassistant.components.sensor import SensorStateClass, SensorDeviceClass
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util.dt import DEFAULT_TIME_ZONE
 from tuya_device_handlers.definition.sensor import (
     SensorDefinition as TuyaSensorDefinition,
 )
@@ -27,6 +33,7 @@ from ...ha_tuya_integration.tuya_integration_imports import (
     TuyaDPCodeRawWrapper,
     TuyaRawTypeInformation,
 )
+from ...water_math import plausible_delta
 from ...const import XTDPCode
 from . import location_service
 
@@ -38,11 +45,6 @@ DP_TIME_TASK = "time_task"
 DP_RUN_TASK_STA = "run_task_sta"
 DP_CUR_CAP = "cur_cap"
 DP_START_TIME = "start_time"
-
-# Liters ceiling for one cur_cap reading (25 L/min impeller * 6 h cap). The
-# cur_cap DP occasionally emits a garbage spike (e.g. 177610 L); a spike would
-# otherwise produce an impossible derived flow burst (e.g. 260000 L/min).
-SANE_CUR_CAP_MAX = 9000
 
 # How often to re-publish the flow-rate sensor state while a run is active.
 # Pure local recomputation (no API call) — cost is one recorder row per tick
@@ -102,6 +104,31 @@ class XTDPCodeRawStatusWrapper(TuyaDPCodeRawWrapper):
                     ),
                 )
         return None
+
+
+class DPCodeLastReportWrapper(XTDPCodeRawStatusWrapper):
+    """When this device last reported anything — NOT a DP value.
+
+    Entity availability across the whole integration is the cloud `online`
+    flag and nothing else, so a valve that stopped reporting keeps showing
+    frozen values and looks perfectly healthy. That is the mechanism behind
+    "HA disagrees with the SmartLife app" (audit C23). The multi-manager
+    stamps `last_report_ts` (epoch seconds, 0.0 when unknown) on every
+    XTDevice as reports arrive; this surfaces it.
+
+    It is bound to a DP purely because entity creation is DP-presence-gated
+    — the DP's own value is never read. A device whose manager predates the
+    stamp simply reports unknown.
+    """
+
+    def read_device_status(self, device: TuyaCustomerDevice) -> datetime | None:
+        try:
+            ts = float(getattr(device, "last_report_ts", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if ts <= 0:
+            return None
+        return datetime.fromtimestamp(ts, tz=DEFAULT_TIME_ZONE)
 
 
 class DPCodeTimestampWrapper(XTDPCodeRawStatusWrapper):
@@ -530,12 +557,6 @@ class Fdm5kwFlowRateEntity(XTSensorEntity):
             self._was_running = False
             return changed
 
-        if cur_cap > SANE_CUR_CAP_MAX:
-            # Glitch spike in the cur_cap DP — ignore this sample so the
-            # derived rate doesn't show an impossible burst. Keep the last
-            # baseline; the next real reading resumes a sane delta.
-            return False
-
         if not self._was_running or self._last_ts is None or self._last_cur_cap is None:
             # Run just started: capture baseline, emit 0 once.
             self._last_cur_cap = cur_cap
@@ -548,7 +569,14 @@ class Fdm5kwFlowRateEntity(XTSensorEntity):
         delta_t = (now - self._last_ts).total_seconds()
         if delta_t <= 0:
             return False
-        delta_cap = max(0, cur_cap - self._last_cur_cap)
+        # Glitch spikes are rejected per-DELTA, not per-absolute-value: on the
+        # valves whose cur_cap is a lifetime odometer an absolute ceiling
+        # latches and pins this rate at 0 forever (audit D3/R16). None = the
+        # jump is impossible — drop the sample and keep the old baseline, so
+        # the next real reading resumes a sane delta.
+        delta_cap = plausible_delta(self._last_cur_cap, cur_cap, delta_t)
+        if delta_cap is None:
+            return False
         self._current_flow = round(delta_cap * 60.0 / delta_t, 2)
         self._last_cur_cap = cur_cap
         self._last_ts = now
@@ -606,18 +634,73 @@ class DPCodeSat0BatteryWrapper(XTDPCodeRawStatusWrapper):
         return None
 
 
+def next_occurrence(
+    naive: datetime, days_mask: int, now: datetime, max_days: int = 9
+) -> datetime:
+    """Roll a schedule stamp forward to its next real occurrence.
+
+    `days_mask` bit 0 = Monday, the same convention the timer decoder and
+    writer use; 0 means "no day info", i.e. every day.
+    Naive arithmetic on purpose: adding days to a tz-aware datetime shifts
+    the wall-clock time across a DST boundary, and a 16:00 timer stays at
+    16:00.
+    """
+    if naive > now:
+        return naive
+    candidate = naive + timedelta(days=max((now - naive).days, 0))
+    for _ in range(max_days):
+        if candidate > now and (
+            not days_mask or days_mask & (1 << candidate.weekday())
+        ):
+            return candidate
+        candidate += timedelta(days=1)
+    return naive
+
+
 class DPCodeSat0NextRunWrapper(XTDPCodeRawStatusWrapper):
     """T3 next-irrigation time from sat_0 bytes[7..11] = [Y-2000, M, D, H, M].
-    0xFF year / month 0 (idle frame `..ff ff ff ff ff`) = no schedule -> None."""
+    0xFF year / month 0 (idle frame `..ff ff ff ff ff`) = no schedule -> None.
 
-    def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
+    The DATE part rots: 6 of 11 valves published a stamp in the past, one of
+    them three weeks old, while the H:M always matched the live timer — the
+    firmware stops refreshing the date and SmartLife recomputes the next
+    occurrence from the schedule instead (audit D5). Do the same: roll the
+    stamp forward, honouring the day mask of the timer currently in the
+    time_task_0 DP when its H:M agrees.
+    """
+
+    def read_device_status(self, device: TuyaCustomerDevice) -> datetime | None:
         decoded = super().read_device_status(device)
-        if decoded and len(decoded) >= 12:
-            y, mo, d, h, mi = decoded[7], decoded[8], decoded[9], decoded[10], decoded[11]
-            if y == 0xFF or mo == 0 or mo > 12 or d == 0 or d > 31:
-                return None
-            return f"20{y:02d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:00"
-        return None
+        if not decoded or len(decoded) < 12:
+            return None
+        y, mo, d, h, mi = decoded[7], decoded[8], decoded[9], decoded[10], decoded[11]
+        if y == 0xFF or mo == 0 or mo > 12 or d == 0 or d > 31:
+            return None
+        try:
+            naive = datetime(2000 + y, mo, d, h, mi)
+        except ValueError:
+            return None
+        rolled = next_occurrence(naive, _scheduled_days_mask(device, h, mi), datetime.now())
+        return rolled.replace(tzinfo=DEFAULT_TIME_ZONE)
+
+
+def _scheduled_days_mask(device: TuyaCustomerDevice, hour: int, minute: int) -> int:
+    """Day mask of the time_task_0 timer matching `hour`:`minute`, else 0.
+
+    The DP is a sliding window that only holds the last-written slot, so this
+    is a best effort — 0 falls back to "every day", which is what these
+    valves mostly run anyway.
+    """
+    raw = device.status.get(DP_T3_TIME_TASK)
+    if not isinstance(raw, str) or not raw:
+        return 0
+    try:
+        frame = base64.b64decode(raw)
+    except ValueError:
+        return 0
+    if len(frame) < 12 or frame[8] != hour or frame[9] != minute:
+        return 0
+    return frame[10]
 
 
 class DPCodeFlowStaVolumeWrapper(XTDPCodeRawStatusWrapper):
@@ -629,10 +712,8 @@ class DPCodeFlowStaVolumeWrapper(XTDPCodeRawStatusWrapper):
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
         decoded = super().read_device_status(device)
         if decoded and len(decoded) >= 5:
-            vol = int.from_bytes(decoded[1:5], "big")
-            if vol > SANE_CUR_CAP_MAX:
-                return None  # glitch guard, same ceiling as cur_cap
-            return str(vol)
+            # Raw counter, no ceiling — see water_math (audit D3/R16).
+            return str(int.from_bytes(decoded[1:5], "big"))
         return None
 
 
@@ -668,16 +749,6 @@ class DPCodeCounterCustomWrapper(XTDPCodeRawStatusWrapper):
             return {"duration": int(parts[2]), "volume": int(parts[3]), "ts": parts[4]}
         except ValueError:
             return None
-
-
-class DPCodeCounterCustomVolumeWrapper(DPCodeCounterCustomWrapper):
-    """Last completed-run volume (L). Skips the 0xFFFE aborted sentinel."""
-
-    def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
-        p = self._parse(device)
-        if not p or p["duration"] == 65534:
-            return None
-        return str(p["volume"])
 
 
 class DPCodeCounterCustomLastRunWrapper(DPCodeCounterCustomWrapper):
@@ -857,6 +928,33 @@ class Fdm5kwSensor:
                 ignore_other_dp_code_handler=True,
                 wrapper_class=(DPCodeTimestampWrapper,),
             ),
+            # --- Staleness (C23) ---
+            # Two descriptors, one per product family, because entity spawn
+            # is DP-presence-gated and the QT-08W and the T3 share no DP.
+            # They carry the same translation_key, exactly like the two
+            # irrigation_timer_registry descriptors below.
+            Fdm5kwSensorEntityDescription(
+                key=f"{DP_CUR_CAP}_last_report",
+                dpcode=DP_CUR_CAP,
+                translation_key="last_report",
+                name="Last report",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=True,
+                ignore_other_dp_code_handler=True,
+                wrapper_class=(DPCodeLastReportWrapper,),
+            ),
+            Fdm5kwSensorEntityDescription(
+                key=f"{DP_T3_SAT}_last_report",
+                dpcode=DP_T3_SAT,
+                translation_key="last_report",
+                name="Last report",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=True,
+                ignore_other_dp_code_handler=True,
+                wrapper_class=(DPCodeLastReportWrapper,),
+            ),
             # --- One-shot control status ---
             Fdm5kwSensorEntityDescription(
                 key=f"{DP_ONE_CONTROL}_mode",
@@ -947,6 +1045,13 @@ class Fdm5kwSensor:
                 name="Watering volume",
                 device_class=SensorDeviceClass.WATER,
                 native_unit_of_measurement=UnitOfVolume.LITERS,
+                # Per-run counter that resets to 0 when the next run starts
+                # — TOTAL_INCREASING, same as the QT-08W cur_cap twin. Without
+                # a state_class HA keeps no long-term statistics, so the
+                # per-valve "Hourly water" statistics-graph card (stat_types
+                # ["change"], which only exists for TOTAL/TOTAL_INCREASING)
+                # was permanently empty on every T3 (audit D2).
+                state_class=SensorStateClass.TOTAL_INCREASING,
                 icon="mdi:water",
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,
@@ -967,6 +1072,7 @@ class Fdm5kwSensor:
                 dpcode=DP_T3_SAT,
                 translation_key="next_watering",
                 name="Next watering",
+                device_class=SensorDeviceClass.TIMESTAMP,
                 icon="mdi:clock-outline",
                 entity_registry_enabled_default=True,
                 ignore_other_dp_code_handler=True,

@@ -43,6 +43,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView
 
 from .const import DOMAIN, DOMAIN_ORIG
+from .water_math import sum_plausible_deltas
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -84,51 +85,23 @@ LAST_N_FOR_AVERAGES = 10
 # either a stale registry slot or a broken start/end recorder pairing
 # and must not bleed into the calendar UI.
 MAX_SANE_RUN_SECONDS = 6 * 3600
-# Cap on liters delivered in one cycle. The QT-08W impeller tops out at
-# 25 L/min, so even the longest sane run can't exceed 25 * (cap minutes).
-# A derived per-run volume above this means the cur_cap delta is garbage
-# (e.g. an odometer reset mid-run) and must be dropped, not shown.
-MAX_SANE_RUN_LITERS = 25 * (MAX_SANE_RUN_SECONDS / 60)
 
 
 def _run_volume(
     vol_series: list[tuple[datetime, float]],
     start_lu: datetime,
     end_lu: datetime,
-    run_minutes: float | None = None,
 ) -> float | None:
-    """Per-run liters = peak cur_cap in the run window, ignoring spikes.
+    """Per-run liters = the plausible cur_cap climb inside the run window.
 
-    cur_cap resets to 0 at cycle start and ramps up as water flows, so the
-    peak inside the run window is the liters delivered. But the DP glitches:
-    it intermittently reports a garbage value (e.g. 15237, 177610 L —
-    observed on ~2 of 488 samples, 2026-07-06) that sticks as the idle
-    resting value between runs. A plain max() picks up that spike and shows
-    an impossible per-run total. Dropping any sample above MAX_SANE_RUN_LITERS
-    filters the spikes while keeping the real ramp.
+    This used to take the peak sample and reject anything above an absolute
+    9000 L ceiling. That is only correct while cur_cap is a per-cycle
+    counter; on the valves that run it as a lifetime odometer the peak is
+    the odometer and every sample is above the ceiling, so the run recorded
+    no liters at all (audit D3/R16). Summing plausible deltas is exact for
+    both shapes, and spikes are rejected by rate instead of by magnitude.
     """
-    # Scale the ceiling to the ACTUAL run duration, not the 6 h cap:
-    # a 5-minute run physically tops out around 125 L, so a 2,000 L
-    # sample inside it is garbage even though it clears the absolute
-    # ceiling. 50 L/min = 2× the meter's 25 L/min spec — margin for
-    # cur_cap's ~10 s update lag; 50 L floor keeps sub-minute runs from
-    # rejecting their own real ramp. (Valve 824 emitted exactly this
-    # class of sub-ceiling garbage, 2026-07-06.)
-    # run_minutes is passed explicitly when the sampling window is wider
-    # than the actual run (see the pairing loop) — the spike ceiling must
-    # scale with the real watering duration, not the window size.
-    if run_minutes is None:
-        run_minutes = max((end_lu - start_lu).total_seconds() / 60, 0.0)
-    sane_cap = min(MAX_SANE_RUN_LITERS, max(50.0, 50.0 * run_minutes))
-    peak: float | None = None
-    for ts, v in vol_series:
-        if ts < start_lu or ts > end_lu:
-            continue
-        if v > sane_cap:
-            continue  # glitch spike — not a real reading
-        if peak is None or v > peak:
-            peak = v
-    return peak
+    return sum_plausible_deltas(vol_series, start_lu, end_lu)
 
 
 async def async_setup_entry(
@@ -559,11 +532,18 @@ def _build_in_progress_event(
         start=run["start"],
         end=estimated_end,
         summary=title,
+        # Per-device UID component: both calendars merge the whole fleet into
+        # ONE entity, so an ICS UID of entity_id + start collided for every
+        # valve starting in the same second and Google silently kept one of
+        # them (audit R8). _render_ics appends the start time.
+        uid=registry_entity_id,
         description=description,
     )
 
 
-def _live_open_run(hass: HomeAssistant, d: dict[str, Any]) -> dict[str, Any] | None:
+def _live_open_run(
+    hass: HomeAssistant, d: dict[str, Any], store: Any = None
+) -> dict[str, Any] | None:
     """Detect an in-progress run from live states: the start_time DP is
     newer than the last real close and recent enough to be plausible.
     Liters-so-far come from the live cur_cap accumulator."""
@@ -582,9 +562,14 @@ def _live_open_run(hass: HomeAssistant, d: dict[str, Any]) -> dict[str, Any] | N
         return None
     if not (0 <= (now - start).total_seconds() <= MAX_SANE_RUN_SECONDS):
         return None
-    total_l: float | None = None
+    # Liters so far: the runs store's live delta accumulator, which is right
+    # whether the counter resets each cycle or runs as a lifetime odometer.
+    # The counter's raw value only works for the former (audit D3/R16).
+    total_l: float | None = (
+        store.delivered_since_rise(d["tuya_device_id"]) if store else None
+    )
     vol = d.get("volume_entity")
-    if vol and (vs := hass.states.get(vol)):
+    if total_l is None and vol and (vs := hass.states.get(vol)):
         try:
             v = float(vs.state)
         except (TypeError, ValueError):
@@ -631,7 +616,12 @@ def _compute_averages(
     totals = []
     for r in runs:
         dur_min = r["duration_seconds"] / 60.0
-        if r["total_l"] is None or dur_min <= 0:
+        # 0 L rows are real records of a valve that opened and delivered
+        # nothing (709's 2 s / 0 L, 704 and 706's failed runs). Averaging
+        # them in drags avg_lpm toward zero, and _expand_slot divides by it
+        # to size volume-mode planned events — a near-zero rate made those
+        # events absurdly long (audit R12).
+        if not r["total_l"] or dur_min <= 0:
             continue
         lpms.append(r["total_l"] / dur_min)
         totals.append(r["total_l"])
@@ -830,13 +820,12 @@ def _pair_runs(
         # a [start_row, end_row] window contains no samples and every
         # event showed "—" liters (ticket 9W8FXA4l, "liters missing in
         # most entries"). Between cycles cur_cap rests at the final run
-        # total, so extending to the next start stays exact; the spike
-        # ceiling is scaled by the real run duration.
+        # total, so extending to the next start adds no further deltas and
+        # stays exact.
         total_l = _run_volume(
             vol_series,
             s_last_updated,
             next_start_lu or datetime.now().astimezone(),
-            run_minutes=duration_seconds / 60,
         )
 
         runs.append(
@@ -1051,6 +1040,7 @@ class IrrigationPlannedCalendar(CalendarEntity):
                             start=start_dt,
                             end=end_dt,
                             summary=title,
+                            uid=f"{registry_entity_id}#{slot.get('slot', 0)}",
                             description=description,
                         )
                     )
@@ -1122,7 +1112,7 @@ class IrrigationCompletedCalendar(CalendarEntity):
             runs = self._runs_store.runs_in_window(
                 d["tuya_device_id"], effective_start, effective_end
             )
-            open_run = _live_open_run(self.hass, d)
+            open_run = _live_open_run(self.hass, d, self._runs_store)
             if open_run is not None:
                 runs.append(open_run)
             if not runs:
@@ -1190,6 +1180,7 @@ class IrrigationCompletedCalendar(CalendarEntity):
                         start=r["start"],
                         end=r["end"],
                         summary=title,
+                        uid=d["registry_entity_id"],
                         description=description,
                     )
                 )
@@ -1370,7 +1361,8 @@ def _render_ics(entity_id: str, events: list[CalendarEvent]) -> bytes:
             ie.add("description", ev.description)
         ie.add("dtstart", ev.start)
         ie.add("dtend", ev.end)
-        uid = f"{entity_id}:{_dt_to_uid(ev.start)}@{DOMAIN}"
+        # ev.uid carries the per-device component; see the R8 note above.
+        uid = f"{ev.uid or entity_id}:{_dt_to_uid(ev.start)}@{DOMAIN}"
         ie.add("uid", uid)
         cal.add_component(ie)
     return cal.to_ical()

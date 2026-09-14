@@ -110,21 +110,25 @@ if TYPE_CHECKING:
 
 COMPOUND_KEY: list[str | tuple[str, ...]] = ["key", "dpcode"]
 
-# Liters ceiling for a single cur_cap reading. The QT-08W impeller tops out
-# at 25 L/min, so even a long (6 h) cycle can't exceed 25 * 360 = 9000 L. The
-# cur_cap DP intermittently reports a garbage spike (e.g. 177610 L) that is
-# physically impossible; drop any reading above this so the watering-volume
-# sensor and its history graph don't show the spike.
-SANE_CUR_CAP_MAX = 9000
+# Unit strings that mean "this DP has no unit". The Tuya data model hands
+# back the Chinese "无" for unitless DPs; descriptors here use "".
+_NO_UNIT = {"", "无", "none"}
 
 
-def filter_cur_cap_spike(value: object) -> int | None:
-    """Return cur_cap as int, or None if it's an impossible glitch spike."""
+def cur_cap_liters(value: object) -> int | None:
+    """Return cur_cap as int — the raw counter, no ceiling.
+
+    This used to drop any reading above 9000 L as a "glitch spike". On the
+    valves that run cur_cap as a lifetime odometer the counter never comes
+    back under that ceiling, so the filter latched and 7 online valves read
+    `unknown` forever (audit D3/R16). Spike rejection now lives on the
+    *delta* instead — see water_math.plausible_delta, used by every place
+    that turns this counter into consumed liters.
+    """
     try:
-        v = float(value)  # type: ignore[arg-type]
+        return int(float(value))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    return int(v) if v <= SANE_CUR_CAP_MAX else None
 
 
 class XTElectricityCurrentStringWrapper(TuyaDPCodeStringWrapper[float]):
@@ -1900,12 +1904,13 @@ SENSORS: dict[str, tuple[XTSensorEntityDescription, ...]] = {
             device_class=SensorDeviceClass.WATER,
             native_unit_of_measurement="L",
             suggested_display_precision=0,
-            # Drop cur_cap glitch spikes (see filter_cur_cap_spike) so the
-            # detail-card volume + its graph never show an impossible value.
-            native_value=filter_cur_cap_spike,
-            # cur_cap resets to 0 each cycle; TOTAL_INCREASING lets HA
-            # long-term stats treat each reset as a new accumulator window,
-            # giving an all-time water figure. FDM5KW has no water_total DP.
+            # Raw counter, no ceiling (see cur_cap_liters).
+            native_value=cur_cap_liters,
+            # cur_cap is either a per-cycle counter that resets to 0 or a
+            # lifetime odometer, depending on the unit. TOTAL_INCREASING is
+            # exactly the right semantics for both: HA's statistics treat a
+            # reset as a new accumulator window and a monotonic counter as
+            # one long one. FDM5KW has no water_total DP.
             state_class=SensorStateClass.TOTAL_INCREASING,
             # The fdm5kw module also registers a Fdm5kwFlowRateDescription on
             # the same cur_cap DP. Whichever descriptor reaches the platform
@@ -2389,6 +2394,19 @@ class XTSensorEntity(XTEntity, TuyaSensorEntity, RestoreSensor):  # type: ignore
                     function_code=description.dpcode or description.key,
                     scale_threshold=description.recalculate_scale_for_percentage_threshold,
                 )
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:  # type: ignore[override]
+        """Drop the Tuya data model's placeholder units.
+
+        Unitless DPs come back from the cloud carrying the Chinese string
+        "无" ("none"), which HA then prints in the UI and treats as a real
+        unit — blocking unit conversion and long-term statistics on that
+        sensor (audit D14, e.g. sensor.*_watering_task). The derived
+        flow-rate entity already works around this by hard-coding its unit.
+        """
+        unit = super().native_unit_of_measurement
+        return None if unit is None or str(unit).strip() in _NO_UNIT else unit
 
     @property
     def available(self) -> bool:  # type: ignore[override]

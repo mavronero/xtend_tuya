@@ -21,15 +21,22 @@ def next_run(b):         # DPCodeSat0NextRunWrapper
     return f"20{y:02d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:00"
 
 
+def next_occurrence(naive, days_mask, now, max_days=9):  # sensor.next_occurrence
+    from datetime import timedelta
+    if naive > now:
+        return naive
+    candidate = naive + timedelta(days=max((now - naive).days, 0))
+    for _ in range(max_days):
+        if candidate > now and (
+            not days_mask or days_mask & (1 << candidate.weekday())
+        ):
+            return candidate
+        candidate += timedelta(days=1)
+    return naive
+
+
 def flow_volume(b):      # DPCodeFlowStaVolumeWrapper
     return int.from_bytes(b[1:5], "big") if len(b) >= 5 else None
-
-
-def counter_volume(csv):  # DPCodeCounterCustomVolumeWrapper
-    p = csv.split(",")
-    if len(p) < 5 or int(p[2]) == 65534:
-        return None
-    return int(p[3])
 
 
 def time_task(b):  # DPCodeT3TimeTaskWrapper.update_data
@@ -62,13 +69,27 @@ def demo():
     assert battery(d("AAEA5AABABoHDg4tAA==")) == 100
     # sat_0 idle frame (ff schedule) -> no next run
     assert next_run(d("AAEAZAEBAP///////w==")) is None
+    # next_watering must be rolled forward when the firmware's date rots
+    # (D5: 704 published 2026-08-20 on 2026-09-14, H:M still correct).
+    from datetime import datetime
+    now = datetime(2026, 9, 14, 13, 36)          # a Monday
+    stale = datetime(2026, 8, 20, 16, 0)         # a Thursday, 25 days back
+    # No day info -> the next daily occurrence, today at 16:00.
+    assert next_occurrence(stale, 0, now) == datetime(2026, 9, 14, 16, 0)
+    # Mon/Wed/Fri mask (bit0=Mon) -> also today.
+    assert next_occurrence(stale, 0x15, now) == datetime(2026, 9, 14, 16, 0)
+    # Tue/Thu mask -> tomorrow.
+    assert next_occurrence(stale, 0x0A, now) == datetime(2026, 9, 15, 16, 0)
+    # Already past today's slot -> the next matching day, not today.
+    late = datetime(2026, 9, 14, 17, 0)
+    assert next_occurrence(stale, 0x15, late) == datetime(2026, 9, 16, 16, 0)
+    # A future stamp is left exactly as the firmware reported it.
+    fresh = datetime(2026, 9, 15, 6, 30)
+    assert next_occurrence(fresh, 0x7F, now) == fresh
     # flow_sta_0 (701): final frame volume 113 L
     assert flow_volume(d("AAAAAHEAAAJY//////////8A")) == 113
     # flow_sta_0 mid-run frame: 90 L
     assert flow_volume(d("AAAAAFoAAAAADhAAAA4QCgAA")) == 90
-    # counter_custom: last run 113 L; aborted (65534) -> None
-    assert counter_volume("0,1,600,113,20260714161000") == 113
-    assert counter_volume("0,1,65534,9,20260714155958") is None
     # runs_store T3 run-record filters (mirror of _on_counter_change)
     assert counter_run("0,1,900,151,20260807144500") == (900, 151.0)
     assert counter_run("0,1,65534,9,20260714155958") is None   # aborted sentinel

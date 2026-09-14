@@ -393,6 +393,18 @@ SWITCHES: dict[str, tuple[XTSwitchEntityDescription, ...]] = {
             key=XTDPCode.SWITCH,
             translation_key="valve",
         ),
+        # QT-08W-T3 exposes the same valve on the indexed DP switch_1. The
+        # cross-category table (folded into every category by
+        # merge_descriptors) names that "Switch 1", which is what the
+        # dashboard strategy failed to recognise as a valve switch (audit
+        # D4/R1). A category entry wins over the cross-category one, so this
+        # renames it to "Valve". unique_id is derived from the DPCODE, not
+        # from the translation_key, so existing switch.<slug>_switch_1
+        # entity ids are kept as-is.
+        XTSwitchEntityDescription(
+            key=XTDPCode.SWITCH_1,
+            translation_key="valve",
+        ),
         XTSwitchEntityDescription(
             key=XTDPCode.WORK_MODE,
             translation_key="sleep_mode",
