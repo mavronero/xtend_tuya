@@ -10,7 +10,9 @@ import asyncio
 from time import monotonic as _monotonic
 from datetime import datetime, timedelta
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import (
     DeviceEntryDisabler,
@@ -103,8 +105,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
     XTConcurrencyManager.hass = hass
     XTTuyaPatcher.patch_tuya_code()
     await async_register_cards(hass)
-    start_time = datetime.now()
-    last_time = start_time
     multi_manager = MultiManager(hass, entry)
     service_manager = ServiceManager(multi_manager=multi_manager)
     last_time = datetime.now()
@@ -117,6 +117,80 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
         False,
     )
 
+    # ---------------------------------------------------------------- 2026-09
+    # Everything below the readiness gate (setup_entry above, which is what
+    # raises ConfigEntryNotReady / ConfigEntryAuthFailed so HA can retry or
+    # reauth) used to run inside this coroutine. For a 250-device hub that is
+    # 2-4 minutes, and whoever awaits async_setup_entry gets to cancel it:
+    # HA's stage-2 bootstrap timeout at boot, and the nabu.casa proxy dropping
+    # the UI "Reload" REST request after ~1-2 min (HA 2026.9 cancels the
+    # handler with it). Three cancelled setups in a row on 2026-09-14. Now the
+    # entry reports loaded immediately and the heavy part runs in a task the
+    # entry owns, so only a real unload/reload can cancel it.
+    _LOAD_TASKS[entry.entry_id] = entry.async_create_background_task(
+        hass,
+        _async_load_entry(hass, entry, multi_manager, service_manager),
+        name=f"xtend_tuya load {entry.title}",
+    )
+    return True
+
+
+# ponytail: fixed retry, no backoff — a hub that keeps failing to load is
+# already a logged ERROR every 2 min; add backoff if it ever spams.
+LOAD_RETRY_SECONDS = 120
+_LOAD_TASKS: dict[str, asyncio.Task] = {}
+
+
+def _load_failure_action(err: BaseException) -> str:
+    """Decide what to do when the background load fails.
+
+    Mirrored in tests/test_background_load.py — keep in sync.
+    """
+    if isinstance(err, asyncio.CancelledError):
+        return "propagate"
+    if isinstance(err, ConfigEntryAuthFailed):
+        return "reauth"
+    return "retry"
+
+
+async def _async_load_entry(
+    hass: HomeAssistant,
+    entry: XTConfigEntry,
+    multi_manager: MultiManager,
+    service_manager: ServiceManager,
+) -> None:
+    try:
+        await _async_load_entry_body(hass, entry, multi_manager, service_manager)
+    except BaseException as err:  # noqa: BLE001 - routed below
+        action = _load_failure_action(err)
+        if action == "propagate":
+            raise
+        if action == "reauth":
+            LOGGER.error("Xtended Tuya %s: authentication failed during load: %s", entry.title, err)
+            entry.async_start_reauth(hass)
+            return
+        LOGGER.error(
+            "Xtended Tuya %s: background load failed (%s); reloading entry in %s s",
+            entry.title,
+            err,
+            LOAD_RETRY_SECONDS,
+            exc_info=not isinstance(err, ConfigEntryNotReady),
+        )
+
+        @callback
+        def _reload(_now) -> None:
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+        async_call_later(hass, LOAD_RETRY_SECONDS, _reload)
+
+
+async def _async_load_entry_body(
+    hass: HomeAssistant,
+    entry: XTConfigEntry,
+    multi_manager: MultiManager,
+    service_manager: ServiceManager,
+) -> None:
+    start_time = datetime.now()
     # Get all devices from Tuya
     last_time = datetime.now()
     await multi_manager.mm_update_device_cache()
@@ -292,7 +366,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
         None,
         False,
     )
-    return True
 
 
 # Aug 2026 incident series: a sharing-SDK refresh mid-run can rebuild device
@@ -448,9 +521,21 @@ def is_config_entry_master(
 
 async def async_unload_entry(hass: HomeAssistant, entry: XTConfigEntry) -> bool:
     """Unloading the Tuya platforms."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        tuya = entry.runtime_data
-        if tuya.manager is not None:
+    # HA awaits the entry's background tasks after unload; cancelling here
+    # just makes sure a still-running load stops before platforms go away.
+    if task := _LOAD_TASKS.pop(entry.entry_id, None):
+        task.cancel()
+    # The background load may not have forwarded the platforms yet (or was
+    # cancelled halfway); EntityComponent raises ValueError("Config entry was
+    # never loaded!") for those, which must not fail the unload.
+    results = await asyncio.gather(
+        *(hass.config_entries.async_forward_entry_unload(entry, p) for p in PLATFORMS),
+        return_exceptions=True,
+    )
+    unload_ok = all(r is True or isinstance(r, ValueError) for r in results)
+    if unload_ok:
+        tuya = getattr(entry, "runtime_data", None)
+        if tuya is not None and tuya.manager is not None:
             if tuya.manager.mq is not None:
                 tuya.manager.mq.stop()
             tuya.manager.remove_device_listeners()
