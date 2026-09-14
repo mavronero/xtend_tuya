@@ -227,6 +227,27 @@ def demo():
     assert len(s.runs[DEV]) == 1
     assert s.runs[DEV][0]["total_l"] == 9.0
 
+    # ... and if the REAL close report lands while we wait, the deferred
+    # stand-in must not store the same run a second time.
+    DEFERRED.clear()
+    s = store(
+        {
+            D["start_entity"]: (now - timedelta(seconds=90)).isoformat(),
+            D["end_entity"]: close.isoformat(),
+            D["volume_entity"]: "0",
+        }
+    )
+    s._end_entity_to_device = {D["end_entity"]: D}
+    s._on_end_change(end_event(close.isoformat()))
+    real_close = now - timedelta(seconds=2)  # the valve really shut just now
+    s.hass.states.values[D["end_entity"]] = real_close.isoformat()
+    s.hass.states.values[D["volume_entity"]] = "9"
+    s._on_end_change(end_event(real_close.isoformat()))
+    assert len(s.runs[DEV]) == 1
+    DEFERRED[0][1](None)
+    assert len(s.runs[DEV]) == 1, s.runs[DEV]
+    assert s.runs[DEV][0]["end"] == real_close.isoformat()
+
     print("ok: runs are recorded once, with liters that survive an odometer")
 
 

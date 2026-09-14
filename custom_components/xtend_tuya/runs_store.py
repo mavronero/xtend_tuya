@@ -309,15 +309,27 @@ class RunsStore:
             async_call_later(
                 self.hass,
                 (end - now).total_seconds() + PREREPORT_SETTLE_SEC,
-                partial(self._record_end, d, start, end),
+                partial(self._record_end, d, start, end, deferred=True),
             )
             return
         self._record_end(d, start, end, None)
 
     @callback
     def _record_end(
-        self, d: dict[str, Any], start: datetime, end: datetime, _now: Any
+        self,
+        d: dict[str, Any],
+        start: datetime,
+        end: datetime,
+        _now: Any = None,
+        deferred: bool = False,
     ) -> None:
+        if deferred and self._row_near(
+            d["tuya_device_id"], end, MAX_FUTURE_SLACK_SEC
+        ):
+            # The real close report landed while we were waiting — that one
+            # carries the true close time, so drop the scheduled stand-in
+            # instead of storing the same run twice.
+            return
         total_l = self._run_liters(d, (end - start).total_seconds())
         if self.add_run(d["tuya_device_id"], start, end, total_l):
             self.async_schedule_save()
