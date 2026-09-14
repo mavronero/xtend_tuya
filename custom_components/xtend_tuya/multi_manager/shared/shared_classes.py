@@ -250,7 +250,13 @@ class XTDevice(TuyaDevice):
         "device_source_priority",
         "original_device",
         "source",
+        "sync_changes",
     ]
+
+    # False on scratch copies that carry a live device's id but are still
+    # being built (get_open_api_device): their intermediate/empty attribute
+    # values must not be broadcast into the live device maps. See D6.
+    sync_changes: bool = True
 
     class XTDevicePreference(StrEnum):
         IS_A_COVER_DEVICE = "IS_A_COVER_DEVICE"
@@ -363,6 +369,8 @@ class XTDevice(TuyaDevice):
 
     def __setattr__(self, attr, value):
         super().__setattr__(attr, value)
+        if not self.sync_changes:
+            return
         if attr not in XTDevice.FIELDS_TO_EXCLUDE_FROM_SYNC:
             if (
                 self.original_device is not None

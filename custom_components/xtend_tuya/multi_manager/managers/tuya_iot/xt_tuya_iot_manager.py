@@ -448,18 +448,45 @@ class XTIOTDeviceManager(TuyaDeviceManager):
         for listener in self.device_listeners:
             listener.update_device(device, updated_status_properties, dp_timestamps)
 
+    @staticmethod
+    def _status_list_to_dict(status: Any) -> dict[str, Any]:
+        """Normalize a cloud `status` payload to the {code: value} form.
+
+        XTDevice(**item) assigns whatever the API sent. The industry-solution
+        device list (/v1.0/iot-03/devices) keeps `status` as a list of
+        {code, value} dicts, and every reader indexes it by code — the next
+        access raises `TypeError: list indices must be integers`. Mirrored in
+        tests/test_status_list_normalization.py.
+        """
+        if not isinstance(status, list):
+            return status or {}
+        return {
+            item["code"]: item["value"]
+            for item in status
+            if isinstance(item, dict) and "code" in item and "value" in item
+        }
+
     def _update_device_list_info_cache(self, devIds: list[str]):
         response = self.get_device_list_info(devIds)
         result = response.get("result", {})
         for item in result.get("list", []):
             device_id = item["id"]
-            self.device_map[device_id] = XTDevice(**item)
-            self.device_map[device_id].source = "IOT _update_device_list_info_cache"
+            device = XTDevice(**item)
+            device.status = self._status_list_to_dict(device.status)
+            device.source = "IOT _update_device_list_info_cache"
+            self.device_map[device_id] = device
 
     def get_open_api_device(self, device: XTDevice) -> XTDevice | None:
-        device_properties = XTDevice.from_compatible_device(
-            device, "IOT get_open_api_device"
-        )
+        # This used to go through from_compatible_device, which returns the
+        # SAME object when handed an XTDevice — so the four assignments below
+        # emptied the *live* device and XTDevice.__setattr__ broadcast those
+        # empty dicts into every registered device map, until the two OpenAPI
+        # calls below refilled them. A slow or failing shadow/model call left
+        # the fleet collapsed (audit D6). Build on a detached copy instead,
+        # with the mirror muted until the caller merges the result back.
+        device_properties = device.get_copy()
+        device_properties.sync_changes = False
+        device_properties.source = "IOT get_open_api_device"
         device_properties.function = {}
         device_properties.status_range = {}
         device_properties.status = {}
