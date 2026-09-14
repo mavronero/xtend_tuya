@@ -302,6 +302,10 @@ function collectValveEntities(
     }
   };
 
+  // Second-choice valve switch, used only if nothing matched the primary
+  // rules below — see the switch_1 note there.
+  let switchFallback: string | undefined;
+
   for (const e of Object.values(hass.entities)) {
     if (e.device_id !== haDeviceId) continue;
 
@@ -328,6 +332,18 @@ function collectValveEntities(
         e.entity_id.endsWith("_valve"))
     ) {
       if (!v.switch) v.switch = e.entity_id;
+      continue;
+    }
+    // QT-08W-T3 valves: the valve sits on the indexed DP switch_1 and the
+    // cross-category table used to name it "Switch 1", so none of the rules
+    // above matched and v.switch stayed undefined on all 11 T3 valves — no
+    // control card, no bars, counted offline (audit D4/R1). The integration
+    // now gives sfkzq's switch_1 the "valve" key, but registries written by
+    // an older build still carry "switch_1", so accept it too. Second
+    // choice on purpose: a device that really does have both keeps its
+    // proper valve entity.
+    if (e.entity_id.startsWith("switch.") && e.translation_key === "switch_1") {
+      if (!switchFallback) switchFallback = e.entity_id;
       continue;
     }
     if (
@@ -357,6 +373,8 @@ function collectValveEntities(
       }
     }
   }
+
+  if (!v.switch && switchFallback) v.switch = switchFallback;
 
   return v;
 }
