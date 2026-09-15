@@ -118,6 +118,7 @@ async def async_setup_entry(
     recorder on each `async_get_events`, so adding/removing valves
     after setup is picked up automatically.
     """
+    from .irrigation_locations import XTIrrigationLocationsView, async_sync
     from .runs_store import async_get_store
 
     store = await async_get_store(hass)
@@ -134,6 +135,8 @@ async def async_setup_entry(
     # scan left in the recording path, and it is off the request path.
     store.track_devices(_iter_fdm5kw_devices(hass))
     _maybe_start_backfill(hass, store)
+    # Irrigation locations follow SmartLife names; async_sync never raises.
+    hass.async_create_task(async_sync(hass))
 
     # Re-arm periodically. Relying on setup + renders alone broke live: the
     # 4.4.233 speedup made this platform set up before the valve sensors
@@ -142,6 +145,7 @@ async def async_setup_entry(
     # track_devices is additive/idempotent and a state walk is cheap.
     async def _rearm(_now) -> None:
         store.track_devices(_iter_fdm5kw_devices(hass))
+        await async_sync(hass)
 
     entry.async_on_unload(
         async_track_time_interval(hass, _rearm, RUNS_STORE_REARM_INTERVAL)
@@ -153,6 +157,7 @@ async def async_setup_entry(
     if not hass.data.get(ICS_VIEW_REGISTERED_KEY):
         hass.http.register_view(XtendTuyaCalendarICSView())
         hass.http.register_view(XtendTuyaRunsExportView())
+        hass.http.register_view(XTIrrigationLocationsView())
         hass.data[ICS_VIEW_REGISTERED_KEY] = True
 
 
@@ -1231,6 +1236,18 @@ class XtendTuyaRunsExportView(HomeAssistantView):
 
         store = await async_get_store(hass)
 
+        # Additive fields only (location_id/location). A broken locations
+        # store must not take the frozen export down with it.
+        from . import location_model as lm
+
+        try:
+            from .irrigation_locations import async_get_locations
+
+            loc_data = (await async_get_locations(hass)).data
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("irrigation locations unavailable", exc_info=True)
+            loc_data = lm.empty()
+
         # tuya device_id -> display name, via the device registry.
         dev_reg = dr.async_get(hass)
         names: dict[str, str] = {}
@@ -1244,11 +1261,23 @@ class XtendTuyaRunsExportView(HomeAssistantView):
             if device_filter and device_id != device_filter:
                 continue
             name = names.get(device_id)
+            # Only this device's assignments, so the per-run lookup stays
+            # O(assignments of one valve) instead of O(fleet).
+            dev_locs = {
+                "locations": loc_data["locations"],
+                "assignments": [
+                    a for a in loc_data["assignments"] if a["device_id"] == device_id
+                ],
+            }
             for r in rows:
                 if since is not None:
                     r_end = _parse_iso(r["end"])
                     if r_end is None or r_end < since:
                         continue
+                try:
+                    loc = lm.location_for_run(dev_locs, device_id, r["end"])
+                except ValueError:
+                    loc = None
                 out.append(
                     {
                         "device_id": device_id,
@@ -1257,6 +1286,8 @@ class XtendTuyaRunsExportView(HomeAssistantView):
                         "end": r["end"],
                         "duration_seconds": r["duration_seconds"],
                         "liters": r.get("total_l"),
+                        "location_id": loc["id"] if loc else None,
+                        "location": loc["name"] if loc else None,
                     }
                 )
         out.sort(key=lambda r: r["end"])
