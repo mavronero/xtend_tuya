@@ -85,6 +85,7 @@ interface StrategyConfig {
 interface DashboardView {
   title: string;
   path?: string;
+  icon?: string;
   type?: string;
   max_columns?: number;
   sections?: unknown[];
@@ -180,12 +181,13 @@ class IrrigationValvesStrategy extends HTMLElement {
     if (valves.length === 0) {
       return {
         title: "Solar Valves",
-        views: [emptyOverviewView(overviewTitle)],
+        views: [emptyOverviewView(overviewTitle), locationsView()],
       };
     }
 
     const views: DashboardView[] = [
       buildOverviewView(overviewTitle, valves, hours),
+      locationsView(),
       ...valves.map((v) => buildValveView(v, hours)),
     ];
 
@@ -395,6 +397,29 @@ function makeViewPath(deviceId: string, valveName: string): string {
 /* ------------------------------------------------------------------ *
  * View builders                                                       *
  * ------------------------------------------------------------------ */
+
+/** Irrigation Locations (permanent irrigated places; valves come and go). */
+function locationsView(): DashboardView {
+  return {
+    title: "Locations",
+    path: "locations",
+    icon: "mdi:map-marker-radius",
+    type: "sections",
+    max_columns: 2,
+    sections: [
+      {
+        type: "grid",
+        column_span: 2,
+        cards: [
+          {
+            type: "custom:irrigation-locations-card",
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
+    ],
+  };
+}
 
 function emptyOverviewView(title: string): DashboardView {
   return {
