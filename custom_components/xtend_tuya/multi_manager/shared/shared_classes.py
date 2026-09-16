@@ -778,6 +778,16 @@ class XTDeviceMap(UserDict[str, XTDevice]):
             return None
         if device := self.get(device_id):
             if hasattr(device, key) and getattr(device, key) != value:
+                # The mirror keeps every copy of a device in step, but a copy
+                # from a poorer source (SmartLife sharing: switch + countdown)
+                # must never overwrite a richer one (OpenAPI: ~32 DPs). Since
+                # 4.4.251 stopped wiping the registry per load (audit C9),
+                # a second hub sharing the same device ids mirrored its 2-DP
+                # copies onto the first hub's full objects at boot: fleet-wide
+                # collapse, manual watering + timers dead (2026-09-16).
+                # Mirrored in tests/test_multimap_mirror_guard.py.
+                if key in XTDevice.DP_ATTRS and is_dp_collapse(getattr(device, key), value):
+                    return None
                 setattr(device, key, value)
 
 
