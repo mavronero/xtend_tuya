@@ -130,7 +130,12 @@ async def async_setup_entry(
     owner = hass.data.get(CALENDAR_OWNER_KEY)
     if owner is None:
         hass.data[CALENDAR_OWNER_KEY] = entry.entry_id
-        entry.async_on_unload(lambda: hass.data.pop(CALENDAR_OWNER_KEY, None))
+
+        def _release_owner() -> None:
+            # Must return None: HA runs a non-None on_unload result as a task.
+            hass.data.pop(CALENDAR_OWNER_KEY, None)
+
+        entry.async_on_unload(_release_owner)
         owner = entry.entry_id
     if owner == entry.entry_id:
         async_add_entities(

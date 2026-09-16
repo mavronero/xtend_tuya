@@ -95,3 +95,67 @@ async def test_second_hub_with_same_ids_does_not_collapse_first(hass, caplog):
     # The second hub never steals devices the first one owns.
     assert not any(d.id in first.runtime_data.multi_manager.device_map for d in second.runtime_data.multi_manager.device_map.values())
     assert not _integration_errors(caplog), _integration_errors(caplog)
+
+
+@pytest.mark.usefixtures("fake_plugins")
+async def test_irrigation_locations_seed_once_from_names(hass, hass_client, caplog):
+    """/api/xtend_tuya/irrigation_locations: seeded once from "Place (NNN)" names,
+    then manual only (Simon 2026-09-16); new valves land in `unassigned`."""
+    devices = [build_device(d) for d in load_fixture_devices("solar")]
+    solar = FakeAccount("tuya_iot", devices, XTDeviceSourcePriority.TUYA_IOT)
+    await setup_hub(hass, "solar-valves@test", [solar])
+    await hass.async_block_till_done()
+
+    client = await hass_client()
+    resp = await client.get("/api/xtend_tuya/irrigation_locations")
+    assert resp.status == 200, await resp.text()
+    body = await resp.json()
+    named = [d for d in devices if d.product_name in ("Valve Controller", "QT-08W-T3") and "(" in d.name]
+    assert len(body["locations"]) >= 50, f"seed produced {len(body['locations'])} locations from {len(named)} named valves"
+    assigned = {dev["device_id"] for loc in body["locations"] for dev in loc["devices"] if not dev["end"]}
+    assert assigned, "no open assignments after seed"
+    assert all(dev["source"] == "auto" for loc in body["locations"] for dev in loc["devices"])
+
+    # A location renamed in HA must survive: seed never runs again once the store holds data.
+    loc = body["locations"][0]
+    resp = await client.post("/api/xtend_tuya/irrigation_locations", json={"action": "update_location", "id": loc["id"], "name": "Renamed Plot"})
+    assert resp.status == 200, await resp.text()
+    from custom_components.xtend_tuya.irrigation_locations import async_seed_once
+
+    await async_seed_once(hass)
+    body2 = await (await client.get("/api/xtend_tuya/irrigation_locations")).json()
+    assert any(l["name"] == "Renamed Plot" for l in body2["locations"])
+    assert len(body2["locations"]) == len(body["locations"])
+    assert not _integration_errors(caplog), _integration_errors(caplog)
+
+
+@pytest.mark.usefixtures("fake_plugins")
+async def test_irrigation_locations_seed_once_from_names(hass, hass_client, caplog):
+    """/api/xtend_tuya/irrigation_locations: seeded once from "Place (NNN)" names,
+    then manual only (Simon 2026-09-16); new valves land in `unassigned`."""
+    devices = [build_device(d) for d in load_fixture_devices("solar")]
+    solar = FakeAccount("tuya_iot", devices, XTDeviceSourcePriority.TUYA_IOT)
+    await setup_hub(hass, "solar-valves@test", [solar])
+    await hass.async_block_till_done()
+
+    client = await hass_client()
+    resp = await client.get("/api/xtend_tuya/irrigation_locations")
+    assert resp.status == 200, await resp.text()
+    body = await resp.json()
+    named = [d for d in devices if d.product_name in ("Valve Controller", "QT-08W-T3") and "(" in d.name]
+    assert len(body["locations"]) >= 50, f"seed produced {len(body['locations'])} locations from {len(named)} named valves"
+    assigned = {dev["device_id"] for loc in body["locations"] for dev in loc["devices"] if not dev["end"]}
+    assert assigned, "no open assignments after seed"
+    assert all(dev["source"] == "auto" for loc in body["locations"] for dev in loc["devices"])
+
+    # A location renamed in HA must survive: seed never runs again once the store holds data.
+    loc = body["locations"][0]
+    resp = await client.post("/api/xtend_tuya/irrigation_locations", json={"action": "update_location", "id": loc["id"], "name": "Renamed Plot"})
+    assert resp.status == 200, await resp.text()
+    from custom_components.xtend_tuya.irrigation_locations import async_seed_once
+
+    await async_seed_once(hass)
+    body2 = await (await client.get("/api/xtend_tuya/irrigation_locations")).json()
+    assert any(l["name"] == "Renamed Plot" for l in body2["locations"])
+    assert len(body2["locations"]) == len(body["locations"])
+    assert not _integration_errors(caplog), _integration_errors(caplog)

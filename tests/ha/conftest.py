@@ -195,8 +195,12 @@ class FakeAccount:
 
 
 @pytest.fixture
-def fake_plugins(monkeypatch):
-    """No real plugins; MultiManager.setup_entry registers ACCOUNTS[entry_id]."""
+async def fake_plugins(hass, monkeypatch):
+    """No real plugins; MultiManager.setup_entry registers ACCOUNTS[entry_id].
+
+    Unloads every hub at teardown: the entry-bound timers (12 h homes walk,
+    15 min calendar re-arm) are released on unload, and the HA harness
+    rejects lingering timers."""
     from custom_components.xtend_tuya.const import AllowedPlugins
     from custom_components.xtend_tuya.multi_manager import multi_manager as mm_mod
 
@@ -216,6 +220,10 @@ def fake_plugins(monkeypatch):
 
     monkeypatch.setattr(mm_mod.MultiManager, "setup_entry", setup_entry)
     yield
+    for entry_id in list(ACCOUNTS):
+        if hass.config_entries.async_get_entry(entry_id) is not None:
+            assert await hass.config_entries.async_unload(entry_id), f"unload failed for {entry_id}"
+    await hass.async_block_till_done()
     ACCOUNTS.clear()
 
 

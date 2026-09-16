@@ -126,6 +126,10 @@ class XTIrrigationLocationsView(HomeAssistantView):
         from .calendar import _iter_fdm5kw_devices
         from .runs_store import async_get_store
 
+        # Seed-once retry: calendar setup can run before the valve entities
+        # exist (then the seed saw no devices). No-op once the store holds
+        # anything, so this is not the rejected "automation".
+        await async_seed_once(hass)
         runs = await async_get_store(hass)
         data = (await async_get_locations(hass)).data
         live = {d["tuya_device_id"]: d for d in _iter_fdm5kw_devices(hass)}
