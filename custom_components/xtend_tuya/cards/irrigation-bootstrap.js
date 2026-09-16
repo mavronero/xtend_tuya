@@ -40,7 +40,37 @@ const BUNDLES = {
 const allDefined = () =>
   Object.keys(BUNDLES).every((el) => customElements.get(el));
 
+// HA's workbox service worker serves the app-shell index network-first with
+// a timeout; over nabu.casa it often loses and a stale index is used. That
+// index carries the OLD bootstrap and the OLD bundle list, so a card added
+// in a release is never imported and never healed (irrigation-locations-card,
+// 4.4.257/258). Read the live index with a unique query (bypasses the SW
+// runtime cache) and import every card bundle it lists that this page has
+// not evaluated yet. Imports are idempotent; unknown new cards define
+// themselves against the live registry on that import.
+const DISCOVERED = new Set();
+async function discover() {
+  try {
+    const html = await (
+      await fetch(`/?xt=${Date.now()}`, { cache: "no-store", headers: { Accept: "text/html" } })
+    ).text();
+    for (const m of html.matchAll(/xtend_tuya_static\/cards\/([a-z0-9-]+\.js)\?v=(\d+)/g)) {
+      const [, file, v] = m;
+      if (file === "irrigation-bootstrap.js" || DISCOVERED.has(file)) continue;
+      DISCOVERED.add(file);
+      try {
+        await import(`${PREFIX}${file}?v=${v}&d=${Date.now()}`);
+      } catch (e) {
+        // next heal() re-imports anything still undefined
+      }
+    }
+  } catch (e) {
+    // offline / relay hiccup: BUNDLES-based heal below still runs
+  }
+}
+
 async function heal() {
+  if (!DISCOVERED.size) await discover();
   // unique set of bundle files that own at least one missing element
   const files = [
     ...new Set(
