@@ -19,6 +19,8 @@ Whoever deploys writes the previous version here before updating.
 4. Tell Simon. Then debug on the branch, not on prod.
 
 ## Deploy checklist
+- Before tagging: `.venv-test/bin/pytest` (real-HA harness, `tests/ha/README.md`) and the
+  standalone checks `for t in tests/test_*.py; do python3 $t; done`. All green or no release.
 - One change per release. 4.4.251 was 45 files from four audit streams; nobody could bisect it.
 - Deploy only when you can watch the next 15 minutes. Not last thing in the evening, not right
   before Simon's 06:00 round.

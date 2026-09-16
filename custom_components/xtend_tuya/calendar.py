@@ -70,6 +70,7 @@ _ENTITY_SUFFIX_TO_ROLE: tuple[tuple[str, str], ...] = (
 )
 
 ICS_VIEW_REGISTERED_KEY = f"{DOMAIN}_ics_view_registered"
+CALENDAR_OWNER_KEY = f"{DOMAIN}_calendar_owner"  # entry_id that owns the 2 calendar entities
 ICS_DEFAULT_FUTURE_DAYS = 30
 ICS_DEFAULT_PAST_DAYS = 30
 
@@ -113,20 +114,30 @@ async def async_setup_entry(
 
     A single planned-calendar entity and a single completed-calendar
     entity cover every fdm5kw valve under every xtend_tuya config
-    entry; HA collapses duplicates by unique_id when multiple entries
-    call this. The entities read live state from `hass.states` and the
+    entry. HA does NOT collapse duplicates by unique_id across entries:
+    the second hub's platform setup logged "Platform xtend_tuya does not
+    generate unique IDs ... ignoring calendar.irrigation_planned" at every
+    prod boot (caught by tests/ha once the harness existed). The first
+    entry to set up owns the two entities; a later entry only registers
+    the views. The entities read live state from `hass.states` and the
     recorder on each `async_get_events`, so adding/removing valves
     after setup is picked up automatically.
     """
     from .runs_store import async_get_store
 
     store = await async_get_store(hass)
-    async_add_entities(
-        [
-            IrrigationPlannedCalendar(hass, store),
-            IrrigationCompletedCalendar(hass, store),
-        ]
-    )
+    owner = hass.data.get(CALENDAR_OWNER_KEY)
+    if owner is None:
+        hass.data[CALENDAR_OWNER_KEY] = entry.entry_id
+        entry.async_on_unload(lambda: hass.data.pop(CALENDAR_OWNER_KEY, None))
+        owner = entry.entry_id
+    if owner == entry.entry_id:
+        async_add_entities(
+            [
+                IrrigationPlannedCalendar(hass, store),
+                IrrigationCompletedCalendar(hass, store),
+            ]
+        )
 
     # Arm the end-sensor listener for every valve known right now (devices
     # appearing later are picked up on each calendar render) and run the
