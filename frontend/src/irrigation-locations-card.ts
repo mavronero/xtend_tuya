@@ -360,13 +360,18 @@ export class IrrigationLocationsCard extends LitElement {
   /** Valve detail view: where this valve is installed, and a way to change it. */
   private _renderDevice(deviceId: string) {
     const d = this._data;
-    const here = d?.locations.find((l) => l.devices.some((x) => x.device_id === deviceId && !x.end)) ?? null;
+    // The strategy passes the Tuya id, but falls back to the HA device UUID
+    // when the registry sensor is unavailable (its attributes are stripped),
+    // so match on either.
+    const isMe = (x: {device_id: string; ha_device_id: string | null}) => x.device_id === deviceId || x.ha_device_id === deviceId;
+    const here = d?.locations.find((l) => l.devices.some((x) => isMe(x) && !x.end)) ?? null;
+    const tuyaId = here?.devices.find((x) => isMe(x))?.device_id ?? d?.unassigned.find((u) => isMe(u))?.device_id ?? deviceId;
     const select = d
       ? html`<select ?disabled=${this._busy} @change=${(e: Event) => {
           const sel = e.target as HTMLSelectElement;
           const v = sel.value;
           sel.value = "";
-          if (v) void this._post("device", { action: "assign_device", device_id: deviceId, location_id: v });
+          if (v) void this._post("device", { action: "assign_device", device_id: tuyaId, location_id: v });
         }}>
           <option value="">${here ? "Move to…" : "Assign to…"}</option>
           ${d.locations.filter((l) => l.id !== here?.id).map((l) => html`<option value=${l.id}>${l.name}</option>`)}
