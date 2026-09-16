@@ -508,6 +508,20 @@ function buildOverviewView(
     type: "sections",
     max_columns: 3,
     sections: [
+      // New valves without a location go on top of the valve list so they
+      // get assigned (Simon 2026-09-16); the card renders empty when there
+      // are none.
+      {
+        type: "grid",
+        column_span: 3,
+        cards: [
+          {
+            type: "custom:irrigation-locations-card",
+            unassigned: true,
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
       // The Re-sync button lives in the valve-matrix count row (Simon
       // 2026-06-06: "integrate the resync button there") — no standalone
       // refresh-button card on the overview anymore. The element stays
@@ -600,6 +614,8 @@ function buildValveView(v: ValveEntities, hours: number): DashboardView {
   const middleCards: unknown[] = [];
   const rightCards: unknown[] = [];
 
+  // Where the valve is installed (irrigation location) + assign/move.
+  leftCards.push({ type: "custom:irrigation-locations-card", device_id: v.device_id });
   const control = buildControlCard(v);
   if (control) leftCards.push(control);
   leftCards.push(buildTimerCard(v));

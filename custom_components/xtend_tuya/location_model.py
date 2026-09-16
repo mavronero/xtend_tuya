@@ -94,16 +94,18 @@ def _add(data, location_id, device_id, begin, source) -> None:
     )
 
 
-def sync(
+def seed_from_names(
     data: dict[str, Any],
     devices: Iterable[tuple[str, str]],
     now_iso: str,
     first_run_start: Callable[[str], str | None],
 ) -> bool:
-    """Auto-assign valves to locations from their SmartLife names.
+    """Assign valves to locations from their SmartLife names.
 
-    Never closes an assignment because a valve is offline or missing: a
-    dead battery is not a swap. Manual assignments and manually ended ones
+    Meant as a one-time seed (the HA glue only runs it on an empty store):
+    after that, assignment is manual. Idempotent and safe on a populated
+    store all the same: never closes an assignment because a valve is
+    offline or missing, and manual assignments and manually ended ones
     always win over the name.
     """
     changed = False

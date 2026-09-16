@@ -1,8 +1,11 @@
 """HA glue for irrigation locations (see location_model.py for the rules).
 
-Persists the location/assignment table in .storage, keeps it in step with
-SmartLife valve names, and serves it at /api/xtend_tuya/irrigation_locations
-for the irrigation card. Everything is computed from the in-memory runs
+Persists the location/assignment table in .storage and serves it at
+/api/xtend_tuya/irrigation_locations for the irrigation cards. Locations are
+seeded ONCE by splitting the SmartLife names ("HM Verbs (701)"); after that
+assignment is manual only (Simon 2026-09-16: an automation "will create too
+many problems"), so a new valve shows up as unassigned until someone picks
+its location in the valve list. Everything is computed from the in-memory runs
 store: never the recorder, so a request stays far below Nabu Casa's 60 s
 proxy cut.
 
@@ -59,15 +62,19 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-async def async_sync(hass: HomeAssistant) -> None:
-    """Auto-assign valves from their current names. Never raises: this runs
-    from calendar setup and its re-arm timer, which must not break."""
+async def async_seed_once(hass: HomeAssistant) -> None:
+    """One-time split of the SmartLife names into locations. A no-op once
+    the store holds anything, so it is safe to call from calendar setup and
+    its re-arm (the retry covers a setup that ran before the valves were
+    known). Never raises: those callers must not break."""
     try:
         from .calendar import _iter_fdm5kw_devices
         from .runs_store import async_get_store
 
-        runs = await async_get_store(hass)
         locations = await async_get_locations(hass)
+        if locations.data["locations"] or locations.data["assignments"]:
+            return
+        runs = await async_get_store(hass)
 
         def first_run_start(device_id: str) -> str | None:
             rows = runs.runs.get(device_id)
@@ -76,10 +83,14 @@ async def async_sync(hass: HomeAssistant) -> None:
         devices = [
             (d["tuya_device_id"], d["valve_name"]) for d in _iter_fdm5kw_devices(hass)
         ]
-        if lm.sync(locations.data, devices, _now_iso(), first_run_start):
+        if lm.seed_from_names(locations.data, devices, _now_iso(), first_run_start):
+            _LOGGER.info(
+                "irrigation locations seeded from SmartLife names: %d locations",
+                len(locations.data["locations"]),
+            )
             locations.async_schedule_save()
     except Exception:  # noqa: BLE001
-        _LOGGER.debug("irrigation location sync failed", exc_info=True)
+        _LOGGER.debug("irrigation location seed failed", exc_info=True)
 
 
 def _stats(rows: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
@@ -115,8 +126,6 @@ class XTIrrigationLocationsView(HomeAssistantView):
         from .calendar import _iter_fdm5kw_devices
         from .runs_store import async_get_store
 
-        # Pick up a valve renamed in SmartLife since the last re-arm.
-        await async_sync(hass)
         runs = await async_get_store(hass)
         data = (await async_get_locations(hass)).data
         live = {d["tuya_device_id"]: d for d in _iter_fdm5kw_devices(hass)}

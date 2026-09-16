@@ -51,6 +51,12 @@ interface Payload {
 }
 
 type EditFields = Record<"name" | "description" | "expected_lpm" | "lat" | "lon", string>;
+interface CardConfig {
+  type: string;
+  title?: string;
+  unassigned?: boolean;
+  device_id?: string;
+}
 
 const API = "xtend_tuya/irrigation_locations";
 
@@ -75,7 +81,10 @@ const numOrNull = (s: string) => (s.trim() === "" || isNaN(Number(s)) ? null : N
 
 export class IrrigationLocationsCard extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
-  @state() private _config: { type: string; title?: string } | null = null;
+  // Modes: full list (default); `unassigned: true` = only the valves without
+  // a location, for the top of the valve list; `device_id` = one valve's
+  // location + assign/move select, for its detail view.
+  @state() private _config: CardConfig | null = null;
   @state() private _data: Payload | null = null;
   @state() private _loading = false;
   @state() private _error: string | null = null;
@@ -90,12 +99,12 @@ export class IrrigationLocationsCard extends LitElement {
   @state() private _showUnassigned = false;
   private _fetched = false;
 
-  setConfig(config: { type: string; title?: string }): void {
+  setConfig(config: CardConfig): void {
     this._config = config;
   }
 
   getCardSize(): number {
-    return 8;
+    return this._config?.device_id ? 1 : this._config?.unassigned ? 3 : 8;
   }
 
   private async _load(): Promise<void> {
@@ -325,9 +334,65 @@ export class IrrigationLocationsCard extends LitElement {
     </div>`;
   }
 
+  private _unassignedRows(d: Payload) {
+    return html`${d.unassigned.map(
+        (u) => html`<div class="hist">
+          <div class="hist-main">${this._chip(u)}</div>
+          ${this._assignSelect(null, u.device_id)}
+        </div>`
+      )}
+      ${this._errFor("unassigned")}`;
+  }
+
+  /** Valve list header: new valves that still need a location. */
+  private _renderUnassigned() {
+    const d = this._data;
+    if (!d || d.unassigned.length === 0) return nothing;
+    return html`<ha-card>
+      <div class="card-header">
+        <ha-icon icon="mdi:map-marker-question"></ha-icon>
+        <span class="title">${this._config!.title ?? "Valves without location"} (${d.unassigned.length})</span>
+      </div>
+      <div class="card-content">${this._unassignedRows(d)}</div>
+    </ha-card>`;
+  }
+
+  /** Valve detail view: where this valve is installed, and a way to change it. */
+  private _renderDevice(deviceId: string) {
+    const d = this._data;
+    const here = d?.locations.find((l) => l.devices.some((x) => x.device_id === deviceId && !x.end)) ?? null;
+    const select = d
+      ? html`<select ?disabled=${this._busy} @change=${(e: Event) => {
+          const sel = e.target as HTMLSelectElement;
+          const v = sel.value;
+          sel.value = "";
+          if (v) void this._post("device", { action: "assign_device", device_id: deviceId, location_id: v });
+        }}>
+          <option value="">${here ? "Move to…" : "Assign to…"}</option>
+          ${d.locations.filter((l) => l.id !== here?.id).map((l) => html`<option value=${l.id}>${l.name}</option>`)}
+        </select>`
+      : nothing;
+    return html`<ha-card>
+      <div class="card-header">
+        <ha-icon icon="mdi:map-marker-radius"></ha-icon>
+        <span class="title">${this._config!.title ?? "Location"}</span>
+      </div>
+      <div class="card-content">
+        ${this._error ? html`<div class="err">${this._error}</div>` : nothing}
+        <div class="hist">
+          <div class="hist-main">${here ? html`<b>${here.name}</b>` : html`<span class="dim">Not assigned</span>`}</div>
+          ${select}
+        </div>
+        ${this._errFor("device")}
+      </div>
+    </ha-card>`;
+  }
+
   protected render() {
     if (!this._config || !this.hass) return nothing;
     if (!this._fetched) void this._load();
+    if (this._config.device_id) return this._renderDevice(this._config.device_id);
+    if (this._config.unassigned) return this._renderUnassigned();
     const d = this._data;
     const q = this._query.trim().toLowerCase();
     const list = d ? d.locations.filter((l) => this._matches(l, q)) : [];
@@ -369,15 +434,7 @@ export class IrrigationLocationsCard extends LitElement {
               <div class="sub toggle" @click=${() => (this._showUnassigned = !this._showUnassigned)}>
                 ${this._showUnassigned ? "▾" : "▸"} Unassigned valves (${d.unassigned.length})
               </div>
-              ${this._showUnassigned
-                ? html`${d.unassigned.map(
-                      (u) => html`<div class="hist">
-                        <div class="hist-main">${this._chip(u)}</div>
-                        ${this._assignSelect(null, u.device_id)}
-                      </div>`
-                    )}
-                    ${this._errFor("unassigned")}`
-                : nothing}
+              ${this._showUnassigned ? this._unassignedRows(d) : nothing}
             </div>`
           : nothing}
       </div>

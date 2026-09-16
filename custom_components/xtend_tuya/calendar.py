@@ -123,7 +123,7 @@ async def async_setup_entry(
     recorder on each `async_get_events`, so adding/removing valves
     after setup is picked up automatically.
     """
-    from .irrigation_locations import XTIrrigationLocationsView, async_sync
+    from .irrigation_locations import XTIrrigationLocationsView, async_seed_once
     from .runs_store import async_get_store
 
     store = await async_get_store(hass)
@@ -146,8 +146,9 @@ async def async_setup_entry(
     # scan left in the recording path, and it is off the request path.
     store.track_devices(_iter_fdm5kw_devices(hass))
     _maybe_start_backfill(hass, store)
-    # Irrigation locations follow SmartLife names; async_sync never raises.
-    hass.async_create_task(async_sync(hass))
+    # One-time seed of irrigation locations from SmartLife names; no-op
+    # afterwards and never raises.
+    hass.async_create_task(async_seed_once(hass))
 
     # Re-arm periodically. Relying on setup + renders alone broke live: the
     # 4.4.233 speedup made this platform set up before the valve sensors
@@ -156,7 +157,7 @@ async def async_setup_entry(
     # track_devices is additive/idempotent and a state walk is cheap.
     async def _rearm(_now) -> None:
         store.track_devices(_iter_fdm5kw_devices(hass))
-        await async_sync(hass)
+        await async_seed_once(hass)
 
     entry.async_on_unload(
         async_track_time_interval(hass, _rearm, RUNS_STORE_REARM_INTERVAL)
