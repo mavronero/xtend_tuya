@@ -9,6 +9,7 @@ Whoever deploys writes the previous version here before updating.
 | date | deployed | previous (rollback target) | smoke |
 |---|---|---|---|
 | 2026-09-16 | 4.4.255 | 4.4.250 (251–254 collapse the device map) | ok, canary 824 watered |
+| 2026-09-16 | 4.4.257 | 4.4.255 (256 never deployed: its unload bug) | pending |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
