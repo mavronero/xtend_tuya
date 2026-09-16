@@ -417,26 +417,41 @@ class MultiManager(TuyaManager):
             del MultiManager.device_owner[device_id]
 
     def update_master_device_map(self):
+        dropped: dict[str, int] = {}
         for manager in self.accounts.values():
             for device_map in manager.get_available_device_maps():
-                for device_id in device_map:
+                for device_id in list(device_map):
+                    if device_id not in self.master_device_map and not self.claim_device(
+                        device_id
+                    ):
+                        # Owned by another loaded entry. Used to be converted
+                        # and kept in this hub's source map anyway, only left
+                        # out of the master map — so a 2-DP sharing copy of a
+                        # valve the other hub serves with 30 DPs lived here,
+                        # got mirrored, and clobbered the other hub's object
+                        # at every load (2026-09-16). A hub now holds only
+                        # devices it owns; the owning hub has its own sources
+                        # and MQ for them, and a message for a dropped id is
+                        # simply ignored by this hub.
+                        del device_map[device_id]
+                        dropped[manager.get_type_name()] = (
+                            dropped.get(manager.get_type_name(), 0) + 1
+                        )
+                        continue
                     # New devices have been created in their own device maps
                     # let's convert them to XTDevice
                     device_map[device_id] = manager.convert_to_xt_device(
                         device_map[device_id], device_map.device_source_priority
                     )
-
                     if device_id in self.master_device_map:
                         continue
-                    if not self.claim_device(device_id):
-                        LOGGER.debug(
-                            "Device %s already owned by another config entry, "
-                            "skipping it for %s",
-                            device_id,
-                            self.config_entry.title,
-                        )
-                        continue
                     self.master_device_map[device_id] = device_map[device_id]
+        if dropped:
+            LOGGER.info(
+                "%s: left %s to the entries that own them",
+                self.config_entry.title,
+                ", ".join(f"{n} {src} device(s)" for src, n in dropped.items()),
+            )
 
     def __get_available_device_maps(self) -> list[XTDeviceMap]:
         return_list: list[XTDeviceMap] = []

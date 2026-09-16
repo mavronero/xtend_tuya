@@ -92,8 +92,16 @@ async def test_second_hub_with_same_ids_does_not_collapse_first(hass, caplog):
     thin, t3_bad, qt, t3 = _valve_health(first.runtime_data.multi_manager.device_map)
     assert not thin, f"first hub collapsed by the second: {len(thin)}/{qt} QT-08W thin, e.g. {thin[:5]}"
     assert not t3_bad, f"first hub T3 collapsed: {t3_bad}"
-    # The second hub never steals devices the first one owns.
-    assert not any(d.id in first.runtime_data.multi_manager.device_map for d in second.runtime_data.multi_manager.device_map.values())
+    # The second hub never steals devices the first one owns, and it does not
+    # even keep copies of them in its source maps (4.4.260): no copy, nothing
+    # to mirror.
+    first_ids = set(first.runtime_data.multi_manager.device_map)
+    assert not any(d.id in first_ids for d in second.runtime_data.multi_manager.device_map.values())
+    for account in second.runtime_data.multi_manager.accounts.values():
+        for source_map in account.get_available_device_maps():
+            leaked = first_ids & set(source_map)
+            assert not leaked, f"second hub still holds {len(leaked)} copies of the first hub's devices"
+    assert len(second.runtime_data.multi_manager.device_map) == 0  # every thin copy was owned by the first hub
     assert not _integration_errors(caplog), _integration_errors(caplog)
 
 
