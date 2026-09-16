@@ -9,7 +9,9 @@ Whoever deploys writes the previous version here before updating.
 | date | deployed | previous (rollback target) | smoke |
 |---|---|---|---|
 | 2026-09-16 | 4.4.255 | 4.4.250 (251–254 collapse the device map) | ok, canary 824 watered |
-| 2026-09-16 | 4.4.257 | 4.4.255 (256 never deployed: its unload bug) | pending |
+| 2026-09-16 | 4.4.257 | 4.4.255 (256 never deployed: its unload bug) | backend ok; Locations card "Configuration error" (bootstrap map) |
+| 2026-09-16 | 4.4.258 | 4.4.255 | ok; browsers with a stale SW index still show the error card until refreshed |
+| 2026-09-16 | 4.4.259 | – | released, NOT deployed (bootstrap live-index discovery; deploy with the next change) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
@@ -27,7 +29,12 @@ Whoever deploys writes the previous version here before updating.
   before Simon's 06:00 round.
 - After restart: `HA_TOKEN=… python3 scripts/prod_smoke.py --expect <version> [--water]`
   (or paste `scripts/prod_smoke.js` into the prod tab's console). Must print `SMOKE OK`.
-- Card bundle changes additionally need "Re-sync valves" on the dashboard.
+- Card bundle changes additionally need "Re-sync valves" on the dashboard, done from a tab that
+  loaded AFTER the restart. HA's service worker serves the app-shell index network-first with a
+  timeout; over nabu.casa it often falls back to the cached index, which still references the old
+  bundle stamps. Symptom: "Configuration error" card. Cure for a browser: unregister the SW
+  (DevTools → Application) or wait for a refresh; 4.4.259's bootstrap self-discovers new bundles
+  from the live index so this only affects the bootstrap itself from now on.
 - Update the table above.
 
 ## What the smoke check guards against (all real incidents)
