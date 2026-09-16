@@ -22,7 +22,11 @@
 const PREFIX = "/xtend_tuya_static/cards/";
 
 // element name -> bundle file that defines it
+// tests/test_bootstrap_bundles.py checks every customElements.define() in
+// cards/*.js is listed here: a card missing from this map never heals and
+// renders "Configuration error" (irrigation-locations-card, 4.4.257).
 const BUNDLES = {
+  "irrigation-locations-card": "irrigation-locations-card.js",
   "irrigation-quota-card": "irrigation-quota-card.js",
   "irrigation-room-groups": "irrigation-room-groups.js",
   "irrigation-control-card": "irrigation-control-card.js",

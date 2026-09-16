@@ -18,6 +18,12 @@
     await new Promise((r) => setTimeout(r, 10000));
   }
   if (!entries.every((e) => e.state === 'loaded')) fail('entries not loaded: ' + entries.map((e) => e.title + '=' + e.state).join(', '));
+  // "loaded" is set before the background device load (4.4.249); wait for devices.
+  for (let i = 0; i < 24; i++) {
+    const rs = await Promise.all(entries.map((e) => fetch('/api/diagnostics/config_entry/' + e.entry_id, { headers: { Authorization: 'Bearer ' + tok } }).then((r) => r.json())));
+    if (rs.every((j) => (j.data.devices || []).length > 0)) break;
+    await new Promise((r) => setTimeout(r, 10000));
+  }
   ok(entries.map((e) => e.title.split('@')[0] + '=loaded').join(', '));
 
   out.push('2 version');

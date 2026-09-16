@@ -105,8 +105,15 @@ def wait_loaded(ha: HA, timeout: int = 300) -> list[dict]:
 
 
 def check_hub(ha: HA, entry: dict) -> None:
-    diag = ha.get(f"/api/diagnostics/config_entry/{entry['entry_id']}")
-    devices = diag.get("data", {}).get("devices", [])
+    # "loaded" is set before the background device load (4.4.249): wait for devices.
+    t0 = time.time()
+    while True:
+        diag = ha.get(f"/api/diagnostics/config_entry/{entry['entry_id']}")
+        devices = diag.get("data", {}).get("devices", [])
+        if devices or time.time() - t0 > 300:
+            break
+        print("  ...  waiting for the device load")
+        time.sleep(10)
     title = entry["title"].split("@")[0]
     thin, t3_bad, qt, t3 = [], [], 0, 0
     for d in devices:
