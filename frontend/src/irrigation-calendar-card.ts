@@ -2,12 +2,18 @@ import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { packLanes, isMissed, LaneEvent } from "./calendar-lanes";
 
-/* Irrigation calendar as a clickable time grid (Trello 9W8FXA4l: "grid
- * view", 15-min grid, planned always before completed, link to the valve).
- * Simon's reference is Planyway's day view: hour rows, coloured blocks,
- * tap = open. Data comes from the two merged calendar entities through
- * HA's calendar REST API, so the grid, the HA Calendar panel and the ICS
- * feed keep one truth. */
+/* Irrigation calendar: three views over the same two calendar entities
+ * (Trello 9W8FXA4l).
+ *   Day / Week  — Planyway-style time grid, coloured blocks, tap = valve.
+ *   Timeline    — rows = valves under their irrigation location, x = time;
+ *                 planned slot as an outlined ghost bar, the actual run as a
+ *                 solid bar on top (OpenSprinkler preview / Rain Bird Dryrun
+ *                 layout, plan-vs-actual encoded by shape, colour only for
+ *                 problems).
+ * Visual language follows the valves overview matrix: same header, subtitle
+ * with text-button actions, 150px name column, outlined 1fr track, tabular
+ * metrics, uppercase group headers in the primary colour, 620px phone
+ * breakpoint. Amber = water flowing, exactly as in the matrix. */
 
 interface HomeAssistant {
   callApi?: <T = unknown>(method: string, path: string) => Promise<T>;
@@ -34,21 +40,30 @@ interface CardConfig {
   valves?: Valve[];
   planned_entity?: string;
   completed_entity?: string;
-  /** Pixels per hour in the grid (default 56). */
+  /** Pixels per hour in the day/week grid (default 56). */
   hour_height?: number;
 }
 
 interface GridEvent extends LaneEvent {
   key: string; // registry entity id = valve identity in both calendars
   summary: string;
+  liters: number | null;
   path?: string;
 }
 
-type Mode = "day" | "week";
+interface LocationsPayload {
+  locations: { id: string; name: string; devices: { device_id: string }[] }[];
+}
+
+type Mode = "day" | "week" | "timeline";
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 const PLANNED = "calendar.irrigation_planned";
 const COMPLETED = "calendar.irrigation_completed";
+const MODE_KEY = "xt-irrigation-calendar-mode";
+const RANGE_KEY = "xt-irrigation-calendar-range";
+const NO_LOCATION = "No location";
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -68,18 +83,48 @@ const hhmm = (ms: number) => {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+const fmtMin = (ms: number) => (ms > 0 ? String(Math.round(ms / 60_000)) : "–");
+const fmtL = (l: number | null) => (l == null ? "–" : String(Math.round(l)));
+
+/** "FF East 03 (826) · 10 min · 13.4 L/min · 134 L" → 134; "—" → null */
+function litersFromSummary(summary: string): number | null {
+  const m = /·\s*~?([\d.,]+)\s*L\s*$/.exec(summary);
+  return m ? Number(m[1].replace(",", ".")) : null;
+}
 
 function errText(e: unknown): string {
   const o = e as { body?: { message?: string }; message?: string };
   return o?.body?.message ?? o?.message ?? String(e);
 }
 
+function pref(key: string, fallback: string): string {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function setPref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+}
+
 export class IrrigationCalendarCard extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
   @state() private _config: CardConfig | null = null;
-  @state() private _mode: Mode = "day";
+  @state() private _mode: Mode = (["day", "week", "timeline"].includes(pref(MODE_KEY, "day"))
+    ? pref(MODE_KEY, "day")
+    : "day") as Mode;
+  @state() private _range: 1 | 3 | 7 = ([1, 3, 7].includes(Number(pref(RANGE_KEY, "1")))
+    ? Number(pref(RANGE_KEY, "1"))
+    : 1) as 1 | 3 | 7;
   @state() private _anchor: Date = startOfDay(new Date());
   @state() private _events: GridEvent[] = [];
+  @state() private _locationOf: Map<string, string> | null = null; // device_id → name
+  @state() private _problemsOnly = false;
   @state() private _loading = false;
   @state() private _error: string | null = null;
   private _loadedKey = "";
@@ -96,7 +141,7 @@ export class IrrigationCalendarCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     // ponytail: plain 5-min poll; runs land in the store on valve close,
-    // the calendar view is not a live monitor.
+    // the calendar is not a live monitor.
     this._timer = window.setInterval(() => this._load(true), 5 * 60_000);
   }
 
@@ -106,16 +151,22 @@ export class IrrigationCalendarCard extends LitElement {
   }
 
   updated(): void {
-    const key = `${this._mode}|${this._anchor.getTime()}`;
+    const key = `${this._mode}|${this._range}|${this._anchor.getTime()}`;
     if (key !== this._loadedKey && this.hass?.callApi) {
       this._loadedKey = key;
       this._load();
     }
   }
 
+  // ------------------------------------------------------------- data
+
   private _window(): [Date, Date] {
-    const from = this._mode === "day" ? startOfDay(this._anchor) : startOfWeek(this._anchor);
-    return [from, addDays(from, this._mode === "day" ? 1 : 7)];
+    if (this._mode === "week") {
+      const from = startOfWeek(this._anchor);
+      return [from, addDays(from, 7)];
+    }
+    const from = startOfDay(this._anchor);
+    return [from, addDays(from, this._mode === "timeline" ? this._range : 1)];
   }
 
   private _valveByRegistry(): Map<string, Valve> {
@@ -136,6 +187,7 @@ export class IrrigationCalendarCard extends LitElement {
       const [p, c] = await Promise.all([
         this.hass.callApi<CalendarApiEvent[]>("GET", `calendars/${planned}${q}`),
         this.hass.callApi<CalendarApiEvent[]>("GET", `calendars/${completed}${q}`),
+        this._loadLocations(),
       ]);
       const valves = this._valveByRegistry();
       const toEvent = (e: CalendarApiEvent, kind: GridEvent["kind"]): GridEvent | null => {
@@ -152,6 +204,7 @@ export class IrrigationCalendarCard extends LitElement {
           key,
           name: v?.valve_name ?? e.summary.split(" · ")[0],
           summary: e.summary,
+          liters: kind === "planned" ? null : litersFromSummary(e.summary),
           path: v?.view_path,
         };
       };
@@ -174,8 +227,23 @@ export class IrrigationCalendarCard extends LitElement {
     }
   }
 
+  // Irrigation locations group the timeline rows. Fetched once; a failure
+  // just leaves every valve under "No location".
+  private async _loadLocations(): Promise<void> {
+    if (this._locationOf || !this.hass?.callApi) return;
+    const m = new Map<string, string>();
+    try {
+      const r = await this.hass.callApi<LocationsPayload>("GET", "xtend_tuya/irrigation_locations");
+      for (const loc of r?.locations ?? [])
+        for (const d of loc.devices ?? []) m.set(d.device_id, loc.name);
+    } catch {
+      /* grouping is a nicety */
+    }
+    this._locationOf = m;
+  }
+
   private _scrollToFirst(): void {
-    // Earliest time-of-day with an event in the window (week view: any day).
+    if (this._mode === "timeline") return;
     const [from, to] = this._window();
     let firstHour: number | null = null;
     for (const e of this._events) {
@@ -186,115 +254,276 @@ export class IrrigationCalendarCard extends LitElement {
     }
     const scroller = this.renderRoot.querySelector<HTMLElement>(".scroll");
     if (!scroller || firstHour === null) return;
-    const hourPx = this._hourPx();
-    scroller.scrollTop = Math.max(0, (firstHour - 1) * hourPx);
+    scroller.scrollTop = Math.max(0, (firstHour - 1) * this._hourPx());
   }
 
   private _hourPx(): number {
     return this._config?.hour_height ?? 56;
   }
 
-  private _shift(n: number): void {
-    this._anchor = addDays(this._anchor, this._mode === "day" ? n : 7 * n);
+  // ------------------------------------------------------------- actions
+
+  private _setMode(mode: Mode): void {
+    this._mode = mode;
+    setPref(MODE_KEY, mode);
   }
 
-  private _open(ev: GridEvent): void {
-    if (!ev.path) return;
+  private _setRange(r: 1 | 3 | 7): void {
+    this._range = r;
+    setPref(RANGE_KEY, String(r));
+  }
+
+  private _shift(n: number): void {
+    const step = this._mode === "week" ? 7 : this._mode === "timeline" ? this._range : 1;
+    this._anchor = addDays(this._anchor, step * n);
+  }
+
+  private _open(path?: string): void {
+    if (!path) return;
     const base = window.location.pathname.split("/")[1] || "lovelace";
-    window.history.pushState(null, "", `/${base}/${ev.path}`);
+    window.history.pushState(null, "", `/${base}/${path}`);
     this.dispatchEvent(new Event("location-changed", { bubbles: true, composed: true }));
   }
 
-  private _title(): string {
+  // ------------------------------------------------------------- render
+
+  private _rangeLabel(): string {
     const [from, to] = this._window();
-    const opts: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
-    if (this._mode === "day") return from.toLocaleDateString(undefined, opts);
+    const long: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
+    if (to.getTime() - from.getTime() <= DAY_MS) return from.toLocaleDateString(undefined, long);
     return `${from.toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${addDays(
       to,
       -1
-    ).toLocaleDateString(undefined, opts)}`;
+    ).toLocaleDateString(undefined, long)}`;
+  }
+
+  private _countsText(): string {
+    const c = { planned: 0, completed: 0, running: 0, missed: 0 };
+    for (const e of this._events) c[e.kind]++;
+    const parts = [`${c.planned + c.missed} planned`, `${c.completed} ran`];
+    if (c.running) parts.push(`${c.running} running`);
+    if (c.missed) parts.push(`${c.missed} missed`);
+    return parts.join(" · ");
   }
 
   render() {
     if (!this._config) return nothing;
+    const mode = this._mode;
+    const tab = (m: Mode, label: string) =>
+      html`<button class="txt tab ${mode === m ? "on" : ""}" @click=${() => this._setMode(m)}>${label}</button>`;
+    return html`
+      <ha-card>
+        <h1 class="card-header">${this._config.title ?? "Irrigation calendar"}</h1>
+        <div class="card-subtitle">
+          <span class="counts">${this._loading ? "loading…" : this._countsText()}</span>
+          <span class="actions">
+            ${tab("day", "Day")} ${tab("week", "Week")} ${tab("timeline", "Timeline")}
+            ${mode === "timeline"
+              ? html`<select class="range" @change=${(e: Event) => this._setRange(Number((e.target as HTMLSelectElement).value) as 1 | 3 | 7)}>
+                  ${[1, 3, 7].map((r) => html`<option value=${r} ?selected=${r === this._range}>${r} d</option>`)}
+                </select>`
+              : nothing}
+          </span>
+        </div>
+        <div class="card-subtitle nav">
+          <span class="datenav">
+            <button class="txt" @click=${() => this._shift(-1)} aria-label="Previous">‹</button>
+            <span class="range-label">${this._rangeLabel()}</span>
+            <button class="txt" @click=${() => this._shift(1)} aria-label="Next">›</button>
+            <button class="txt" @click=${() => (this._anchor = startOfDay(new Date()))}>Today</button>
+          </span>
+          <span class="actions">
+            ${mode === "timeline"
+              ? html`<button class="txt ${this._problemsOnly ? "on" : ""}" @click=${() => (this._problemsOnly = !this._problemsOnly)}>
+                  ${this._problemsOnly ? "Showing problems" : "Problems only"}
+                </button>`
+              : nothing}
+            <span class="legend">
+              <i class="sw planned"></i>planned <i class="sw completed"></i>ran
+              <i class="sw missed"></i>missed
+            </span>
+          </span>
+        </div>
+        ${this._error ? html`<div class="err">${this._error}</div>` : nothing}
+        ${mode === "timeline" ? this._renderTimeline() : this._renderGrid()}
+      </ha-card>
+    `;
+  }
+
+  // Day / Week: vertical time grid, lanes for overlaps.
+  private _renderGrid() {
     const [from] = this._window();
     const days = this._mode === "day" ? 1 : 7;
     const hourPx = this._hourPx();
     const today = startOfDay(new Date()).getTime();
-    const counts = { planned: 0, completed: 0, running: 0, missed: 0 };
-    for (const e of this._events) counts[e.kind]++;
+    return html`
+      <div class="scroll">
+        <div class="grid" style="--hour:${hourPx}px;--days:${days}">
+          <div class="hours">
+            ${days > 1 ? html`<div class="colhead"></div>` : nothing}
+            ${Array.from({ length: 24 }, (_, h) => html`<div class="hour">${pad(h)}:00</div>`)}
+          </div>
+          ${Array.from({ length: days }, (_, i) => {
+            const dayStart = addDays(from, i).getTime();
+            const dayEnd = dayStart + DAY_MS;
+            const inDay = this._events
+              .filter((e) => e.start < dayEnd && e.end > dayStart)
+              .map((e) => ({ ...e, start: Math.max(e.start, dayStart), end: Math.min(e.end, dayEnd) }));
+            const placed = packLanes(inDay);
+            // ponytail: 05:00 on the fleet is 20+ valves at once; widen the
+            // column instead of shrinking blocks to slivers (grid scrolls).
+            const maxLanes = placed.reduce((m, p) => Math.max(m, p.lanes), 1);
+            const laneW = days > 1 ? 40 : 72;
+            return html`
+              <div
+                class="col ${dayStart === today ? "today" : ""}"
+                style="min-width:${Math.max(110, maxLanes * laneW)}px"
+              >
+                ${days > 1
+                  ? html`<div class="colhead"><span>${new Date(dayStart).toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}</span></div>`
+                  : nothing}
+                <div class="lines">
+                  ${Array.from({ length: 96 }, (_, q) => html`<div class="q ${q % 4 === 0 ? "h" : ""}"></div>`)}
+                </div>
+                ${placed.map(({ ev, lane, lanes }) => {
+                  const top = ((ev.start - dayStart) / HOUR_MS) * hourPx;
+                  const h = Math.max(((ev.end - ev.start) / HOUR_MS) * hourPx, hourPx / 4);
+                  const w = 100 / lanes;
+                  return html`<div
+                    class="ev ${ev.kind} ${ev.path ? "link" : ""}"
+                    style="top:${top}px;height:${h}px;left:${lane * w}%;width:calc(${w}% - 2px)"
+                    title=${ev.summary}
+                    @click=${() => this._open(ev.path)}
+                  >
+                    <b>${ev.name}</b>
+                    <span>${hhmm(ev.start)}–${hhmm(ev.end)}</span>
+                  </div>`;
+                })}
+              </div>
+            `;
+          })}
+        </div>
+      </div>
+    `;
+  }
+
+  // Timeline: one row per valve, grouped by irrigation location.
+  private _renderTimeline() {
+    const [from, to] = this._window();
+    const t0 = from.getTime();
+    const span = to.getTime() - t0;
+    const pct = (ms: number) => ((ms - t0) / span) * 100;
+    const now = Date.now();
+
+    const byKey = new Map<string, GridEvent[]>();
+    for (const e of this._events) (byKey.get(e.key) ?? byKey.set(e.key, []).get(e.key)!).push(e);
+
+    const valves = this._config?.valves ?? [];
+    const locOf = (v: Valve) => this._locationOf?.get(v.device_id) ?? NO_LOCATION;
+    const groups = new Map<string, Valve[]>();
+    for (const v of [...valves].sort((a, b) => a.valve_name.localeCompare(b.valve_name)))
+      (groups.get(locOf(v)) ?? groups.set(locOf(v), []).get(locOf(v))!).push(v);
+    const groupNames = [...groups.keys()].sort((a, b) =>
+      a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b)
+    );
+
+    // axis ticks: every 3 h for one day, 12 h for three, a day for seven
+    const stepH = this._range === 1 ? 3 : this._range === 3 ? 12 : 24;
+    const ticks: { left: number; label: string }[] = [];
+    for (let ms = t0; ms < to.getTime(); ms += stepH * HOUR_MS) {
+      const d = new Date(ms);
+      ticks.push({
+        left: pct(ms),
+        label:
+          stepH >= 24
+            ? d.toLocaleDateString(undefined, { weekday: "short" })
+            : d.getHours() === 0 && this._range > 1
+              ? d.toLocaleDateString(undefined, { weekday: "short" })
+              : `${pad(d.getHours())}`,
+      });
+    }
+    const dayLines = Array.from({ length: this._range - 1 }, (_, i) => pct(t0 + (i + 1) * DAY_MS));
+    const nowPct = now > t0 && now < to.getTime() ? pct(now) : null;
+
+    let shown = 0;
+    const rows = groupNames.map((g) => {
+      const items = groups
+        .get(g)!
+        .map((v) => {
+          const evs = byKey.get(v.registry_entity) ?? [];
+          const plans = evs.filter((e) => e.kind === "planned" || e.kind === "missed");
+          const runs = evs.filter((e) => e.kind === "completed" || e.kind === "running");
+          const planned = plans.filter((e) => e.kind === "planned").map((e) => e.key);
+          // a run with no plan starting within 15 min of it is unplanned
+          const unplanned = runs.filter(
+            (r) => !plans.some((p) => Math.abs(p.start - r.start) <= 15 * 60_000)
+          );
+          const problem =
+            plans.some((e) => e.kind === "missed") || unplanned.length > 0 ||
+            runs.some((r) => r.end - r.start > 4 * HOUR_MS);
+          void planned;
+          return { v, plans, runs, unplanned, problem };
+        })
+        .filter((r) => !this._problemsOnly || r.problem);
+      if (!items.length) return nothing;
+      shown += items.length;
+      return html`
+        <div class="grouphdr">${g}</div>
+        ${items.map(({ v, plans, runs, unplanned, problem }) => {
+          const planMs = plans.reduce((s, e) => s + (e.end - e.start), 0);
+          const runMs = runs.reduce((s, e) => s + (e.end - e.start), 0);
+          const liters = runs.reduce<number | null>(
+            (s, e) => (e.liters == null ? s : (s ?? 0) + e.liters),
+            null
+          );
+          return html`
+            <div class="row clickable ${problem ? "problem" : ""}" @click=${() => this._open(v.view_path)}>
+              <div class="name" title=${v.valve_name}>${v.valve_name}</div>
+              <div class="track">
+                ${dayLines.map((l) => html`<i class="dayline" style="left:${l}%"></i>`)}
+                ${plans.map(
+                  (e) => html`<i
+                    class="ghost ${e.kind === "missed" ? "missed" : ""}"
+                    style="left:${pct(e.start)}%;width:${Math.max(pct(e.end) - pct(e.start), 0.4)}%"
+                    title=${e.summary}
+                  ></i>`
+                )}
+                ${runs.map(
+                  (e) => html`<i
+                    class="run ${e.kind === "running" ? "running" : ""} ${unplanned.includes(e) ? "unplanned" : ""}"
+                    style="left:${pct(e.start)}%;width:${Math.max(pct(e.end) - pct(e.start), 0.4)}%"
+                    title=${e.summary}
+                  ></i>`
+                )}
+                ${nowPct !== null ? html`<i class="now" style="left:${nowPct}%"></i>` : nothing}
+              </div>
+              <div class="metric ${planMs ? "" : "muted"}">${fmtMin(planMs)}</div>
+              <div class="metric ${runMs ? "" : "muted"}">${fmtMin(runMs)}</div>
+              <div class="metric ${liters == null ? "muted" : ""}">${fmtL(liters)}</div>
+            </div>
+          `;
+        })}
+      `;
+    });
 
     return html`
-      <ha-card>
-        <div class="card-header">
-          <ha-icon icon="mdi:calendar-clock"></ha-icon>
-          <span class="title">${this._config.title ?? "Irrigation calendar"}</span>
-          <div class="seg">
-            <button class=${this._mode === "day" ? "on" : ""} @click=${() => (this._mode = "day")}>Day</button>
-            <button class=${this._mode === "week" ? "on" : ""} @click=${() => (this._mode = "week")}>Week</button>
+      <div class="tl">
+        <div class="row header">
+          <div></div>
+          <div class="axis">
+            ${ticks.map((t) => html`<span style="left:${t.left}%">${t.label}</span>`)}
           </div>
+          <div class="metric" title="Planned minutes in this range"><span class="lbl-long">plan min</span><span class="lbl-short">plan</span></div>
+          <div class="metric" title="Minutes actually watered in this range"><span class="lbl-long">ran min</span><span class="lbl-short">ran</span></div>
+          <div class="metric"><span class="lbl-long">water (L)</span><span class="lbl-short">L</span></div>
         </div>
-        <div class="nav">
-          <button @click=${() => this._shift(-1)} aria-label="Previous">‹</button>
-          <button @click=${() => (this._anchor = startOfDay(new Date()))}>Today</button>
-          <button @click=${() => this._shift(1)} aria-label="Next">›</button>
-          <span class="range">${this._title()}</span>
-          ${this._loading ? html`<span class="dim">loading…</span>` : nothing}
-        </div>
-        <div class="legend">
-          <span><i class="sw planned"></i>planned ${counts.planned}</span>
-          <span><i class="sw completed"></i>completed ${counts.completed}</span>
-          ${counts.running ? html`<span><i class="sw running"></i>running ${counts.running}</span>` : nothing}
-          ${counts.missed ? html`<span><i class="sw missed"></i>missed ${counts.missed}</span>` : nothing}
-        </div>
-        ${this._error ? html`<div class="err">${this._error}</div>` : nothing}
-        <div class="scroll">
-          <div class="grid" style="--hour:${hourPx}px;--days:${days}">
-            <div class="hours">
-              ${Array.from({ length: 24 }, (_, h) => html`<div class="hour">${pad(h)}:00</div>`)}
-            </div>
-            ${Array.from({ length: days }, (_, i) => {
-              const dayStart = addDays(from, i).getTime();
-              const dayEnd = dayStart + DAY_MS;
-              const inDay = this._events
-                .filter((e) => e.start < dayEnd && e.end > dayStart)
-                .map((e) => ({ ...e, start: Math.max(e.start, dayStart), end: Math.min(e.end, dayEnd) }));
-              const placed = packLanes(inDay);
-              // ponytail: 05:00 on the fleet is 20+ valves at once; widen the
-              // column instead of shrinking blocks to slivers (grid scrolls).
-              const maxLanes = placed.reduce((m, p) => Math.max(m, p.lanes), 1);
-              const laneW = days > 1 ? 40 : 72;
-              return html`
-                <div
-                  class="col ${dayStart === today ? "today" : ""}"
-                  style="min-width:${Math.max(110, maxLanes * laneW)}px"
-                >
-                  ${days > 1
-                    ? html`<div class="colhead"><span>${new Date(dayStart).toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}</span></div>`
-                    : nothing}
-                  <div class="lines">
-                    ${Array.from({ length: 96 }, (_, q) => html`<div class="q ${q % 4 === 0 ? "h" : ""}"></div>`)}
-                  </div>
-                  ${placed.map(({ ev, lane, lanes }) => {
-                    const top = ((ev.start - dayStart) / 3_600_000) * hourPx;
-                    const h = Math.max(((ev.end - ev.start) / 3_600_000) * hourPx, hourPx / 4);
-                    const w = 100 / lanes;
-                    return html`<div
-                      class="ev ${ev.kind} ${ev.path ? "link" : ""}"
-                      style="top:${top}px;height:${h}px;left:${lane * w}%;width:calc(${w}% - 2px)"
-                      title=${ev.summary}
-                      @click=${() => this._open(ev)}
-                    >
-                      <b>${ev.name}</b>
-                      <span>${hhmm(ev.start)}–${hhmm(ev.end)}</span>
-                    </div>`;
-                  })}
-                </div>
-              `;
-            })}
-          </div>
-        </div>
-      </ha-card>
+        ${rows}
+        ${!valves.length
+          ? html`<div class="empty">No valves on this dashboard yet. Use "Re-sync valves" on the overview.</div>`
+          : this._problemsOnly && shown === 0
+            ? html`<div class="empty">No missed or unplanned runs in this range.</div>`
+            : nothing}
+      </div>
     `;
   }
 
@@ -303,79 +532,128 @@ export class IrrigationCalendarCard extends LitElement {
       --cc-text: var(--primary-text-color, #212121);
       --cc-dim: var(--secondary-text-color, #727272);
       --cc-line: var(--divider-color, #e0e0e0);
-      --cc-planned: var(--info-color, #2196f3);
-      --cc-completed: var(--success-color, #4caf50);
-      --cc-running: var(--warning-color, #ff9800);
+      --cc-primary: var(--primary-color, #03a9f4);
+      --cc-planned: rgba(3, 169, 244, 0.3);
+      --cc-water: var(--state-switch-active-color, #f9a825);
       --cc-missed: var(--error-color, #db4437);
+      --cc-bg: var(--card-background-color, #fff);
+      --cc-hover: var(--secondary-background-color, #f5f5f5);
+    }
+    ha-card {
+      padding-bottom: 8px;
+      color: var(--cc-text);
     }
     .card-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-size: 1.4rem;
+      font-weight: 400;
       padding: 16px 16px 4px;
-      font-size: 1.1em;
-      font-weight: 500;
-      color: var(--cc-text);
+      margin: 0;
     }
-    .card-header ha-icon {
+    .card-subtitle {
+      padding: 0 16px 10px;
+      margin: 0;
       color: var(--cc-dim);
-    }
-    .title {
-      flex: 1;
-      min-width: 0;
-    }
-    button {
-      font: inherit;
-      color: var(--cc-text);
-      background: var(--card-background-color, #fff);
-      border: 1px solid var(--cc-line);
-      border-radius: 6px;
-      padding: 4px 10px;
-      cursor: pointer;
-    }
-    .seg button.on,
-    button:active {
-      background: var(--cc-planned);
-      color: #fff;
-      border-color: var(--cc-planned);
-    }
-    .nav,
-    .legend {
+      font-size: 0.95rem;
+      font-variant-numeric: tabular-nums;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 4px 16px;
+      justify-content: space-between;
+      gap: 12px;
       flex-wrap: wrap;
-      color: var(--cc-text);
     }
-    .legend {
-      font-size: 0.8em;
-      color: var(--cc-dim);
-      padding-bottom: 8px;
+    .card-subtitle.nav {
+      padding-bottom: 6px;
     }
-    .legend span {
-      display: inline-flex;
+    .actions,
+    .datenav {
+      display: flex;
       align-items: center;
       gap: 4px;
+      flex-wrap: wrap;
+    }
+    .range-label {
+      color: var(--cc-text);
+      font-weight: 500;
+      padding: 0 4px;
+    }
+    button.txt {
+      border: none;
+      background: none;
+      color: var(--cc-primary);
+      font: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+    button.txt:hover {
+      background: var(--cc-hover);
+    }
+    button.txt:focus-visible {
+      outline: 2px solid var(--cc-primary);
+      outline-offset: 1px;
+    }
+    button.tab.on {
+      color: var(--cc-text);
+      box-shadow: inset 0 -2px 0 var(--cc-primary);
+      border-radius: 6px 6px 0 0;
+    }
+    button.txt.on:not(.tab) {
+      background: var(--cc-hover);
+      color: var(--cc-text);
+    }
+    select.range {
+      border: 1px solid var(--cc-line);
+      background: var(--cc-bg);
+      color: var(--cc-text);
+      font: inherit;
+      font-size: 0.85rem;
+      padding: 2px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 6px;
+    }
+    .legend {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px 6px;
+      font-size: 0.8rem;
+      margin-left: 8px;
     }
     .sw {
       display: inline-block;
-      width: 10px;
+      width: 12px;
       height: 10px;
       border-radius: 2px;
-      border: 1px solid transparent;
+      box-sizing: border-box;
+      margin-left: 6px;
     }
-    .range {
-      font-weight: 500;
+    .sw:first-child {
+      margin-left: 0;
     }
-    .dim {
-      color: var(--cc-dim);
+    .sw.planned {
+      background: var(--cc-planned);
+      box-shadow: inset 0 0 0 1px var(--cc-primary);
+    }
+    .sw.completed {
+      background: var(--cc-water);
+    }
+    .sw.missed {
+      border: 1px dashed var(--cc-missed);
     }
     .err {
       color: var(--cc-missed);
       padding: 0 16px 8px;
-      font-size: 0.85em;
+      font-size: 0.85rem;
     }
+    .empty {
+      padding: 12px 16px 8px;
+      color: var(--cc-dim);
+      font-size: 0.9rem;
+    }
+
+    /* ---- day / week grid ---- */
     .scroll {
       max-height: 72vh;
       overflow: auto;
@@ -383,7 +661,7 @@ export class IrrigationCalendarCard extends LitElement {
     }
     .grid {
       display: grid;
-      /* auto min so a column's inline min-width (lanes × width) grows its track */
+      /* auto tracks so a column's inline min-width (lanes × width) grows it */
       grid-template-columns: 48px repeat(var(--days), auto);
       min-width: max-content;
       position: relative;
@@ -391,40 +669,43 @@ export class IrrigationCalendarCard extends LitElement {
     .hours {
       position: sticky;
       left: 0;
-      background: var(--card-background-color, #fff);
+      background: var(--cc-bg);
       z-index: 2;
     }
     .hour {
       height: var(--hour);
-      font-size: 0.72em;
+      font-size: 0.72rem;
       color: var(--cc-dim);
       text-align: right;
       padding-right: 6px;
       box-sizing: border-box;
       transform: translateY(-0.6em);
+      font-variant-numeric: tabular-nums;
     }
     .colhead {
       position: sticky;
       top: 0;
       z-index: 3;
-      background: var(--card-background-color, #fff);
-      font-size: 0.8em;
-      padding: 2px 0;
+      background: var(--cc-bg);
+      height: 22px;
+      line-height: 22px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
       border-bottom: 1px solid var(--cc-line);
       color: var(--cc-dim);
     }
-    /* stays readable when a wide (many-lane) column scrolls sideways */
     .colhead span {
       position: sticky;
       left: 54px;
-      padding: 0 6px;
+      padding: 0 8px;
     }
     .col {
       position: relative;
       border-left: 1px solid var(--cc-line);
     }
     .col.today .colhead {
-      color: var(--cc-planned);
+      color: var(--cc-primary);
       font-weight: 600;
     }
     .lines {
@@ -442,14 +723,19 @@ export class IrrigationCalendarCard extends LitElement {
       position: absolute;
       box-sizing: border-box;
       overflow: hidden;
-      border-radius: 4px;
+      border-radius: 3px;
       padding: 1px 4px;
-      font-size: 0.72em;
+      font-size: 0.72rem;
       line-height: 1.2;
       color: var(--cc-text);
-      border: 1px solid;
-      background: var(--card-background-color, #fff);
+      background: var(--cc-bg);
       z-index: 1;
+    }
+    .col .ev {
+      margin-top: 22px;
+    }
+    .grid[style*="--days:1"] .col .ev {
+      margin-top: 0;
     }
     .ev.link {
       cursor: pointer;
@@ -461,25 +747,192 @@ export class IrrigationCalendarCard extends LitElement {
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .ev b {
+      font-weight: 500;
+    }
     .ev span {
       color: var(--cc-dim);
     }
-    .planned {
-      border-color: var(--cc-planned);
-      background: color-mix(in srgb, var(--cc-planned) 12%, var(--card-background-color, #fff));
+    .ev.planned {
+      background: var(--cc-planned);
+      box-shadow: inset 0 0 0 1px var(--cc-primary);
     }
-    .completed {
-      border-color: var(--cc-completed);
-      background: color-mix(in srgb, var(--cc-completed) 35%, var(--card-background-color, #fff));
+    .ev.completed,
+    .ev.running {
+      background: var(--cc-water);
     }
-    .running {
-      border-color: var(--cc-running);
-      background: color-mix(in srgb, var(--cc-running) 35%, var(--card-background-color, #fff));
+    .ev.running {
+      box-shadow: inset 0 0 0 2px var(--cc-primary);
     }
-    .missed {
-      border-color: var(--cc-missed);
-      border-style: dashed;
-      background: color-mix(in srgb, var(--cc-missed) 12%, var(--card-background-color, #fff));
+    .ev.missed {
+      border: 1px dashed var(--cc-missed);
+    }
+
+    /* ---- timeline ---- */
+    .tl {
+      display: flex;
+      flex-direction: column;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 150px 1fr 74px 70px 68px;
+      align-items: center;
+      gap: 12px;
+      height: 32px;
+      padding: 0 16px;
+    }
+    .row.header {
+      height: 22px;
+      color: var(--cc-dim);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .row.clickable {
+      cursor: pointer;
+    }
+    .row.clickable:hover {
+      background: var(--cc-hover);
+    }
+    .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.9rem;
+    }
+    .row.problem .name {
+      color: var(--cc-missed);
+    }
+    .axis {
+      position: relative;
+      height: 100%;
+      font-variant-numeric: tabular-nums;
+    }
+    .axis span {
+      position: absolute;
+      top: 3px;
+      transform: translateX(-50%);
+    }
+    .axis span:first-child {
+      transform: none;
+    }
+    .track {
+      position: relative;
+      height: 22px;
+      border-radius: 3px;
+      box-shadow: inset 0 0 0 1px var(--cc-line);
+      overflow: hidden;
+      /* hour gridlines: one faint tick per hour of the range */
+      background-image: repeating-linear-gradient(
+        to right,
+        var(--cc-line) 0 1px,
+        transparent 1px calc(100% / (24 * var(--days, 1)))
+      );
+      background-size: calc(100% + 1px) 6px;
+      background-repeat: repeat-x;
+      background-position: 0 bottom;
+    }
+    .track i {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      display: block;
+      /* a 10-min run is 0.7% of a day: keep it a visible mark, like the matrix */
+      min-width: 3px;
+    }
+    .dayline {
+      width: 1px;
+      background: var(--cc-line);
+    }
+    .ghost {
+      background: var(--cc-planned);
+      box-shadow: inset 0 0 0 1px var(--cc-primary);
+      border-radius: 2px;
+      box-sizing: border-box;
+    }
+    .ghost.missed {
+      background: none;
+      box-shadow: none;
+      border: 1px dashed var(--cc-missed);
+    }
+    .run {
+      top: 4px;
+      bottom: 4px;
+      background: var(--cc-water);
+      border-radius: 2px;
+    }
+    .run.running {
+      box-shadow: inset 0 0 0 2px var(--cc-primary);
+    }
+    .now {
+      width: 1px;
+      min-width: 1px;
+      background: var(--cc-text);
+      opacity: 0.5;
+    }
+    .metric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.9rem;
+      white-space: nowrap;
+    }
+    .metric.muted {
+      color: var(--cc-dim);
+    }
+    .grouphdr {
+      padding: 10px 16px 3px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--cc-primary);
+      border-top: 1px solid var(--cc-line);
+    }
+    .row.header + .grouphdr {
+      border-top: none;
+    }
+    .lbl-short {
+      display: none;
+    }
+    @media (max-width: 620px) {
+      .row {
+        grid-template-columns: 92px 1fr 40px 40px 40px;
+        gap: 6px;
+        padding: 0 10px;
+      }
+      .name {
+        font-size: 0.8rem;
+      }
+      .metric {
+        font-size: 0.78rem;
+      }
+      .lbl-long {
+        display: none;
+      }
+      .lbl-short {
+        display: inline;
+      }
+      .grouphdr {
+        padding: 10px 10px 3px;
+      }
+      .card-subtitle {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+      .card-header {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .run.running {
+        animation: xt-pulse 2s ease-in-out infinite;
+      }
+      @keyframes xt-pulse {
+        50% {
+          opacity: 0.6;
+        }
+      }
     }
   `;
 }
@@ -492,7 +945,7 @@ if (!customElements.get("irrigation-calendar-card")) {
     w.customCards.push({
       type: "irrigation-calendar-card",
       name: "Irrigation Calendar",
-      description: "Planned and completed irrigation runs on a clickable 15-minute time grid.",
+      description: "Planned and completed irrigation runs as a day grid, week grid or per-valve timeline.",
     });
   }
 }
