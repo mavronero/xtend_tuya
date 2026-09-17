@@ -13,6 +13,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-16 | 4.4.258 | 4.4.255 | ok; browsers with a stale SW index still show the error card until refreshed |
 | 2026-09-16 | 4.4.259 | – | released, NOT deployed (bootstrap live-index discovery) |
 | 2026-09-16 | 4.4.260 | 4.4.258 | ok; log "simon…: left 216 tuya_sharing device(s), 108 tuya_iot device(s) to the entries that own them" |
+| 2026-09-17 | 4.4.261 | 4.4.260 | ok (deployed via the Chrome extension; diagnostics check too heavy for that link, other signals green) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
