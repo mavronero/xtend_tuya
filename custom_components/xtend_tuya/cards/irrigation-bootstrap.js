@@ -27,6 +27,7 @@ const PREFIX = "/xtend_tuya_static/cards/";
 // renders "Configuration error" (irrigation-locations-card, 4.4.257).
 const BUNDLES = {
   "irrigation-locations-card": "irrigation-locations-card.js",
+  "irrigation-calendar-card": "irrigation-calendar-card.js",
   "irrigation-quota-card": "irrigation-quota-card.js",
   "irrigation-room-groups": "irrigation-room-groups.js",
   "irrigation-control-card": "irrigation-control-card.js",

@@ -188,6 +188,7 @@ class IrrigationValvesStrategy extends HTMLElement {
     const views: DashboardView[] = [
       buildOverviewView(overviewTitle, valves, hours),
       locationsView(),
+      calendarView(valves),
       ...valves.map((v) => buildValveView(v, hours)),
     ];
 
@@ -413,6 +414,36 @@ function locationsView(): DashboardView {
         cards: [
           {
             type: "custom:irrigation-locations-card",
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** Irrigation calendar: planned + completed runs on a clickable time grid
+ * (Trello 9W8FXA4l). Valve list maps calendar events to their detail views. */
+function calendarView(valves: ValveEntities[]): DashboardView {
+  return {
+    title: "Calendar",
+    path: "calendar",
+    icon: "mdi:calendar-clock",
+    type: "sections",
+    max_columns: 2,
+    sections: [
+      {
+        type: "grid",
+        column_span: 2,
+        cards: [
+          {
+            type: "custom:irrigation-calendar-card",
+            valves: valves.map((v) => ({
+              device_id: v.device_id,
+              registry_entity: v.registry_entity,
+              valve_name: v.valve_name,
+              view_path: v.view_path,
+            })),
             layout_options: { grid_columns: 12, grid_rows: "auto" },
           },
         ],

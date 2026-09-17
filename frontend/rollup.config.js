@@ -22,6 +22,7 @@ export default [
   card("irrigation-quota-card"),
   card("irrigation-room-groups"),
   card("irrigation-locations-card"),
+  card("irrigation-calendar-card"),
   // Strategy bundle has zero deps (no Lit imports) and is tiny; ship it
   // as a classic IIFE so it can load via a blocking `<script>` tag and
   // register its custom element synchronously during page parse — the
