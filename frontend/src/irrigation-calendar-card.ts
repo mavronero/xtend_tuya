@@ -1,15 +1,15 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
-import { packLanes, isMissed, LaneEvent } from "./calendar-lanes";
+import { packLanes, pairPlanRuns, Pairable } from "./calendar-lanes";
 
 /* Irrigation calendar: three views over the same two calendar entities
  * (Trello 9W8FXA4l).
  *   Day / Week  — Planyway-style time grid, coloured blocks, tap = valve.
- *   Timeline    — rows = valves under their home · room (as the matrix), x = time;
- *                 planned slot as an outlined ghost bar, the actual run as a
- *                 solid bar on top (OpenSprinkler preview / Rain Bird Dryrun
- *                 layout, plan-vs-actual encoded by shape, colour only for
- *                 problems).
+ *   Timeline    — rows = valves under their home · room (as the matrix), x = time
+ *                 (OpenSprinkler preview / Rain Bird Dryrun layout).
+ * Every planned slot is paired with the run that answered it, so each block
+ * IS an outcome: planned (ahead), ran, missed, unplanned run, running.
+ * Colour only says "water flowed" (amber) or "problem" (red).
  * Visual language follows the valves overview matrix: same header, subtitle
  * with text-button actions, 150px name column, outlined 1fr track, tabular
  * metrics, uppercase group headers in the primary colour, 620px phone
@@ -46,7 +46,7 @@ interface CardConfig {
   hour_height?: number;
 }
 
-interface GridEvent extends LaneEvent {
+interface GridEvent extends Pairable {
   key: string; // registry entity id = valve identity in both calendars
   summary: string;
   liters: number | null;
@@ -204,16 +204,12 @@ export class IrrigationCalendarCard extends LitElement {
         };
       };
       const runs = (c ?? [])
-        .map((e) =>
-          toEvent(e, /Type: In progress/.test(e.description ?? "") ? "running" : "completed")
-        )
+        .map((e) => toEvent(e, /Type: In progress/.test(e.description ?? "") ? "running" : "ran"))
         .filter((e): e is GridEvent => !!e);
-      const now = Date.now();
       const plans = (p ?? [])
         .map((e) => toEvent(e, "planned"))
-        .filter((e): e is GridEvent => !!e)
-        .map((e) => (isMissed(e, runs, now) ? { ...e, kind: "missed" as const } : e));
-      this._events = [...plans, ...runs];
+        .filter((e): e is GridEvent => !!e);
+      this._events = pairPlanRuns(plans, runs, Date.now());
     } catch (e) {
       this._error = errText(e);
     } finally {
@@ -278,11 +274,11 @@ export class IrrigationCalendarCard extends LitElement {
   }
 
   private _countsText(): string {
-    const c = { planned: 0, completed: 0, running: 0, missed: 0 };
+    const c = { planned: 0, ran: 0, missed: 0, unplanned: 0, running: 0 };
     for (const e of this._events) c[e.kind]++;
-    const parts = [`${c.planned + c.missed} planned`, `${c.completed} ran`];
+    const parts = [`${c.ran} ran`, `${c.missed} missed`, `${c.planned} ahead`];
+    if (c.unplanned) parts.push(`${c.unplanned} unplanned`);
     if (c.running) parts.push(`${c.running} running`);
-    if (c.missed) parts.push(`${c.missed} missed`);
     return parts.join(" · ");
   }
 
@@ -319,8 +315,8 @@ export class IrrigationCalendarCard extends LitElement {
                 </button>`
               : nothing}
             <span class="legend">
-              <i class="sw planned"></i>planned <i class="sw completed"></i>ran
-              <i class="sw missed"></i>missed
+              <i class="sw planned"></i>planned <i class="sw ran"></i>ran
+              <i class="sw missed"></i>missed <i class="sw unplanned"></i>unplanned
             </span>
           </span>
         </div>
@@ -438,28 +434,26 @@ export class IrrigationCalendarCard extends LitElement {
         .get(g)!
         .map((v) => {
           const evs = byKey.get(v.registry_entity) ?? [];
-          const plans = evs.filter((e) => e.kind === "planned" || e.kind === "missed");
-          const runs = evs.filter((e) => e.kind === "completed" || e.kind === "running");
-          const planned = plans.filter((e) => e.kind === "planned").map((e) => e.key);
-          // a run with no plan starting within 15 min of it is unplanned
-          const unplanned = runs.filter(
-            (r) => !plans.some((p) => Math.abs(p.start - r.start) <= 15 * 60_000)
+          const problem = evs.some(
+            (e) =>
+              e.kind === "missed" || e.kind === "unplanned" || e.end - e.start > 4 * HOUR_MS
           );
-          const problem =
-            plans.some((e) => e.kind === "missed") || unplanned.length > 0 ||
-            runs.some((r) => r.end - r.start > 4 * HOUR_MS);
-          void planned;
-          return { v, plans, runs, unplanned, problem };
+          return { v, evs, problem };
         })
         .filter((r) => !this._problemsOnly || r.problem);
       if (!items.length) return nothing;
       shown += items.length;
       return html`
         <div class="grouphdr">${g}</div>
-        ${items.map(({ v, plans, runs, unplanned, problem }) => {
-          const planMs = plans.reduce((s, e) => s + (e.end - e.start), 0);
-          const runMs = runs.reduce((s, e) => s + (e.end - e.start), 0);
-          const liters = runs.reduce<number | null>(
+        ${items.map(({ v, evs, problem }) => {
+          const planMs = evs.reduce((s, e) => {
+            if (e.kind === "planned" || e.kind === "missed") return s + (e.end - e.start);
+            if (e.planStart != null && e.planEnd != null) return s + (e.planEnd - e.planStart);
+            return s;
+          }, 0);
+          const ranEvs = evs.filter((e) => e.kind === "ran" || e.kind === "unplanned" || e.kind === "running");
+          const runMs = ranEvs.reduce((s, e) => s + (e.end - e.start), 0);
+          const liters = ranEvs.reduce<number | null>(
             (s, e) => (e.liters == null ? s : (s ?? 0) + e.liters),
             null
           );
@@ -468,16 +462,9 @@ export class IrrigationCalendarCard extends LitElement {
               <div class="name" title=${v.valve_name}>${v.valve_name}</div>
               <div class="track">
                 ${dayLines.map((l) => html`<i class="dayline" style="left:${l}%"></i>`)}
-                ${plans.map(
+                ${evs.map(
                   (e) => html`<i
-                    class="ghost ${e.kind === "missed" ? "missed" : ""}"
-                    style="left:${pct(e.start)}%;width:${Math.max(pct(e.end) - pct(e.start), 0.4)}%"
-                    title=${e.summary}
-                  ></i>`
-                )}
-                ${runs.map(
-                  (e) => html`<i
-                    class="run ${e.kind === "running" ? "running" : ""} ${unplanned.includes(e) ? "unplanned" : ""}"
+                    class="bar ${e.kind}"
                     style="left:${pct(e.start)}%;width:${Math.max(pct(e.end) - pct(e.start), 0.4)}%"
                     title=${e.summary}
                   ></i>`
@@ -522,6 +509,12 @@ export class IrrigationCalendarCard extends LitElement {
       --cc-primary: var(--primary-color, #03a9f4);
       --cc-planned: rgba(3, 169, 244, 0.3);
       --cc-water: var(--state-switch-active-color, #f9a825);
+      /* unplanned run: still water, but hatched so it reads as "nobody scheduled this" */
+      --cc-water-stripes: repeating-linear-gradient(
+        135deg,
+        var(--cc-water) 0 3px,
+        color-mix(in srgb, var(--cc-water) 35%, var(--cc-bg)) 3px 6px
+      );
       --cc-missed: var(--error-color, #db4437);
       --cc-bg: var(--card-background-color, #fff);
       --cc-hover: var(--secondary-background-color, #f5f5f5);
@@ -623,11 +616,14 @@ export class IrrigationCalendarCard extends LitElement {
       background: var(--cc-planned);
       box-shadow: inset 0 0 0 1px var(--cc-primary);
     }
-    .sw.completed {
+    .sw.ran {
       background: var(--cc-water);
     }
     .sw.missed {
       border: 1px dashed var(--cc-missed);
+    }
+    .sw.unplanned {
+      background: var(--cc-water-stripes);
     }
     .err {
       color: var(--cc-missed);
@@ -744,9 +740,12 @@ export class IrrigationCalendarCard extends LitElement {
       background: var(--cc-planned);
       box-shadow: inset 0 0 0 1px var(--cc-primary);
     }
-    .ev.completed,
+    .ev.ran,
     .ev.running {
       background: var(--cc-water);
+    }
+    .ev.unplanned {
+      background: var(--cc-water-stripes);
     }
     .ev.running {
       box-shadow: inset 0 0 0 2px var(--cc-primary);
@@ -831,24 +830,25 @@ export class IrrigationCalendarCard extends LitElement {
       width: 1px;
       background: var(--cc-line);
     }
-    .ghost {
-      background: var(--cc-planned);
-      box-shadow: inset 0 0 0 1px var(--cc-primary);
+    .bar {
       border-radius: 2px;
       box-sizing: border-box;
     }
-    .ghost.missed {
-      background: none;
-      box-shadow: none;
+    .bar.planned {
+      background: var(--cc-planned);
+      box-shadow: inset 0 0 0 1px var(--cc-primary);
+    }
+    .bar.missed {
       border: 1px dashed var(--cc-missed);
     }
-    .run {
-      top: 4px;
-      bottom: 4px;
+    .bar.ran,
+    .bar.running {
       background: var(--cc-water);
-      border-radius: 2px;
     }
-    .run.running {
+    .bar.unplanned {
+      background: var(--cc-water-stripes);
+    }
+    .bar.running {
       box-shadow: inset 0 0 0 2px var(--cc-primary);
     }
     .now {
@@ -912,7 +912,7 @@ export class IrrigationCalendarCard extends LitElement {
       }
     }
     @media (prefers-reduced-motion: no-preference) {
-      .run.running {
+      .bar.running {
         animation: xt-pulse 2s ease-in-out infinite;
       }
       @keyframes xt-pulse {
@@ -932,7 +932,7 @@ if (!customElements.get("irrigation-calendar-card")) {
     w.customCards.push({
       type: "irrigation-calendar-card",
       name: "Irrigation Calendar",
-      description: "Planned and completed irrigation runs as a day grid, week grid or per-valve timeline.",
+      description: "Planned, ran, missed and unplanned irrigation runs as a day grid, week grid or per-valve timeline.",
     });
   }
 }

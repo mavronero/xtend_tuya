@@ -430,11 +430,11 @@ function calendarView(valves: ValveEntities[]): DashboardView {
     path: "calendar",
     icon: "mdi:calendar-clock",
     type: "sections",
-    max_columns: 2,
+    max_columns: 3, // same width as the overview
     sections: [
       {
         type: "grid",
-        column_span: 2,
+        column_span: 3,
         cards: [
           {
             type: "custom:irrigation-calendar-card",

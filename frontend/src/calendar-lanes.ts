@@ -6,10 +6,15 @@
  * first lane whose previous occupant ended at or before its start.
  */
 
+/** One block on the grid. After pairing, a planned slot that ran is ONE
+ * event ("ran": drawn at the actual run times, plan kept in planStart/End),
+ * so the eye never has to match a ghost to a bar. */
+export type Kind = "planned" | "ran" | "missed" | "unplanned" | "running";
+
 export interface LaneEvent {
   start: number; // ms
   end: number; // ms
-  kind: "planned" | "completed" | "running" | "missed";
+  kind: Kind;
   name: string;
 }
 
@@ -19,11 +24,12 @@ export interface Placed<T extends LaneEvent> {
   lanes: number; // total lanes in this event's overlap cluster
 }
 
-const KIND_ORDER: Record<LaneEvent["kind"], number> = {
+const KIND_ORDER: Record<Kind, number> = {
   planned: 0,
   missed: 0,
+  ran: 1,
+  unplanned: 1,
   running: 1,
-  completed: 1,
 };
 
 export function packLanes<T extends LaneEvent>(events: T[]): Placed<T>[] {
@@ -61,16 +67,55 @@ export function packLanes<T extends LaneEvent>(events: T[]): Placed<T>[] {
   return out;
 }
 
-/** A planned slot counts as missed when it ended in the past and no run of
- * the same valve started within `tolMs` of its start. */
-export function isMissed(
-  planned: { start: number; end: number; key: string },
-  runs: { start: number; key: string }[],
+export interface Pairable extends LaneEvent {
+  key: string; // valve identity
+  liters?: number | null;
+  summary?: string;
+  planStart?: number;
+  planEnd?: number;
+}
+
+/** Pair planned slots with actual runs of the same valve (closest start
+ * within `tolMs`, each run used once). Returns one event per outcome:
+ *   planned   — slot still ahead (or within tolerance of now)
+ *   ran       — slot ran: drawn at the run's times, plan kept alongside
+ *   missed    — slot ended in the past and nothing ran
+ *   unplanned — run with no slot near it
+ *   running   — an open run (kept as is) */
+export function pairPlanRuns<T extends Pairable>(
+  plans: T[],
+  runs: T[],
   nowMs: number,
   tolMs = 15 * 60 * 1000
-): boolean {
-  if (planned.end > nowMs) return false;
-  return !runs.some(
-    (r) => r.key === planned.key && Math.abs(r.start - planned.start) <= tolMs
-  );
+): T[] {
+  const used = new Set<T>();
+  const out: T[] = [];
+  for (const plan of [...plans].sort((a, b) => a.start - b.start)) {
+    let best: T | null = null;
+    for (const run of runs) {
+      if (used.has(run) || run.key !== plan.key) continue;
+      const d = Math.abs(run.start - plan.start);
+      if (d <= tolMs && (!best || d < Math.abs(best.start - plan.start))) best = run;
+    }
+    if (best) {
+      used.add(best);
+      out.push({
+        ...best,
+        kind: best.kind === "running" ? "running" : "ran",
+        planStart: plan.start,
+        planEnd: plan.end,
+        summary: `${best.summary ?? ""}
+planned ${plan.summary ?? ""}`,
+      });
+    } else if (plan.end + tolMs < nowMs) {
+      out.push({ ...plan, kind: "missed" });
+    } else {
+      out.push(plan);
+    }
+  }
+  for (const run of runs) {
+    if (used.has(run)) continue;
+    out.push(run.kind === "running" ? run : { ...run, kind: "unplanned" });
+  }
+  return out;
 }
