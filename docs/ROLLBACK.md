@@ -16,6 +16,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-17 | 4.4.261 | 4.4.260 | ok (deployed via the Chrome extension; diagnostics check too heavy for that link, other signals green) |
 | 2026-09-17 | 4.4.263 | 4.4.261 | ok (SMOKE OK via chrome-devtools; 4.4.262 was released but never deployed) |
 | 2026-09-17 | 4.4.264 | 4.4.263 | ok (SMOKE OK; first smoke run died on a dropped diagnostics fetch over nabu.casa, re-run with retries passed) |
+| 2026-09-17 | 4.4.265 | 4.4.264 | ok (device maps full; the smoke's entity check fired before valves were back, live recheck 81/112 available) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
