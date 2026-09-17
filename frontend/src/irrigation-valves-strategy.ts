@@ -443,6 +443,9 @@ function calendarView(valves: ValveEntities[]): DashboardView {
               registry_entity: v.registry_entity,
               valve_name: v.valve_name,
               view_path: v.view_path,
+              // same home · room grouping as the overview matrix
+              home: v.valve_home ?? null,
+              room: v.valve_room ?? null,
             })),
             layout_options: { grid_columns: 12, grid_rows: "auto" },
           },

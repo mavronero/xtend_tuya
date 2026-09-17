@@ -5,7 +5,7 @@ import { packLanes, isMissed, LaneEvent } from "./calendar-lanes";
 /* Irrigation calendar: three views over the same two calendar entities
  * (Trello 9W8FXA4l).
  *   Day / Week  — Planyway-style time grid, coloured blocks, tap = valve.
- *   Timeline    — rows = valves under their irrigation location, x = time;
+ *   Timeline    — rows = valves under their home · room (as the matrix), x = time;
  *                 planned slot as an outlined ghost bar, the actual run as a
  *                 solid bar on top (OpenSprinkler preview / Rain Bird Dryrun
  *                 layout, plan-vs-actual encoded by shape, colour only for
@@ -32,6 +32,8 @@ interface Valve {
   registry_entity: string;
   valve_name: string;
   view_path: string;
+  home?: string | null;
+  room?: string | null;
 }
 
 interface CardConfig {
@@ -51,10 +53,6 @@ interface GridEvent extends LaneEvent {
   path?: string;
 }
 
-interface LocationsPayload {
-  locations: { id: string; name: string; devices: { device_id: string }[] }[];
-}
-
 type Mode = "day" | "week" | "timeline";
 
 const DAY_MS = 86_400_000;
@@ -63,7 +61,6 @@ const PLANNED = "calendar.irrigation_planned";
 const COMPLETED = "calendar.irrigation_completed";
 const MODE_KEY = "xt-irrigation-calendar-mode";
 const RANGE_KEY = "xt-irrigation-calendar-range";
-const NO_LOCATION = "No location";
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -123,7 +120,6 @@ export class IrrigationCalendarCard extends LitElement {
     : 1) as 1 | 3 | 7;
   @state() private _anchor: Date = startOfDay(new Date());
   @state() private _events: GridEvent[] = [];
-  @state() private _locationOf: Map<string, string> | null = null; // device_id → name
   @state() private _problemsOnly = false;
   @state() private _loading = false;
   @state() private _error: string | null = null;
@@ -187,7 +183,6 @@ export class IrrigationCalendarCard extends LitElement {
       const [p, c] = await Promise.all([
         this.hass.callApi<CalendarApiEvent[]>("GET", `calendars/${planned}${q}`),
         this.hass.callApi<CalendarApiEvent[]>("GET", `calendars/${completed}${q}`),
-        this._loadLocations(),
       ]);
       const valves = this._valveByRegistry();
       const toEvent = (e: CalendarApiEvent, kind: GridEvent["kind"]): GridEvent | null => {
@@ -225,21 +220,6 @@ export class IrrigationCalendarCard extends LitElement {
       this._loading = false;
       if (!silent) this.updateComplete.then(() => this._scrollToFirst());
     }
-  }
-
-  // Irrigation locations group the timeline rows. Fetched once; a failure
-  // just leaves every valve under "No location".
-  private async _loadLocations(): Promise<void> {
-    if (this._locationOf || !this.hass?.callApi) return;
-    const m = new Map<string, string>();
-    try {
-      const r = await this.hass.callApi<LocationsPayload>("GET", "xtend_tuya/irrigation_locations");
-      for (const loc of r?.locations ?? [])
-        for (const d of loc.devices ?? []) m.set(d.device_id, loc.name);
-    } catch {
-      /* grouping is a nicety */
-    }
-    this._locationOf = m;
   }
 
   private _scrollToFirst(): void {
@@ -366,9 +346,15 @@ export class IrrigationCalendarCard extends LitElement {
           ${Array.from({ length: days }, (_, i) => {
             const dayStart = addDays(from, i).getTime();
             const dayEnd = dayStart + DAY_MS;
+            // Blocks are drawn at least 15 min tall, so pack lanes on that
+            // visual length too or a 1-min slot's block overlaps its successor.
             const inDay = this._events
               .filter((e) => e.start < dayEnd && e.end > dayStart)
-              .map((e) => ({ ...e, start: Math.max(e.start, dayStart), end: Math.min(e.end, dayEnd) }));
+              .map((e) => ({
+                ...e,
+                start: Math.max(e.start, dayStart),
+                end: Math.min(Math.max(e.end, e.start + 15 * 60_000), dayEnd),
+              }));
             const placed = packLanes(inDay);
             // ponytail: 05:00 on the fleet is 20+ valves at once; widen the
             // column instead of shrinking blocks to slivers (grid scrolls).
@@ -418,14 +404,15 @@ export class IrrigationCalendarCard extends LitElement {
     const byKey = new Map<string, GridEvent[]>();
     for (const e of this._events) (byKey.get(e.key) ?? byKey.set(e.key, []).get(e.key)!).push(e);
 
+    // Same home · room grouping and order as the overview matrix.
     const valves = this._config?.valves ?? [];
-    const locOf = (v: Valve) => this._locationOf?.get(v.device_id) ?? NO_LOCATION;
+    const groupOf = (v: Valve) => `${v.home || "Unassigned"} · ${v.room || "—"}`;
     const groups = new Map<string, Valve[]>();
-    for (const v of [...valves].sort((a, b) => a.valve_name.localeCompare(b.valve_name)))
-      (groups.get(locOf(v)) ?? groups.set(locOf(v), []).get(locOf(v))!).push(v);
-    const groupNames = [...groups.keys()].sort((a, b) =>
-      a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b)
-    );
+    for (const v of [...valves].sort(
+      (a, b) => groupOf(a).localeCompare(groupOf(b)) || a.valve_name.localeCompare(b.valve_name)
+    ))
+      (groups.get(groupOf(v)) ?? groups.set(groupOf(v), []).get(groupOf(v))!).push(v);
+    const groupNames = [...groups.keys()];
 
     // axis ticks: every 3 h for one day, 12 h for three, a day for seven
     const stepH = this._range === 1 ? 3 : this._range === 3 ? 12 : 24;

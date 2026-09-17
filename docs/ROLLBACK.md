@@ -33,7 +33,11 @@ Whoever deploys writes the previous version here before updating.
 - After restart: `HA_TOKEN=… python3 scripts/prod_smoke.py --expect <version> [--water]`
   (or paste `scripts/prod_smoke.js` into the prod tab's console). Must print `SMOKE OK`.
 - Card bundle changes additionally need "Re-sync valves" on the dashboard, done from a tab that
-  loaded AFTER the restart. HA's service worker serves the app-shell index network-first with a
+  loaded AFTER the restart.
+  The reload that Re-sync triggers can itself pull a stale app-shell index (seen 2026-09-17 on
+  4.4.263: every card "Configuration error", zero irrigation scripts in the page). Cure in that tab:
+  `(await navigator.serviceWorker.getRegistrations()).forEach(r => r.unregister())`, then a hard
+  reload. Tell Simon to force-refresh once if his cards show the error after an update. HA's service worker serves the app-shell index network-first with a
   timeout; over nabu.casa it often falls back to the cached index, which still references the old
   bundle stamps. Symptom: "Configuration error" card. Cure for a browser: unregister the SW
   (DevTools → Application) or wait for a refresh; 4.4.259's bootstrap self-discovers new bundles
