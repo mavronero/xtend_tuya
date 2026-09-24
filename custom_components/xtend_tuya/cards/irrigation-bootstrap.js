@@ -33,6 +33,7 @@ const BUNDLES = {
   "irrigation-control-card": "irrigation-control-card.js",
   "irrigation-timer-card": "irrigation-timer-card.js",
   "irrigation-valve-matrix": "irrigation-valves-strategy.js",
+  "irrigation-valve-detail-card": "irrigation-valves-strategy.js",
   "irrigation-refresh-button": "irrigation-valves-strategy.js",
   "ll-strategy-irrigation-valves": "irrigation-valves-strategy.js",
   "ll-strategy-dashboard-irrigation-valves": "irrigation-valves-strategy.js",

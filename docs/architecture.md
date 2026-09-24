@@ -443,6 +443,20 @@ data = {
   no rooms (fake cloud, no OpenAPI uid), so the seed is covered by the unit
   test and checked on prod after the release.
 
+### 5.2 Dashboard delivery: one valve view (2026-09-24)
+
+The strategy no longer generates one view per valve. There is a single
+hidden subview `valve` (panel) with `custom:irrigation-valve-detail-card`,
+which shows the valve named in the URL (`valve?id=<tuya id>`) with the same
+three columns as before (`buildValveView`). The header keeps only the main
+sections (Overview, Locations, Calendar, ...); a valve is opened by tapping
+it, and the back arrow returns. Every link goes through `view_path`.
+
+On dev (112 valves) the saved config shrinks from 400 KB to 113 KB. A valve
+opens in about 0.3 s after a reload and switches in about 0.1 s. The saved
+prod dashboard keeps its per-valve views until it is re-synced: all old
+card types stay defined, so nothing breaks before that.
+
 ### Contract L2 → L3 (current state, frozen)
 
 - Registry sensor `*_irrigation_timer_registry`, with attributes `device_id`,

@@ -6,10 +6,10 @@
  *
  *   - View 0: an "Overview" with one tile per valve (status, battery,
  *     last watering) that navigates to the valve's detail view on tap.
- *   - View 1..N: per-valve detail view replicating the existing
- *     valve-dashboard.yaml structure (irrigation-control-card,
- *     Other settings, irrigation-timer-card, history graphs, last
- *     watering panel, battery tile + history).
+ *   - One hidden "valve" subview: the irrigation-valve-detail card shows
+ *     the valve named in the URL (`valve?id=<tuya id>`): control, timers,
+ *     history, last watering, battery. One view instead of one per valve
+ *     keeps the saved config small and the header to the main sections.
  *
  * Usage in a Lovelace YAML dashboard:
  *
@@ -85,6 +85,7 @@ interface StrategyConfig {
 interface DashboardView {
   title: string;
   path?: string;
+  subview?: boolean;
   icon?: string;
   type?: string;
   max_columns?: number;
@@ -189,7 +190,7 @@ class IrrigationValvesStrategy extends HTMLElement {
       buildOverviewView(overviewTitle, valves, hours),
       locationsView(),
       calendarView(valves),
-      ...valves.map((v) => buildValveView(v, hours)),
+      valveDetailView(hours),
     ];
 
     return {
@@ -280,7 +281,7 @@ function collectValveEntities(
     device?.name ??
     valve_name;
 
-  const view_path = makeViewPath(tuyaDeviceId, valve_name);
+  const view_path = makeViewPath(tuyaDeviceId);
 
   const v: ValveEntities = {
     device_id: tuyaDeviceId,
@@ -385,14 +386,11 @@ function collectValveEntities(
   return v;
 }
 
-function makeViewPath(deviceId: string, valveName: string): string {
-  // Prefer a slug derived from the valve name (e.g. "S 809 (Green Carpet)"
-  // → "s-809-green-carpet"), fall back to the device_id.
-  const slug = valveName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || deviceId;
+const VALVE_VIEW_PATH = "valve";
+
+function makeViewPath(deviceId: string): string {
+  // The Tuya id, not the name: a SmartLife rename keeps links working.
+  return `${VALVE_VIEW_PATH}?id=${encodeURIComponent(deviceId)}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -632,6 +630,17 @@ function buildOverviewView(
           ]
         : []),
     ],
+  };
+}
+
+/** The one detail view; hidden from the header, reached by tapping a valve. */
+function valveDetailView(hours: number): DashboardView {
+  return {
+    title: "Valve",
+    path: VALVE_VIEW_PATH,
+    subview: true,
+    type: "panel",
+    cards: [{ type: "custom:irrigation-valve-detail-card", hours }],
   };
 }
 
@@ -1659,4 +1668,90 @@ if (!customElements.get(legacyElementName)) {
     legacyElementName,
     class extends IrrigationValvesStrategy {}
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * Valve detail card                                                   *
+ * ------------------------------------------------------------------ */
+
+// Renders the valve named by `?id=<tuya id>` with the same columns the
+// per-valve views had (buildValveView). Vanilla and in this bundle for the
+// same reason as the matrix: HACS reliably updates an existing bundle.
+interface CardHelpers {
+  createCardElement(config: unknown): HTMLElement & { hass?: unknown };
+}
+
+class IrrigationValveDetailCard extends HTMLElement {
+  private _hass: HomeAssistantLike | null = null;
+  private _hours = 24;
+  private _shownId: string | null = null;
+  private _children: (HTMLElement & { hass?: unknown })[] = [];
+  private _onLocation = (): void => void this._render();
+
+  setConfig(config: { hours?: number }): void {
+    this._hours = config.hours ?? 24;
+  }
+
+  set hass(value: HomeAssistantLike) {
+    const first = !this._hass;
+    this._hass = value;
+    for (const c of this._children) c.hass = value;
+    if (first) void this._render();
+  }
+
+  connectedCallback(): void {
+    window.addEventListener("location-changed", this._onLocation);
+    window.addEventListener("popstate", this._onLocation);
+    void this._render();
+  }
+
+  disconnectedCallback(): void {
+    window.removeEventListener("location-changed", this._onLocation);
+    window.removeEventListener("popstate", this._onLocation);
+  }
+
+  private async _render(): Promise<void> {
+    const hass = this._hass;
+    if (!hass || !window.location.pathname.endsWith(`/${VALVE_VIEW_PATH}`)) return;
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (id === this._shownId) return;
+    this._shownId = id;
+
+    const valve = id ? discoverValves(hass, await fetchLocations(hass)).find((v) => v.device_id === id) : undefined;
+    if (id !== this._shownId) return; // navigated on while loading
+    this._children = [];
+    if (!valve) {
+      this.innerHTML = `<ha-card><div style="padding:16px">Valve ${escapeHtml(id ?? "")} not found.</div></ha-card>`;
+      return;
+    }
+    const helpers = await (window as unknown as { loadCardHelpers(): Promise<CardHelpers> }).loadCardHelpers();
+    const view = buildValveView(valve, this._hours);
+    const root = document.createElement("div");
+    root.innerHTML =
+      `<h1 style="margin:0 0 12px;font-size:1.5rem;font-weight:400">${escapeHtml(valve.valve_name)}</h1>` +
+      `<div class="cols" style="display:grid;gap:16px;align-items:start;` +
+      `grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))"></div>`;
+    const cols = root.querySelector(".cols") as HTMLElement;
+    for (const section of (view.sections ?? []) as { cards: unknown[] }[]) {
+      const col = document.createElement("div");
+      col.style.cssText = "display:flex;flex-direction:column;gap:16px;min-width:0";
+      for (const cfg of section.cards) {
+        const el = helpers.createCardElement(cfg);
+        el.hass = hass;
+        this._children.push(el);
+        col.appendChild(el);
+      }
+      cols.appendChild(col);
+    }
+    this.style.cssText = "display:block;padding:16px;max-width:1400px;margin:0 auto";
+    this.replaceChildren(root);
+  }
+
+  getCardSize(): number {
+    return 12;
+  }
+}
+
+if (!customElements.get("irrigation-valve-detail-card")) {
+  customElements.define("irrigation-valve-detail-card", IrrigationValveDetailCard);
 }
