@@ -32,10 +32,12 @@ async def _discover(hass) -> tuple[list, dict]:
 
 
 @pytest.mark.usefixtures("fake_plugins")
-async def test_every_online_valve_satisfies_the_farm_contract(hass):
-    all_valves, found = await _discover(hass)
-    assert len(all_valves) >= 100, f"fixture shrank: {len(all_valves)} valves"
-    valves = [d for d in all_valves if d.online]
+async def test_every_valve_satisfies_the_farm_contract(hass):
+    valves, found = await _discover(hass)
+    assert len(valves) >= 100, f"fixture shrank: {len(valves)} valves"
+    # Offline valves included: their registry sensor is `unavailable` with its
+    # attributes stripped, and they used to vanish from the farm (32/111 on prod).
+    assert any(not d.online for d in valves), "fixture has no offline valves"
 
     missing = [d.name for d in valves if d.id not in found]
     assert not missing, f"valves without a registry sensor: {missing}"
@@ -49,17 +51,3 @@ async def test_every_online_valve_satisfies_the_farm_contract(hass):
     assert not broken, f"contract roles missing: {broken}"
     assert all(found[d.id]["valve_name"] for d in valves)
 
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="known bug: an offline valve's registry sensor is unavailable, HA strips "
-    "its device_id attribute and discover_valves skips the valve (prod 2026-09-24: "
-    "32 of 111). Its past runs vanish from the calendar. Fix in its own release, "
-    "then drop this marker.",
-)
-@pytest.mark.usefixtures("fake_plugins")
-async def test_offline_valves_are_discovered(hass):
-    all_valves, found = await _discover(hass)
-    offline = [d for d in all_valves if not d.online]
-    assert offline, "fixture has no offline valves"
-    assert not [d.name for d in offline if d.id not in found]
