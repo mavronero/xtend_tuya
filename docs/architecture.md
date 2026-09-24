@@ -413,17 +413,24 @@ behind a deprecation period, because the saved prod dashboard reads them.
 | Integration | real HA + fake cloud (existing harness) | `tests/ha/` |
 | Golden snapshot | endpoints, calendar month, ICS, entity list + attrs, service list: diff vs baseline | dev HA, then prod |
 
-Rule: tests import the real code. About 16 of the 25 standalone tests in
-`tests/*.py` re-implement the logic they check ("mirror") instead of importing
-it, so they stay green even when the code drifts. Each is converted in the step
-that touches its code, and not before, to avoid doing the work twice:
+Rule: tests import the real code. 24 of the 25 standalone tests in
+`tests/*.py` used to re-implement the logic they checked ("mirror") or grep
+the source text, so they stayed green even when the code drifted. All of
+them are now real tests in `tests/unit/` (a few behaviours in `tests/ha/`),
+each checked against deliberately broken code (41 mutations in step 8b, all
+caught):
 
-| Step | Mirror tests → real imports into `tests/unit/` |
+| Step | Converted |
 |---|---|
-| 3 (farm) | none: `test_runs_store`, `test_location_model`, `test_water_math` already import |
-| 4 (L1) | `test_quota_accounting`: the C6 part (note_cloud_write) is done in `tests/unit/`; the C10 part (alias fallback in send_commands) moves to step 8 |
-| 5–7 (L2) | done: `entity_parser/fdm5kw/test_t3_decode.py` → `tests/unit/test_codecs.py` (step 5), `test_resync_guard` → `tests/unit/test_timer_state.py` (step 7). Left for step 8: `test_last_report_ts` |
-| 8 | the rest (multi_manager internals that the refactor does not touch): `test_device_ownership`, `test_multimap_mirror_guard`, `test_master_map_registry`, `test_device_map_swap`, `test_device_object_identity`, `test_detached_device_build`, `test_device_deepcopy`, `test_dp_collapse_trace`, `test_runtime_data_lookup`, `test_background_load`, `test_entry_hygiene`, `test_quota_accounting` (C10), `test_mq_supervisor`, `test_openapi_timeouts`, `test_sharing_api_retry`, `test_sharing_mq_overrides`, `test_smart_home_device_list_fallback`, `test_stall_sampler` |
+| 4 | `test_quota_accounting` C6 part |
+| 5 | `entity_parser/fdm5kw/test_t3_decode.py` → `test_codecs.py` |
+| 7 | `test_resync_guard` → `test_timer_state.py` |
+| 8a | `test_entry_hygiene` C16 part → `test_location_service.py` |
+| 8b | device map / ownership: `test_device_ownership`, `test_multimap_mirror_guard`, `test_master_map_registry`, `test_device_map_swap`, `test_device_object_identity`, `test_detached_device_build`, `test_device_deepcopy`, `test_dp_collapse_trace`; setup / runtime: `test_runtime_data_lookup`, `test_background_load`, `test_entry_hygiene` (+ `tests/ha/test_entry_lifecycle.py`), `test_stall_sampler`, `test_last_report_ts`; transport: `test_quota_accounting` C10, `test_mq_supervisor`, `test_openapi_timeouts`, `test_sharing_api_retry` + `test_sharing_mq_overrides` → `test_sharing.py`, `test_smart_home_device_list_fallback` |
+
+Five standalone scripts remain. They already run the real code
+(`test_runs_store`, `test_water_math`, `test_location_model`,
+`test_bootstrap_bundles`, `test_no_stdlib_shadowing`).
 
 The boundary test (`tests/unit/test_layer_boundaries.py`) is a ratchet. Its
 `KNOWN_VIOLATIONS` lists every current violation (12 at step 1). It fails on a
@@ -445,6 +452,7 @@ ever shrinks.
 | 6 | L2b: `profiles.py` (QT-08W, T3 and read-only Smart Water Timer + BLE, by product_id with a DP-signature fallback), `driver.py` (`target()` + `CommandResult`), timer/control services profile-driven with no product branches; plugin extension point `XTCustomEntityParser.get_services()` so L1 no longer knows the valve services; the device layer owns its liters plausibility (`codecs/liters.py`) | services may return a `CommandResult` (`success` kept, `dp` / `cloud` / `reason` added); read-only profiles get "unsupported" (previously a Smart Water Timer was sent QT-08W frames) | 79 tests incl. driver tests on a fake port; dev: 1,331 values, snapshot and service effects identical; ratchet 6 → 3. The soak test was skipped (decision b): it only changes L3 wording later |
 | 7 | L2c: `timer_state.py`: `TimerState` per valve is the only writer of the slots (DP reports, resync clear, restore); live states registered per HA instance in `hass.data` (replaces the class global `INSTANCES`); location updates via a dispatcher signal (replaces the global `REFRESH_LISTENERS`); timer_service no longer reaches into `entity._dpcode_wrapper` | none | 72,399-state parity old vs new accumulation (QT-08W + T3, deletes, duplicates, repeats, short frames); resync mirror test replaced by real tests; dev: 1,331 values incl. the slots of 112 registry sensors identical across restart, a timer survives set → restart → delete, services identical |
 | 8a | Ratchet to zero: `location_service` runs on `TuyaPort` (new `openapi_uid`), its map and schedule set live in `hass.data`; the registry sensor no longer schedules (the composition root does, per hub); boundary test knows the composition root and type-only imports | none | 0 violations (mutation-checked); location_service unit tests replace the C16 source-text checks; dev: values/snapshot/services identical. The home/room walk cannot run on dev (fake cloud has no OpenAPI uid): check `valve_home` on prod after the release |
+| 8b | All 19 remaining mirror tests → real tests (3 parallel agents in isolated worktrees, tests only, 41 mutations all caught); 5 production comments that pointed at deleted mirrors now point at the real tests | none | 200 tests green |
 | 8c | `mypy --strict` on transport/, valves codecs/profiles/driver/timer_state, farm contract/location_model/water_math (`mypy.ini`, enforced by `tests/unit/test_typing.py`) | none | 18 files clean |
 | — | Farm features on L3 + contract | — | — |
 

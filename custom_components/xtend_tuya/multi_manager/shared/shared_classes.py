@@ -702,7 +702,7 @@ _COLLAPSE_MIN_SIZE = 4
 def is_dp_collapse(old: Any, new: Any) -> bool:
     """Did a DP dict lose at least half its entries in one write?
 
-    Mirrored in tests/test_dp_collapse_trace.py — keep in sync.
+    Tested in tests/unit/test_dp_collapse_trace.py.
     """
     if not isinstance(old, dict) or not isinstance(new, dict):
         return False
@@ -785,7 +785,7 @@ class XTDeviceMap(UserDict[str, XTDevice]):
                 # a second hub sharing the same device ids mirrored its 2-DP
                 # copies onto the first hub's full objects at boot: fleet-wide
                 # collapse, manual watering + timers dead (2026-09-16).
-                # Mirrored in tests/test_multimap_mirror_guard.py.
+                # Tested in tests/unit/test_multimap_mirror_guard.py.
                 if key in XTDevice.DP_ATTRS and is_dp_collapse(getattr(device, key), value):
                     return None
                 setattr(device, key, value)

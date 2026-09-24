@@ -59,7 +59,7 @@ class XTIOTHomeManager(TuyaHomeManager):
 
     @staticmethod
     def fetch_is_usable(previous_count: int, fetched_count: int) -> bool:
-        """Mirrored in tests/test_device_map_swap.py — keep in sync."""
+        """Tested in tests/unit/test_device_map_swap.py."""
         if fetched_count == 0:
             return False
         return fetched_count >= previous_count * MIN_KEPT_FRACTION

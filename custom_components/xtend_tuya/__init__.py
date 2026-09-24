@@ -175,7 +175,7 @@ _LOAD_DONE: set[str] = set()
 def _load_failure_action(err: BaseException) -> str:
     """Decide what to do when the background load fails.
 
-    Mirrored in tests/test_background_load.py — keep in sync.
+    Tested against this code in tests/unit/test_background_load.py.
     """
     if isinstance(err, asyncio.CancelledError):
         return "propagate"
@@ -462,7 +462,7 @@ async def cleanup_device_registry(
 
 
 def _entry_still_loading(state: ConfigEntryState, domain: str, entry_id: str) -> bool:
-    """Mirrored in tests/test_background_load.py — keep in sync."""
+    """Tested against this code in tests/unit/test_background_load.py."""
     if state == ConfigEntryState.SETUP_IN_PROGRESS:
         return True
     return domain == DOMAIN and state == ConfigEntryState.LOADED and entry_id not in _LOAD_DONE

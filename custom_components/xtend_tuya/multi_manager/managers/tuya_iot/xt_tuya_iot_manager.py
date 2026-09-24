@@ -459,8 +459,8 @@ class XTIOTDeviceManager(TuyaDeviceManager):
         XTDevice(**item) assigns whatever the API sent. The industry-solution
         device list (/v1.0/iot-03/devices) keeps `status` as a list of
         {code, value} dicts, and every reader indexes it by code — the next
-        access raises `TypeError: list indices must be integers`. Mirrored in
-        tests/test_status_list_normalization.py.
+        access raises `TypeError: list indices must be integers`. Tested in
+        tests/unit/test_detached_device_build.py.
         """
         if not isinstance(status, list):
             return status or {}
