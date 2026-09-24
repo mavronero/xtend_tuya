@@ -17,12 +17,15 @@ import type { MeteringPoint, Site } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { childSites, NO_SITE, summarizeSite, type SiteSummary } from "./farm/site-summary.ts";
 import { sitePath, subtree } from "./farm/valve-filter.ts";
-import { summarizeMp, type MpSummary } from "./farm/mp-summary.ts";
+import { summarizeMp } from "./farm/mp-summary.ts";
+import type { ValveSummary } from "./farm/valve-summary.ts";
 import { liters } from "./components/format.ts";
 import { navigate } from "./components/navigate.ts";
 import "./components/site-card.ts";
 import "./components/site-tree.ts";
 import "./components/mp-card.ts";
+import "./components/mp-editor.ts";
+import type { MpSaveDetail, ValveOption } from "./components/mp-editor.ts";
 import "./components/week-bars.ts";
 import { farmTokens } from "./components/theme.ts";
 
@@ -41,6 +44,8 @@ export class IrrigationSitesCard extends LitElement {
   @property({ attribute: false }) hass?: Hass;
   @state() private _selected: string | null = siteFromUrl();
   @state() private _edit = false;
+  /** Metering point open in the editor panel. */
+  @state() private _editing: string | null = null;
   @state() private _busy = false;
   @state() private _error: string | null = null;
   private _farm = new FarmController(this);
@@ -198,24 +203,71 @@ export class IrrigationSitesCard extends LitElement {
     </form>`;
   }
 
-  private _mpCard(mp: MeteringPoint, sum: MpSummary) {
-    const card = html`<xt-mp-card .summary=${sum}></xt-mp-card>`;
-    if (!this._edit) return card;
-    const sites = this._farm.data.sites
-      .map((s) => ({ id: s.id, path: sitePath(this._farm.data.sites, s.id) }))
+  private async _saveMp(mp: MeteringPoint, d: MpSaveDetail): Promise<void> {
+    const ok = await this._post({
+      action: "update_location",
+      id: mp.id,
+      name: d.name,
+      description: d.description,
+      expected_lpm: d.expected_lpm,
+    });
+    if (ok && d.site_id !== mp.site_id) {
+      await this._post({ action: "set_location_site", location_id: mp.id, site_id: d.site_id });
+    }
+  }
+
+  private async _createMp(form: HTMLFormElement, site: string | null): Promise<void> {
+    const input = form.querySelector("input") as HTMLInputElement;
+    if (!input.value.trim() || !this.hass?.callApi) return;
+    this._busy = true;
+    this._error = null;
+    try {
+      const r = await this.hass.callApi<{ location: { id: string } }>("POST", API, {
+        action: "create_location",
+        name: input.value,
+      });
+      if (site) await this.hass.callApi("POST", API, { action: "set_location_site", location_id: r.location.id, site_id: site });
+      input.value = "";
+      await this._farm.refresh(true);
+      this._editing = r.location.id;
+    } catch (e) {
+      const err = e as { body?: { error?: string }; message?: string };
+      this._error = err.body?.error ?? err.message ?? String(e);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  private _editor(mp: MeteringPoint, valves: ValveSummary[]) {
+    const data = this._farm.data;
+    const sites = data.sites
+      .map((s) => ({ id: s.id, path: sitePath(data.sites, s.id) }))
       .sort((a, b) => a.path.localeCompare(b.path));
-    return html`<div class="mp-edit">
-      ${card}
-      <select
-        aria-label="Move ${mp.name} to site"
-        ?disabled=${this._busy}
-        @change=${(e: Event) =>
-          this._post({ action: "set_location_site", location_id: mp.id, site_id: (e.target as HTMLSelectElement).value || null })}
-      >
-        <option value="" ?selected=${!mp.site_id}>— no site —</option>
-        ${sites.map((s) => html`<option value=${s.id} ?selected=${s.id === mp.site_id}>${s.path}</option>`)}
-      </select>
-    </div>`;
+    const options: ValveOption[] = valves.map((v) => ({
+      device_id: v.device_id,
+      label: v.number ? `#${v.number}` : v.name,
+      status: v.status,
+      battery: v.battery,
+      at: data.locationOf[v.device_id]?.name ?? null,
+    }));
+    return html`<xt-mp-editor
+      .mp=${mp}
+      .sites=${sites}
+      .valves=${options}
+      ?busy=${this._busy}
+      .error=${this._error}
+      @xt-close=${() => (this._editing = null)}
+      @xt-mp-save=${(e: CustomEvent<MpSaveDetail>) => this._saveMp(mp, e.detail)}
+      @xt-mp-assign=${(e: CustomEvent<string>) => this._post({ action: "assign_device", device_id: e.detail, location_id: mp.id })}
+      @xt-mp-unassign=${(e: CustomEvent<string>) => this._post({ action: "end_assignment", device_id: e.detail, location_id: mp.id })}
+    ></xt-mp-editor>`;
+  }
+
+  private _addMp(site: string | null) {
+    return html`<form class="editor" @submit=${(e: Event) => (e.preventDefault(), this._createMp(e.target as HTMLFormElement, site))}>
+      <label>New metering point <input placeholder="Name" /></label>
+      <button type="submit" ?disabled=${this._busy}>Add</button>
+    </form>`;
   }
 
   render() {
@@ -249,13 +301,19 @@ export class IrrigationSitesCard extends LitElement {
       online: placed.filter((v) => v.status !== "offline").length,
     };
 
-    return html`<div class="layout" @xt-site-open=${(e: CustomEvent<string | null>) => this._open(e.detail)} @xt-valve-open=${(e: CustomEvent<string>) => navigate(e.detail)}>
+    const editing = this._editing ? data.locations.find((m) => m.id === this._editing) : undefined;
+    return html`<div
+      class="layout"
+      @xt-site-open=${(e: CustomEvent<string | null>) => this._open(e.detail)}
+      @xt-valve-open=${(e: CustomEvent<string>) => navigate(e.detail)}
+      @xt-mp-edit=${(e: CustomEvent<string>) => ((this._editing = e.detail), (this._error = null))}
+    >
       <aside>
         <xt-site-tree .sites=${data.sites} .selected=${sel} .counts=${counts} ?noSite=${hasNoSite}></xt-site-tree>
       </aside>
       <main>
         ${this._header(sum, total)}
-        ${this._error ? html`<div class="msg err">${this._error}</div>` : nothing}
+        ${this._error && !editing ? html`<div class="msg err">${this._error}</div>` : nothing}
         ${this._farm.error ? html`<div class="msg err">Could not load farm data: ${this._farm.error}</div>` : nothing}
         ${this._edit && site ? this._editSite(site) : nothing}
         ${children.length || (this._edit && sel !== NO_SITE)
@@ -263,14 +321,18 @@ export class IrrigationSitesCard extends LitElement {
               <div class="grid">${children.map((c) => html`<xt-site-card .summary=${c}></xt-site-card>`)}</div>
               ${this._edit && sel !== NO_SITE ? this._addSite(sel) : nothing}`
           : nothing}
-        ${mps.length
+        ${mps.length || (this._edit && sel)
           ? html`<h3>Metering points <span class="count">${mps.length}</span></h3>
-              <div class="grid">${mps.map((m) => this._mpCard(m, mpById.get(m.id)!))}</div>`
+              <div class="grid">
+                ${mps.map((m) => html`<xt-mp-card .summary=${mpById.get(m.id)} ?editable=${this._edit}></xt-mp-card>`)}
+              </div>
+              ${this._edit && sel ? this._addMp(sel === NO_SITE ? null : sel) : nothing}`
           : nothing}
         ${!sel && !data.sites.length
           ? html`<div class="msg">No sites yet. Sites are created from the Tuya rooms once the valves report them, or by hand in Edit.</div>`
           : nothing}
       </main>
+      ${editing ? this._editor(editing, valves) : nothing}
     </div>`;
   }
 
@@ -364,11 +426,6 @@ export class IrrigationSitesCard extends LitElement {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
       gap: 12px;
-    }
-    .mp-edit {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
     }
     .editor {
       display: flex;

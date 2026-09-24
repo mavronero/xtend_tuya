@@ -139,6 +139,7 @@ const mp = (id, name, site_id, assignments, extra = {}) => ({
   valves: assignments.filter((a) => a.end === null).map((a) => a.device_id),
   assignments,
   expected_lpm: null,
+  description: "",
   pump: null,
   ...extra,
 });

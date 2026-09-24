@@ -38,6 +38,7 @@ export interface MeteringPoint {
   valves: string[];
   assignments: Assignment[];
   expected_lpm: number | null;
+  description: string;
   /** Pump feeding it now; `via` names the site it is inherited from. */
   pump: { name: string; via: string | null } | null;
 }
@@ -87,6 +88,7 @@ interface LocationsResponse {
     name: string;
     site_id?: string | null;
     expected_lpm?: number | null;
+    description?: string;
     pump?: { name: string; inherited_from: string | null } | null;
     devices?: { device_id: string; begin: string | null; end: string | null }[];
   }[];
@@ -150,6 +152,7 @@ async function fetchFarmData(hass: CallApi, now: number): Promise<FarmData> {
       valves: devices.filter((d) => d.end === null).map((d) => d.device_id),
       assignments: devices.map((d) => ({ device_id: d.device_id, begin: ms(d.begin), end: ms(d.end) })),
       expected_lpm: loc.expected_lpm ?? null,
+      description: loc.description ?? "",
       pump,
     };
     mps.push(mp);

@@ -30,6 +30,8 @@ function runText(r: RunInfo): string {
 
 export class XtMpCard extends LitElement {
   @property({ attribute: false }) summary?: MpSummary;
+  /** Show a pencil that fires `xt-mp-edit` (detail: metering point id). */
+  @property({ type: Boolean }) editable = false;
 
   private _openValve(e: Event, v: MpValve): void {
     e.stopPropagation();
@@ -63,7 +65,20 @@ export class XtMpCard extends LitElement {
     const unit = s.week.unit;
     const total = unit === "L" ? `${Math.round(s.week.liters)} L` : `${Math.round(s.week.minutes)} min`;
     return html`<ha-card class=${s.status}>
-      <div class="name" title="Metering point">${s.name}</div>
+      <div class="head">
+        <span class="name" title="Metering point">${s.name}</span>
+        ${this.editable
+          ? html`<button
+              class="edit"
+              aria-label="Edit ${s.name}"
+              title="Edit metering point"
+              @click=${() =>
+                this.dispatchEvent(new CustomEvent("xt-mp-edit", { detail: s.id, bubbles: true, composed: true }))}
+            >
+              <ha-icon icon="mdi:pencil-outline"></ha-icon>
+            </button>`
+          : nothing}
+      </div>
       ${s.valves.length ? s.valves.map((v) => this._valve(v)) : html`<div class="row dim">No valve assigned</div>`}
       ${s.pump
         ? html`<div class="row" title="Pump${s.pump.via ? `, inherited from ${s.pump.via}` : ""}">
@@ -116,7 +131,31 @@ export class XtMpCard extends LitElement {
       color: var(--xt-dim);
       flex: none;
     }
+    .head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+    }
+    .edit {
+      all: unset;
+      cursor: pointer;
+      border-radius: 50%;
+      padding: 4px;
+      margin: -4px -6px -4px auto;
+      display: flex;
+    }
+    .edit:hover,
+    .edit:focus-visible {
+      background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+    }
+    .edit ha-icon {
+      --mdc-icon-size: 18px;
+      color: var(--primary-color);
+    }
     .name {
+      flex: 1;
+      min-width: 0;
       font-size: 1.05rem;
       font-weight: 500;
       overflow: hidden;

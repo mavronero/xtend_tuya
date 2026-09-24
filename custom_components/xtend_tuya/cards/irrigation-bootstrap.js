@@ -36,6 +36,7 @@ const BUNDLES = {
   "irrigation-sites-card": "irrigation-farm-cards.js",
   "xt-site-card": "irrigation-farm-cards.js",
   "xt-mp-card": "irrigation-farm-cards.js",
+  "xt-mp-editor": "irrigation-farm-cards.js",
   "xt-site-tree": "irrigation-farm-cards.js",
   "irrigation-quota-card": "irrigation-quota-card.js",
   "irrigation-room-groups": "irrigation-room-groups.js",
