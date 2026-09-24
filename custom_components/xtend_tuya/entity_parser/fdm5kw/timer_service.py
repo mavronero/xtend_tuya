@@ -420,6 +420,9 @@ async def set_timer(hass, data: dict) -> bool:
             device_id,
         )
         return True
+    if not port.settings.cloud_timer_mirror:
+        _LOGGER.info("set_timer: SmartLife mirror off for this hub, %s is DP-only", device_id)
+        return True
     _LOGGER.warning(
         "set_timer: tuya_iot account found for %s, proceeding to cloud write",
         device_id,
@@ -519,6 +522,10 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     if port is None or not port.has_cloud_account:
         _LOGGER.warning("resync: no tuya_iot account for %s — cannot reconcile", device_id)
         return {"success": False, "error": "no_cloud_account"}
+    # Without the mirror no HA timer is in the cloud, so every enabled slot
+    # would look like an orphan and be cleared. Refuse instead.
+    if not port.settings.cloud_timer_mirror:
+        return {"success": False, "error": "cloud_mirror_disabled"}
     is_t3 = _is_t3(port, device_id)
 
     from .sensor import Fdm5kwTimerRegistryEntity
@@ -643,6 +650,9 @@ async def delete_timer(hass, data: dict) -> bool:
         _LOGGER.warning(
             "delete_timer: no tuya_iot account for %s (DP-only delete)", device_id
         )
+        return True
+    if not port.settings.cloud_timer_mirror:
+        _LOGGER.info("delete_timer: SmartLife mirror off for this hub, %s is DP-only", device_id)
         return True
     if prior is None:
         _LOGGER.warning(

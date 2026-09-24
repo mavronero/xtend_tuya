@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from ..multi_manager.shared.threading import XTEventLoopProtector
 from ..util import get_all_multi_managers
 from .breaker import QUOTA_EXCEEDED_CODE, QuotaBreaker
+from .settings import HubSettings
 
 if TYPE_CHECKING:
     from ..multi_manager.multi_manager import MultiManager
@@ -50,6 +51,9 @@ class CloudResult:
 
 class TuyaPort(Protocol):
     @property
+    def settings(self) -> HubSettings: ...
+
+    @property
     def has_cloud_account(self) -> bool: ...
 
     @property
@@ -67,9 +71,19 @@ class TuyaPort(Protocol):
 class CloudTuyaPort:
     """TuyaPort for one hub, backed by its MultiManager (cloud + MQ)."""
 
-    def __init__(self, multi_manager: MultiManager, breaker: QuotaBreaker | None = None) -> None:
+    def __init__(
+        self,
+        multi_manager: MultiManager,
+        settings: HubSettings | None = None,
+        breaker: QuotaBreaker | None = None,
+    ) -> None:
         self._mm = multi_manager
+        self._settings = settings or HubSettings()
         self._breaker = breaker or QuotaBreaker()
+
+    @property
+    def settings(self) -> HubSettings:
+        return self._settings
 
     @property
     def has_cloud_account(self) -> bool:

@@ -61,13 +61,30 @@
         }
     },
     "options": {
+        "error": {
+            "custom_limit_required": "Enter the number of controllable devices for the custom plan."
+        },
         "step": {
             "init": {
                 "title": "Xtend Tuya Settings",
                 "description": "Select the settings you want to configure.",
                 "menu_options": {
                     "configure_api": "API Credentials",
+                    "hub_settings": "Tuya plan and SmartLife sync",
                     "device_settings": "Device Settings"
+                }
+            },
+            "hub_settings": {
+                "title": "Tuya plan and SmartLife sync",
+                "description": "Only the quota handling depends on your Tuya IoT plan. The free Trial plan can control 10 different devices per month; when Tuya refuses a command for quota, cloud writes pause for 6 hours and timers are still written to the device.",
+                "data": {
+                    "plan": "Tuya IoT plan",
+                    "controllable_limit": "Controllable devices per month (custom plan)",
+                    "cloud_timer_mirror": "Show timers set in Home Assistant in the SmartLife app"
+                },
+                "data_description": {
+                    "controllable_limit": "Only used with the custom plan.",
+                    "cloud_timer_mirror": "Also writes each timer to the Tuya cloud, which uses the monthly quota. When off, timers exist on the device only."
                 }
             },
             "configure_api": {
@@ -3284,6 +3301,15 @@
         "tuya_iot_sensor_energy_stat_not_subscribed": {
             "title": "Tuya OpenAPI account badly configured (Energy stat)",
             "description": "The integration \"{name}\" (`{config_entry_id}`) Does not have a Tuya OpenAPI account that is subscribed to the Beta API service\n\nWithout this, fetching energy sensor consumption history will not function properly.\n\nTo fix this warning please follow the guide at the URL by clicking the button below, then restart Home Assistant."
+        }
+    },
+    "selector": {
+        "hub_plan": {
+            "options": {
+                "trial": "Trial / free (10 devices per month)",
+                "paid": "Paid (no device limit)",
+                "custom": "Custom limit"
+            }
         }
     }
 }

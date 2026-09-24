@@ -66,6 +66,26 @@ export class IrrigationQuotaCard extends LitElement {
     const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
     const level = remaining <= 0 ? "crit" : remaining <= 3 ? "warn" : "ok";
 
+    // limit null = hub configured for a paid plan (Tuya plan option).
+    if (e.attributes.limit === null) {
+      return html`
+        <ha-card>
+          <div class="card-header">
+            <ha-icon icon="mdi:cloud-lock-outline"></ha-icon>
+            <span>${name}</span>
+            <span class="pill ok">no limit</span>
+          </div>
+          <div class="card-content">
+            <div class="count">
+              <span class="big">${used}</span>
+              <span class="label"> controllable devices used this month</span>
+            </div>
+            <div class="sub">No monthly device limit (paid plan)${reset ? html` · count resets ${reset}` : nothing}</div>
+          </div>
+        </ha-card>
+      `;
+    }
+
     return html`
       <ha-card>
         <div class="card-header">

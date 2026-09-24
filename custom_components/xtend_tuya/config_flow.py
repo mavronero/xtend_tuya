@@ -56,6 +56,7 @@ from .multi_manager.shared.threading import (
     XTConcurrencyManager,
 )
 from .multi_manager.managers.tuya_iot.xt_tuya_iot_openapi import XTIOTOpenAPI
+from .transport.settings import OPTION_KEY as HUB_SETTINGS_KEY, PLANS, HubSettings
 from .lib.tuya_iot.openapi import (
     TuyaTokenInfo,
 )
@@ -72,6 +73,7 @@ STEP_METHOD_PREFIX = "async_step_"
 class XTStepId(StrEnum):
     INIT = "init"
     CONFIGURE_API = "configure_api"
+    HUB_SETTINGS = "hub_settings"
     DEVICE_SETTINGS = "device_settings"
     SELECT_CLIMATE_DEVICE = "select_climate_device"
     CLIMATE_DEVICE_SETTINGS = "climate_device_settings"
@@ -87,7 +89,11 @@ OPTION_STEP_DEFINITION: dict[XTStepId, tuple[str, list[Any], dict[str, Any], boo
         [],
         {
             "step_id": XTStepId.INIT,
-            "menu_options": [XTStepId.CONFIGURE_API, XTStepId.DEVICE_SETTINGS],
+            "menu_options": [
+                XTStepId.CONFIGURE_API,
+                XTStepId.HUB_SETTINGS,
+                XTStepId.DEVICE_SETTINGS,
+            ],
         },
         False,
     ),
@@ -403,10 +409,58 @@ class TuyaOptionFlow(OptionsFlow):
                 return data
             case XTConfigFlows.XTStepResultType.RESULT:
                 data = cast(dict[str, str], data)
-                # Preserve device_settings when updating API config
-                if "device_settings" in self.options:
-                    data["device_settings"] = self.options["device_settings"]
+                # Preserve the other option groups when updating API config
+                for key in ("device_settings", HUB_SETTINGS_KEY):
+                    if key in self.options:
+                        data[key] = self.options[key]
                 return self.async_create_entry(data=data)
+
+    async def async_step_hub_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Tuya plan, controllable-device limit and SmartLife timer mirror of this hub."""
+        current = HubSettings.from_options(self.options)
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            limit = user_input.get("controllable_limit")
+            if user_input["plan"] == "custom" and not limit:
+                errors["controllable_limit"] = "custom_limit_required"
+            else:
+                chosen = HubSettings.from_options(
+                    {
+                        HUB_SETTINGS_KEY: {
+                            "plan": user_input["plan"],
+                            "controllable_limit": limit,
+                            "cloud_timer_mirror": user_input["cloud_timer_mirror"],
+                        }
+                    }
+                )
+                return self.async_create_entry(
+                    title="", data={**self.options, HUB_SETTINGS_KEY: chosen.to_option()}
+                )
+        schema = vol.Schema(
+            {
+                vol.Required("plan", default=current.plan): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=list(PLANS), translation_key="hub_plan"
+                    )
+                ),
+                vol.Optional(
+                    "controllable_limit",
+                    description={
+                        "suggested_value": current.controllable_limit
+                        if current.plan == "custom"
+                        else None
+                    },
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
+                vol.Required(
+                    "cloud_timer_mirror", default=current.cloud_timer_mirror
+                ): bool,
+            }
+        )
+        return self.async_show_form(
+            step_id=XTStepId.HUB_SETTINGS, data_schema=schema, errors=errors
+        )
 
     async def async_step_select_device(
         self,

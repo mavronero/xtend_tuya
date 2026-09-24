@@ -25,12 +25,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.storage import Store
 
+from .settings import TRIAL_CONTROLLABLE_LIMIT
+
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-# Tuya Trial Edition cap. Kept here as a constant; bump if a hub is on a paid
-# plan with a higher controllable allowance.
-DEFAULT_CONTROLLABLE_LIMIT = 10
 
 
 def _utcnow() -> dt.datetime:
@@ -56,7 +55,7 @@ class ControllableQuotaTracker:
         self,
         hass: HomeAssistant,
         hub_id: str,
-        limit: int = DEFAULT_CONTROLLABLE_LIMIT,
+        limit: int | None = TRIAL_CONTROLLABLE_LIMIT,  # None = unlimited; set per hub in HubSettings
     ) -> None:
         self.hass = hass
         self.hub_id = hub_id
@@ -112,7 +111,9 @@ class ControllableQuotaTracker:
         return len(self._devices)
 
     @property
-    def remaining(self) -> int:
+    def remaining(self) -> int | None:
+        if self.limit is None:
+            return None
         return max(0, self.limit - self.used)
 
     @property

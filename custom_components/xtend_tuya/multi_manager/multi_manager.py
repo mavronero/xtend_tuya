@@ -129,8 +129,9 @@ class MultiManager(TuyaManager):
         # Device drivers (L2) reach this hub only through its TuyaPort. Local
         # import: transport.port -> util -> multi_manager would cycle.
         from ..transport.port import CloudTuyaPort
+        from ..transport.settings import HubSettings
 
-        self.port = CloudTuyaPort(self)
+        self.port = CloudTuyaPort(self, HubSettings.from_options(config_entry.options))
         self.master_device_map: XTDeviceMap = XTDeviceMap({})
         self.is_ready_for_messages = False
         self.pending_messages: list[tuple[str, dict]] = []
@@ -214,7 +215,9 @@ class MultiManager(TuyaManager):
         # hub key is the config entry id (the OpenAPI access_id is not reliably in
         # config_entry.options on this deployment — it lives in xtend storage).
         hub_id = self.config_entry.entry_id
-        self.controllable_quota = ControllableQuotaTracker(self.hass, hub_id)
+        self.controllable_quota = ControllableQuotaTracker(
+            self.hass, hub_id, limit=self.port.settings.controllable_limit
+        )
         try:
             await self.controllable_quota.async_load()
         except Exception:
