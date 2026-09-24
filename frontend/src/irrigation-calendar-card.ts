@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
-import { packLanes, pairPlanRuns, Pairable } from "./calendar-lanes";
+import { offlineSpans, packLanes, pairPlanRuns, Pairable, type HistoryPoint } from "./calendar-lanes";
 import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
 import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
 import { farmTokens } from "./components/theme.ts";
@@ -22,6 +22,7 @@ import "./components/spinner.ts";
 
 interface HomeAssistant {
   callApi?: <T = unknown>(method: string, path: string) => Promise<T>;
+  states?: Record<string, { state: string }>;
 }
 
 interface CalendarApiEvent {
@@ -39,6 +40,8 @@ interface Valve {
   view_path: string;
   home?: string | null;
   room?: string | null;
+  /** Battery % sensor, for the timeline's battery column. */
+  battery?: string | null;
 }
 
 interface CardConfig {
@@ -47,8 +50,11 @@ interface CardConfig {
   valves?: Valve[];
   planned_entity?: string;
   completed_entity?: string;
-  /** Pixels per hour in the day/week grid (default 56). */
+  /** Pixels per hour in the day/week grid (default: 8 hours per screen). */
   hour_height?: number;
+  /** Views offered, in order (default all three). The Timeline view uses
+   * ["timeline"], the Calendar view ["day", "week"]. */
+  modes?: Mode[];
 }
 
 interface GridEvent extends Pairable {
@@ -149,6 +155,8 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _filter: ValveFilter = loadFilter();
   @state() private _farm: FarmData = EMPTY_FARM_DATA;
   private _farmLoaded = false;
+  /** Registry entity -> offline stretches in the loaded range (timeline). */
+  @state() private _offline = new Map<string, [number, number][]>();
   @state() private _loading = false;
   @state() private _error: string | null = null;
   private _loadedKey = "";
@@ -156,6 +164,13 @@ export class IrrigationCalendarCard extends LitElement {
 
   setConfig(config: CardConfig): void {
     this._config = config;
+    const modes = this._modes();
+    if (!modes.includes(this._mode)) this._mode = modes[0];
+  }
+
+  private _modes(): Mode[] {
+    const m = (this._config?.modes ?? []).filter((x): x is Mode => ["day", "week", "timeline"].includes(x));
+    return m.length ? m : ["day", "week", "timeline"];
   }
 
   getCardSize(): number {
@@ -209,6 +224,7 @@ export class IrrigationCalendarCard extends LitElement {
   private async _load(silent = false): Promise<void> {
     if (!this.hass?.callApi) return;
     const [from, to] = this._window();
+    if (this._mode === "timeline") void this._loadOffline(from, to);
     const q = `?start=${encodeURIComponent(from.toISOString())}&end=${encodeURIComponent(to.toISOString())}`;
     const planned = this._config?.planned_entity ?? PLANNED;
     const completed = this._config?.completed_entity ?? COMPLETED;
@@ -251,6 +267,32 @@ export class IrrigationCalendarCard extends LitElement {
       this._loading = false;
       if (!silent) this.updateComplete.then(() => this._scrollToFirst());
     }
+  }
+
+  /** Offline stretches of every valve's registry sensor in the range
+   * (Trello Sijuj2Dd: the timeline shows whether a valve was online). */
+  private async _loadOffline(from: Date, to: Date): Promise<void> {
+    const ids = (this._config?.valves ?? []).map((v) => v.registry_entity);
+    const out = new Map<string, [number, number][]>();
+    // ponytail: chunks keep the URL short; one request per 40 valves.
+    for (let i = 0; i < ids.length; i += 40) {
+      const chunk = ids.slice(i, i + 40);
+      try {
+        const res = await this.hass.callApi!<HistoryPoint[][]>(
+          "GET",
+          `history/period/${encodeURIComponent(from.toISOString())}?end_time=${encodeURIComponent(
+            to.toISOString()
+          )}&filter_entity_id=${chunk.join(",")}&minimal_response&no_attributes`
+        );
+        for (const series of res ?? []) {
+          const id = (series[0] as HistoryPoint & { entity_id?: string })?.entity_id;
+          if (id) out.set(id, offlineSpans(series, from.getTime(), Math.min(to.getTime(), Date.now())));
+        }
+      } catch {
+        /* the timeline still shows the runs */
+      }
+    }
+    this._offline = out;
   }
 
   private _scrollToFirst(): void {
@@ -358,6 +400,9 @@ export class IrrigationCalendarCard extends LitElement {
       ${c.unplanned ? chip("unplanned", c.unplanned, "unplanned", "Runs nobody planned (striped)") : nothing}
       ${c.running ? chip("running", c.running, "running", "Watering now") : nothing}
       ${c.dry ? chip("dry", c.dry, "no water", "Runs that measured no water (red)") : nothing}
+      ${this._mode === "timeline"
+        ? html`<span class="lg" title="Periods the valve was not reachable (grey hatching)"><i class="sw offline"></i>offline</span>`
+        : nothing}
     </div>`;
   }
 
@@ -371,15 +416,15 @@ export class IrrigationCalendarCard extends LitElement {
       <ha-card>
         <div class="head">
           <div class="title-row">
-            <h2>${this._config.title ?? "Irrigation calendar"}</h2>
+            <h2>${this._config.title ?? (this._modes().join() === "timeline" ? "Timeline" : "Irrigation calendar")}</h2>
             ${this._loading ? html`<xt-spinner></xt-spinner>` : nothing}
           </div>
           <div class="bar">
-            <div class="chips" role="group" aria-label="View">
-              ${chip(mode === "day", "Day", () => this._setMode("day"))}
-              ${chip(mode === "week", "Week", () => this._setMode("week"))}
-              ${chip(mode === "timeline", "Timeline", () => this._setMode("timeline"))}
-            </div>
+            ${this._modes().length > 1
+              ? html`<div class="chips" role="group" aria-label="View">
+                  ${this._modes().map((m) => chip(mode === m, m === "day" ? "Day" : m === "week" ? "Week" : "Timeline", () => this._setMode(m)))}
+                </div>`
+              : nothing}
             ${mode === "timeline"
               ? html`<div class="chips" role="group" aria-label="Range">
                   ${([1, 3, 7] as const).map((r) => chip(this._range === r, `${r} d`, () => this._setRange(r)))}
@@ -472,7 +517,18 @@ export class IrrigationCalendarCard extends LitElement {
     `;
   }
 
-  // Timeline: one row per valve, grouped by irrigation location.
+  private _online(v: Valve): boolean {
+    const s = this.hass?.states?.[v.registry_entity]?.state;
+    return !!s && s !== "unavailable" && s !== "unknown";
+  }
+
+  private _battery(v: Valve): number | null {
+    const s = v.battery ? this.hass?.states?.[v.battery]?.state : undefined;
+    const n = Number(s);
+    return s && s !== "" && Number.isFinite(n) ? Math.round(n) : null;
+  }
+
+  // Timeline: one row per valve, grouped by site.
   private _renderTimeline(events: GridEvent[]) {
     const [from, to] = this._window();
     const t0 = from.getTime();
@@ -545,8 +601,17 @@ export class IrrigationCalendarCard extends LitElement {
           );
           return html`
             <div class="row clickable ${problem ? "problem" : ""}" @click=${() => this._open(v.view_path)}>
-              <div class="name" title=${v.valve_name}>${v.valve_name}</div>
+              <div class="name" title=${v.valve_name}>
+                <i class="dot ${this._online(v) ? "" : "off"}" title=${this._online(v) ? "Online now" : "Offline now"}></i>${v.valve_name}
+              </div>
               <div class="track">
+                ${(this._offline.get(v.registry_entity) ?? []).map(
+                  ([s, e]) => html`<i
+                    class="offline"
+                    style="left:${pct(s)}%;width:${Math.max(pct(e) - pct(s), 0.3)}%"
+                    title="Offline ${hhmm(s)}–${hhmm(e)}"
+                  ></i>`
+                )}
                 ${dayLines.map((l) => html`<i class="dayline" style="left:${l}%"></i>`)}
                 ${evs.map(
                   (e) => html`<i
@@ -560,6 +625,9 @@ export class IrrigationCalendarCard extends LitElement {
               <div class="metric ${planMs ? "" : "muted"}">${fmtMin(planMs)}</div>
               <div class="metric ${runMs ? "" : "muted"}">${fmtMin(runMs)}</div>
               <div class="metric ${liters == null ? "muted" : ""}">${fmtL(liters)}</div>
+              <div class="metric ${this._battery(v) == null ? "muted" : ""}" title="Battery now">
+                ${this._battery(v) == null ? "–" : `${this._battery(v)} %`}
+              </div>
             </div>
           `;
         })}
@@ -576,6 +644,7 @@ export class IrrigationCalendarCard extends LitElement {
           <div class="metric" title="Planned minutes in this range"><span class="lbl-long">plan min</span><span class="lbl-short">plan</span></div>
           <div class="metric" title="Minutes actually watered in this range"><span class="lbl-long">ran min</span><span class="lbl-short">ran</span></div>
           <div class="metric"><span class="lbl-long">water (L)</span><span class="lbl-short">L</span></div>
+          <div class="metric" title="Battery now"><span class="lbl-long">battery</span><span class="lbl-short">bat</span></div>
         </div>
         ${rows}
         ${!valves.length
@@ -725,6 +794,29 @@ export class IrrigationCalendarCard extends LitElement {
     }
     .sw.unplanned {
       background: var(--cc-water-stripes);
+    }
+    .sw.offline,
+    .track i.offline {
+      background: repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--xt-off) 55%, transparent) 0 2px,
+        transparent 2px 5px
+      );
+    }
+    .track i.offline {
+      z-index: 0;
+    }
+    .name .dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--xt-ok);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .name .dot.off {
+      background: var(--xt-off);
     }
     .sw.dry {
       background: var(--cc-dry-bg);
@@ -884,7 +976,7 @@ export class IrrigationCalendarCard extends LitElement {
     }
     .row {
       display: grid;
-      grid-template-columns: 150px 1fr 74px 70px 68px;
+      grid-template-columns: 170px 1fr 74px 70px 68px 58px;
       align-items: center;
       gap: 12px;
       height: 32px;
@@ -1009,7 +1101,7 @@ export class IrrigationCalendarCard extends LitElement {
     }
     @media (max-width: 620px) {
       .row {
-        grid-template-columns: 92px 1fr 40px 40px 40px;
+        grid-template-columns: 100px 1fr 36px 36px 40px 36px;
         gap: 6px;
         padding: 0 10px;
       }

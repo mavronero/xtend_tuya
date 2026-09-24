@@ -84,6 +84,7 @@ class IrrigationValvesStrategy extends HTMLElement {
       locationsView(),
       pumpsView(),
       calendarView(valves),
+      timelineView(valves),
       valveDetailView(hours),
     ];
 
@@ -150,6 +151,18 @@ function pumpsView(): DashboardView {
 
 /** Irrigation calendar: planned + completed runs on a clickable time grid
  * (Trello 9W8FXA4l). Valve list maps calendar events to their detail views. */
+function calendarValves(valves: ValveEntities[]): unknown[] {
+  return valves.map((v) => ({
+    device_id: v.device_id,
+    registry_entity: v.registry_entity,
+    valve_name: v.valve_name,
+    view_path: v.view_path,
+    home: v.valve_home ?? null,
+    room: v.valve_room ?? null,
+    battery: v.battery_level ?? null,
+  }));
+}
+
 function calendarView(valves: ValveEntities[]): DashboardView {
   return {
     title: "Calendar",
@@ -164,15 +177,35 @@ function calendarView(valves: ValveEntities[]): DashboardView {
         cards: [
           {
             type: "custom:irrigation-calendar-card",
-            valves: valves.map((v) => ({
-              device_id: v.device_id,
-              registry_entity: v.registry_entity,
-              valve_name: v.valve_name,
-              view_path: v.view_path,
-              // same home · room grouping as the overview matrix
-              home: v.valve_home ?? null,
-              room: v.valve_room ?? null,
-            })),
+            modes: ["day", "week"],
+            valves: calendarValves(valves),
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** Timeline (Trello Sijuj2Dd): one row per valve grouped by site, runs
+ * against plans plus the stretches the valve was offline, and its battery.
+ * Replaces the overview's "Watering history & battery" matrix. */
+function timelineView(valves: ValveEntities[]): DashboardView {
+  return {
+    title: "Timeline",
+    path: "timeline",
+    icon: "mdi:chart-timeline",
+    type: "sections",
+    max_columns: 3,
+    sections: [
+      {
+        type: "grid",
+        column_span: 3,
+        cards: [
+          {
+            type: "custom:irrigation-calendar-card",
+            modes: ["timeline"],
+            valves: calendarValves(valves),
             layout_options: { grid_columns: 12, grid_rows: "auto" },
           },
         ],
@@ -220,28 +253,6 @@ function buildOverviewView(
     .filter((v) => v.flow_rate_sensor)
     .map((v) => ({ entity: v.flow_rate_sensor as string, name: v.valve_name }));
 
-  // Single combined card: one fixed-height row per valve — name |
-  // watering on/off timeline | battery % — so the watering-history and
-  // battery columns line up exactly (Simon 2026-06-04). Two separate stock
-  // cards (history-graph + entities) never align row-for-row because of
-  // differing row heights, headers and axis offsets. The custom
-  // irrigation-valve-matrix card draws both per row instead. Every valve
-  // is included (switchless ones show an empty bar); rows navigate to the
-  // valve's detail view on click.
-  const matrixValves = valves.map((v) => ({
-    name: v.valve_name,
-    // Tuya device id — the key the runs store records runs under, and the
-    // only source of truth the T3 valves have for "was it watering?".
-    device_id: v.device_id,
-    switch: v.switch,
-    battery: v.battery_level,
-    volume: v.volume_sensor,
-    last_report: v.last_report,
-    path: v.view_path,
-    home: v.valve_home ?? null,
-    room: v.valve_room ?? null,
-  }));
-
   return {
     title,
     path: "overview",
@@ -286,21 +297,9 @@ function buildOverviewView(
       // full row. Without this every card on the overview renders
       // squeezed into the left third of the screen.
       //
-      // The valve list with the timeline follows the valve cards and the
-      // unassigned valves.
-      {
-        type: "grid",
-        column_span: 3,
-        cards: [
-          {
-            type: "custom:irrigation-valve-matrix",
-            title: "Watering history & battery (all valves)",
-            hours,
-            valves: matrixValves,
-            layout_options: { grid_columns: 12, grid_rows: "auto" },
-          },
-        ],
-      },
+      // The per-valve timeline that stood here ("Watering history & battery")
+      // is the Timeline view now; the matrix card stays defined for saved
+      // dashboards.
       ...(flowEntities.length > 0
         ? [
             {

@@ -1,7 +1,7 @@
 // Lane packing + plan/run pairing for the irrigation calendar card.
 // Run: node --experimental-strip-types tests/test_calendar_lanes.mjs
 import assert from "node:assert/strict";
-import { packLanes, pairPlanRuns } from "../frontend/src/calendar-lanes.ts";
+import { packLanes, pairPlanRuns, offlineSpans } from "../frontend/src/calendar-lanes.ts";
 
 const M = 60_000;
 const ev = (start, end, kind, name, key = name) => ({ start: start * M, end: end * M, kind, name, key });
@@ -43,5 +43,25 @@ assert.deepEqual(paired, [
 assert.equal(pairPlanRuns([ev(85, 95, "planned", "v9")], [], now)[0].kind, "planned");
 // An open run keeps "running" whether paired or not.
 assert.equal(pairPlanRuns([ev(10, 20, "planned", "v1")], [ev(11, 25, "running", "v1")], now)[0].kind, "running");
+
+// Offline stretches from registry-sensor history (Timeline view).
+{
+  const t = (h) => new Date(Date.UTC(2026, 8, 24, h)).toISOString();
+  const at = (h) => Date.parse(t(h));
+  const pts = [
+    { state: "unavailable", last_changed: t(0) }, // state at the range start
+    { state: "1", last_changed: t(2) },
+    { state: "unknown", last_changed: t(5) },
+    { state: "unavailable", last_changed: t(6) }, // joins the stretch before
+    { state: "2", last_changed: t(8) },
+    { state: "unavailable", last_changed: t(22) }, // runs to the range end
+  ];
+  assert.deepEqual(offlineSpans(pts, at(1), at(23)), [
+    [at(1), at(2)],
+    [at(5), at(8)],
+    [at(22), at(23)],
+  ]);
+  assert.deepEqual(offlineSpans([{ state: "1", last_changed: t(0) }], at(1), at(23)), []);
+}
 
 console.log("ok calendar lanes");

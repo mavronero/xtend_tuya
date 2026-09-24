@@ -119,3 +119,29 @@ planned ${plan.summary ?? ""}`,
   }
   return out;
 }
+
+/** One entry of HA's history API (minimal_response): state and when it began. */
+export interface HistoryPoint {
+  state: string;
+  last_changed: string;
+}
+
+const OFFLINE_STATES = new Set(["unavailable", "unknown"]);
+
+/** Offline stretches [start, end] within [from, to] from an entity's
+ * history: every period its state was unavailable or unknown. The first
+ * point is the state at `from` (HA includes it). */
+export function offlineSpans(points: HistoryPoint[], from: number, to: number): [number, number][] {
+  const out: [number, number][] = [];
+  points.forEach((p, i) => {
+    if (!OFFLINE_STATES.has(p.state)) return;
+    const start = Math.max(from, Date.parse(p.last_changed));
+    const next = points[i + 1];
+    const end = Math.min(to, next ? Date.parse(next.last_changed) : to);
+    if (end <= start) return;
+    const last = out[out.length - 1];
+    if (last && last[1] >= start) last[1] = Math.max(last[1], end);
+    else out.push([start, end]);
+  });
+  return out;
+}
