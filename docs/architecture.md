@@ -48,7 +48,7 @@ they can.
 
 ```
 L4  UI                frontend/: cards, dashboard strategy
-L3  Farm domain       farm/: runs, areas + locations, pumps, balance, notifications, checks
+L3  Farm domain       farm/: runs, sites + metering points, pumps, balance, notifications, checks
 ──── HA contract: entities + services + CommandResult  (farm/contract.py) ────
 L2  Valve drivers     entity_parser/valves/: profiles, codecs, timer state, driver
 ──── TuyaPort  (transport/port.py) ────
@@ -315,13 +315,36 @@ with them:
   of skewing the balance.
 - Flow thresholds: min 2 L/min on the QT-08W.
 
-Planned after the split, each building on L3 and the contract:
-**areas as their own type** (PO decision 2026-09-24: an area has no valves
-and is not "a location with children"; still open: do areas nest, do
-locations nest, is a location in one area or several), locations with an
-optional `area_id`, dated pump assignment on an area or a location with
-inheritance (location → parent location → area → parent area) and override,
-a notification
+Planned after the split, each building on L3 and the contract. The farm
+model was decided with the PO on 2026-09-24:
+
+```
+Site                                   Metering point (MP, "location" in the API)
+  id, name                               id, name
+  parent_site_id?  -> tree               site_id  -> exactly one site
+  pump (dated, optional)                 pump (dated, optional, overrides the site's)
+                                         valve: at most ONE at a time (dated history)
+```
+
+- **Filtering by a site includes its whole subtree.** "Big Farm" also returns
+  the MPs of FF East.
+- **Pump resolution:** the MP's own pump first, then its site's, then up
+  through the parent sites.
+- **Valve exchange:** assigning valve B to an MP that holds valve A ends A's
+  assignment and opens B's. A then has no MP. A valve can only have one MP,
+  so B's previous assignment ends too (already true today).
+- **Metering data belongs to the MP, not to the valve.** Runs are stored per
+  valve and attributed to an MP through the dated assignments
+  (`location_for_run`). This already works that way.
+- **Naming:** the UI and the code say "metering point" and "site". The API keeps
+  `irrigation_locations` and `location_id` / `location` in `/runs`, which is
+  the frozen `ha_sync` contract. Those names only change together with the
+  backend.
+- **Migration:** add `site_id`, and enforce one valve per MP. On prod
+  (2026-09-24) one of 76 locations breaks that rule: "FG Fig Trees" has both
+  968 and 803 open. Simon decides whether to split it into two MPs.
+
+Also planned: a notification
 store (whose sources include `CommandResult` and the checks), and the leak
 balance (pump meter via long-term statistics vs. the sum of runs).
 
