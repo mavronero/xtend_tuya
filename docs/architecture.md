@@ -48,7 +48,7 @@ they can.
 
 ```
 L4  UI                frontend/: cards, dashboard strategy
-L3  Farm domain       farm/: runs, location tree, pumps, balance, notifications, checks
+L3  Farm domain       farm/: runs, areas + locations, pumps, balance, notifications, checks
 ──── HA contract: entities + services + CommandResult  (farm/contract.py) ────
 L2  Valve drivers     entity_parser/valves/: profiles, codecs, timer state, driver
 ──── TuyaPort  (transport/port.py) ────
@@ -315,8 +315,13 @@ with them:
   of skewing the balance.
 - Flow thresholds: min 2 L/min on the QT-08W.
 
-Planned after the split, each building on L3 and the contract: the location
-tree with `parent_id`, dated pump assignment with inheritance, a notification
+Planned after the split, each building on L3 and the contract:
+**areas as their own type** (PO decision 2026-09-24: an area has no valves
+and is not "a location with children"; still open: do areas nest, do
+locations nest, is a location in one area or several), locations with an
+optional `area_id`, dated pump assignment on an area or a location with
+inheritance (location → parent location → area → parent area) and override,
+a notification
 store (whose sources include `CommandResult` and the checks), and the leak
 balance (pump meter via long-term statistics vs. the sum of runs).
 
