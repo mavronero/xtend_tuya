@@ -1390,7 +1390,12 @@ class IrrigationValveDetailCard extends HTMLElement {
       }
       cols.appendChild(col);
     }
-    this.style.cssText = "display:block;padding:16px;max-width:1400px;margin:0 auto";
+    // Same card edge as the farm cards (components/theme.ts), also for HA's
+    // own graphs on this page: the default edge nearly vanishes.
+    this.style.cssText =
+      "display:block;padding:16px;max-width:1400px;margin:0 auto;" +
+      "--ha-card-border-color:color-mix(in srgb,var(--primary-text-color,#212121) 14%,transparent);" +
+      "--ha-card-box-shadow:0 1px 3px rgba(0,0,0,0.07)";
     this.replaceChildren(root);
   }
 

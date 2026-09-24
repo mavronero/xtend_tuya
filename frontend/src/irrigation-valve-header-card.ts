@@ -55,11 +55,14 @@ export class IrrigationValveHeaderCard extends LitElement {
     if (!this._config || !this.hass) return nothing;
     if (!this._farm.loaded) return html`<ha-card class="loading"><xt-spinner></xt-spinner></ha-card>`;
     const now = Date.now();
-    const valves = this._farm.summaries();
-    const v = valves.find((x) => x.device_id === this._config!.device_id);
+    // Only this valve and its metering point's valves, not the whole fleet.
+    const v = this._farm.summaryOf(this._config.device_id);
     if (!v) return html`<ha-card><div class="msg">Valve not found.</div></ha-card>`;
     const mpRec = this._farm.data.locations.find((m) => m.valves.includes(v.device_id));
-    const mp = mpRec ? summarizeMp(mpRec, this._farm.data, valves, now) : null;
+    const mpValves = mpRec
+      ? mpRec.valves.map((id) => (id === v.device_id ? v : this._farm.summaryOf(id))).filter((x) => !!x)
+      : [];
+    const mp = mpRec ? summarizeMp(mpRec, this._farm.data, mpValves as typeof v[], now) : null;
     // A metering point's view wins where it has one: its history survives
     // valve exchanges and it knows the expected flow.
     const week = mp?.week ?? v.week;

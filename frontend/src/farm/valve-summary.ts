@@ -7,7 +7,7 @@
 
 import type { HassState, ValveEntities } from "./discovery.ts";
 import { pairPlanRuns, type Pairable } from "../calendar-lanes.ts";
-import type { FarmData, Run } from "./data.ts";
+import { plannedOf, runsOf, type FarmData, type Run } from "./data.ts";
 
 export type ValveStatus = "watering" | "idle" | "offline";
 export type Badge = "low_battery" | "stale" | "missed" | "no_flow";
@@ -98,11 +98,7 @@ export function summarize(
   const offline = dead(reg) && dead(sw);
   const watering = !offline && sw?.state === "on";
 
-  const runs = data.runs
-    .filter((r) => r.device_id === v.device_id)
-    .map((r) => ({ r, start: Date.parse(r.start), end: Date.parse(r.end) }))
-    .filter((x) => Number.isFinite(x.start) && Number.isFinite(x.end))
-    .sort((a, b) => a.start - b.start);
+  const runs = runsOf(data, v.device_id).map((x) => ({ r: x.run, start: x.start, end: x.end }));
   const info = (r: Run, start: number): RunInfo => ({
     start,
     minutes: (r.duration_seconds ?? 0) / 60,
@@ -110,9 +106,7 @@ export function summarize(
   });
   const lastRun = runs[runs.length - 1];
 
-  const plans = data.planned
-    .filter((p) => p.key === v.registry_entity)
-    .sort((a, b) => a.start - b.start);
+  const plans = plannedOf(data, v.registry_entity);
   const nextPlan = plans.find((p) => p.start > now);
 
   // Missed = a planned slot in the last 24 h that no run answered (same

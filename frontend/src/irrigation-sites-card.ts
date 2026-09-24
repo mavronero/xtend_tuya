@@ -50,6 +50,8 @@ export class IrrigationSitesCard extends LitElement {
   @state() private _busy = false;
   @state() private _error: string | null = null;
   private _farm = new FarmController(this);
+  /** MP summaries, recomputed only when the valve summaries change. */
+  private _mpMemo: { valves: unknown; list: ReturnType<typeof summarizeMp>[] } | null = null;
   private _onLocation = (): void => {
     this._selected = siteFromUrl();
   };
@@ -276,8 +278,11 @@ export class IrrigationSitesCard extends LitElement {
     if (!this._farm.loaded) return html`<ha-card><div class="msg">Loading sites…</div></ha-card>`;
     const data = this._farm.data;
     const valves = this._farm.summaries();
-    const now = Date.now();
-    const mpSums = data.locations.map((m) => summarizeMp(m, data, valves, now));
+    if (this._mpMemo?.valves !== valves) {
+      const now = Date.now();
+      this._mpMemo = { valves, list: data.locations.map((m) => summarizeMp(m, data, valves, now)) };
+    }
+    const mpSums = this._mpMemo.list;
     const mpById = new Map(mpSums.map((m) => [m.id, m]));
     const hasNoSite = data.locations.some((m) => !m.site_id);
     const sel = this._selected && (this._selected === NO_SITE || data.sites.some((s) => s.id === this._selected)) ? this._selected : null;

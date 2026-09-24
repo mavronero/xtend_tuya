@@ -8,6 +8,9 @@ import { EMPTY_FARM_DATA, invalidateFarmData, loadFarmData, type FarmData } from
 import { summarize, type ValveSummary } from "./valve-summary.ts";
 
 const REFRESH_MS = 60_000;
+// HA pushes state changes many times a second and every card re-renders on
+// each; statuses a second or two old are fine, a frozen page is not.
+const SUMMARY_TTL_MS = 2_000;
 
 type Host = ReactiveControllerHost & { hass?: HomeAssistantLike };
 
@@ -19,6 +22,7 @@ export class FarmController implements ReactiveController {
   private host: Host;
   private timer?: number;
   private busy = false;
+  private memo: { at: number; data: FarmData; valves: ValveEntities[]; list: ValveSummary[] } | null = null;
 
   constructor(host: Host) {
     this.host = host;
@@ -59,11 +63,22 @@ export class FarmController implements ReactiveController {
     }
   }
 
-  /** Summaries against the live states, as of now. */
+  /** Summaries against the live states, recomputed at most every 2 s. */
   summaries(): ValveSummary[] {
     const hass = this.host.hass;
     if (!hass) return [];
     const now = Date.now();
-    return this.valves.map((v) => summarize(v, hass.states, this.data, now));
+    const m = this.memo;
+    if (m && m.data === this.data && m.valves === this.valves && now - m.at < SUMMARY_TTL_MS) return m.list;
+    const list = this.valves.map((v) => summarize(v, hass.states, this.data, now));
+    this.memo = { at: now, data: this.data, valves: this.valves, list };
+    return list;
+  }
+
+  /** Summary of one valve only (a valve's own page). */
+  summaryOf(deviceId: string): ValveSummary | undefined {
+    const hass = this.host.hass;
+    const v = this.valves.find((x) => x.device_id === deviceId);
+    return hass && v ? summarize(v, hass.states, this.data, Date.now()) : undefined;
   }
 }

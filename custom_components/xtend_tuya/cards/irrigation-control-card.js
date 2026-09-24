@@ -40,6 +40,12 @@ const ct={attribute:!0,type:String,converter:$,reflect:!1,hasChanged:b},ht=(t=ct
     --xt-warn: var(--warning-color, #ffa600);
     --xt-bad: var(--error-color, #db4437);
     --xt-track: var(--divider-color, #e0e0e0);
+    /* Cards stand out from the page: HA's default edge (divider colour,
+       12 % black) nearly vanishes on the light grey background. */
+    --xt-card-edge: color-mix(in srgb, var(--primary-text-color, #212121) 14%, transparent);
+    --xt-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.07);
+    --ha-card-border-color: var(--xt-card-edge);
+    --ha-card-box-shadow: var(--xt-card-shadow);
   }
 `,_t=o`
   .titlebar {

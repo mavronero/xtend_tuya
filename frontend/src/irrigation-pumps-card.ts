@@ -88,6 +88,8 @@ export class IrrigationPumpsCard extends LitElement {
   @state() private _connecting: string | null = null;
   private _statsKey = "";
   private _farm = new FarmController(this);
+  private _balanceMemo: { key: string; data: unknown; stats: unknown; value: ReturnType<typeof balance> } | null = null;
+  private _mpMemo: { valves: unknown; map: Map<string, MpSummary> } | null = null;
   private _onLocation = (): void => {
     this._selected = pumpFromUrl();
   };
@@ -294,8 +296,20 @@ export class IrrigationPumpsCard extends LitElement {
 
   private _balance(p: Pump) {
     const { ms, period } = RANGES[this._range];
-    const now = Date.now();
-    const b = balance(this._farm.data, p, this._stats, now - ms, now, period);
+    // Recomputed when the pump, range, data or statistics change, and at
+    // most once a minute otherwise (the range end moves with the clock).
+    const key = `${p.id}|${this._range}|${Math.floor(Date.now() / 60_000)}`;
+    const memo = this._balanceMemo;
+    if (!memo || memo.key !== key || memo.data !== this._farm.data || memo.stats !== this._stats) {
+      const now = Date.now();
+      this._balanceMemo = {
+        key,
+        data: this._farm.data,
+        stats: this._stats,
+        value: balance(this._farm.data, p, this._stats, now - ms, now, period),
+      };
+    }
+    const b = this._balanceMemo!.value;
     const pct = (l: number) => (b.pump ? ` · ${Math.round((l / b.pump) * 100)} %` : "");
     return html`<section>
       <div class="section-head">
@@ -481,7 +495,10 @@ export class IrrigationPumpsCard extends LitElement {
     const data = this._farm.data;
     const now = Date.now();
     const valves = this._farm.summaries();
-    const mpSums = new Map(data.locations.map((m) => [m.id, summarizeMp(m, data, valves, now)]));
+    if (this._mpMemo?.valves !== valves) {
+      this._mpMemo = { valves, map: new Map(data.locations.map((m) => [m.id, summarizeMp(m, data, valves, now)])) };
+    }
+    const mpSums = this._mpMemo.map;
     const noPump = data.locations.filter((m: MeteringPoint) => !m.pump);
     const items: PumpListItem[] = [...data.pumps]
       .sort((a, b) => a.name.localeCompare(b.name))

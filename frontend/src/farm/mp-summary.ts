@@ -7,7 +7,7 @@
  * battery, next run, missed) comes from the valves it holds now.
  */
 
-import type { FarmData, MeteringPoint } from "./data.ts";
+import { runsOf, type FarmData, type MeteringPoint } from "./data.ts";
 import { weekStats, type Badge, type RunInfo, type ValveStatus, type ValveSummary, type Week } from "./valve-summary.ts";
 
 export type MpBadge = Badge | "no_valve" | "flow_low" | "flow_high";
@@ -45,13 +45,12 @@ const DAY_MS = 86_400_000;
 
 export function mpRuns(mp: MeteringPoint, data: FarmData): RunInfo[] {
   const out: RunInfo[] = [];
-  for (const r of data.runs) {
-    const end = Date.parse(r.end);
-    const inWindow = mp.assignments.some(
-      (a) => a.device_id === r.device_id && (a.begin === null || a.begin <= end) && (a.end === null || end < a.end)
-    );
-    if (inWindow) {
-      out.push({ start: Date.parse(r.start), minutes: (r.duration_seconds ?? 0) / 60, liters: typeof r.liters === "number" ? r.liters : null });
+  for (const a of mp.assignments) {
+    for (const x of runsOf(data, a.device_id)) {
+      if ((a.begin === null || a.begin <= x.end) && (a.end === null || x.end < a.end)) {
+        const r = x.run;
+        out.push({ start: x.start, minutes: (r.duration_seconds ?? 0) / 60, liters: typeof r.liters === "number" ? r.liters : null });
+      }
     }
   }
   return out.sort((a, b) => a.start - b.start);

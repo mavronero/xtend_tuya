@@ -12,7 +12,7 @@
  * unaccounted is never zero; its size and trend are the signal.
  */
 
-import type { FarmData, MeteringPoint, Pump, PumpAssignment, PumpConnection } from "./data.ts";
+import { mpAt, type FarmData, type MeteringPoint, type Pump, type PumpAssignment, type PumpConnection } from "./data.ts";
 
 /** One statistics row from /api/xtend_tuya/pump_stats. */
 export interface StatRow {
@@ -140,9 +140,7 @@ export function balance(
   for (const r of data.runs) {
     const end = Date.parse(r.end);
     if (end < from || end >= to || typeof r.liters !== "number") continue;
-    const mp = data.locations.find((m) =>
-      m.assignments.some((a) => a.device_id === r.device_id && openAt(a, end))
-    );
+    const mp = mpAt(data, r.device_id, end);
     if (!mp || pumpOfMpAt(data, mp, end) !== pump.id) continue;
     valves += r.liters;
     bucket(Date.parse(r.start)).valves += r.liters;

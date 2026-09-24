@@ -203,3 +203,71 @@ async function fetchFarmData(hass: CallApi, now: number): Promise<FarmData> {
     pumpConnections: (locations?.pump_connections ?? []).map((c) => ({ ...c, begin: ms(c.begin), end: ms(c.end) })),
   };
 }
+
+// --- indexes -------------------------------------------------------------
+// Built once per loaded FarmData (cached by identity), so summaries look
+// runs up per valve instead of scanning and date-parsing the whole list on
+// every render. A card re-renders on every HA state change.
+
+export interface IndexedRun {
+  run: Run;
+  start: number;
+  end: number;
+}
+
+interface Indexes {
+  runs: Map<string, IndexedRun[]>;
+  planned: Map<string, PlannedSlot[]>;
+  mps: Map<string, MeteringPoint[]>;
+}
+
+const indexes = new WeakMap<FarmData, Indexes>();
+
+function indexOf(data: FarmData): Indexes {
+  let ix = indexes.get(data);
+  if (ix) return ix;
+  ix = { runs: new Map(), planned: new Map(), mps: new Map() };
+  for (const run of data.runs) {
+    const start = Date.parse(run.start);
+    const end = Date.parse(run.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    const list = ix.runs.get(run.device_id) ?? [];
+    list.push({ run, start, end });
+    ix.runs.set(run.device_id, list);
+  }
+  for (const list of ix.runs.values()) list.sort((a, b) => a.start - b.start);
+  for (const slot of data.planned) {
+    const list = ix.planned.get(slot.key) ?? [];
+    list.push(slot);
+    ix.planned.set(slot.key, list);
+  }
+  for (const list of ix.planned.values()) list.sort((a, b) => a.start - b.start);
+  for (const mp of data.locations) {
+    for (const device of new Set(mp.assignments.map((a) => a.device_id))) {
+      const list = ix.mps.get(device) ?? [];
+      list.push(mp);
+      ix.mps.set(device, list);
+    }
+  }
+  indexes.set(data, ix);
+  return ix;
+}
+
+/** A valve's runs, oldest first, with parsed times. */
+export function runsOf(data: FarmData, device: string): IndexedRun[] {
+  return indexOf(data).runs.get(device) ?? [];
+}
+
+/** Planned slots of a registry entity, earliest first. */
+export function plannedOf(data: FarmData, key: string): PlannedSlot[] {
+  return indexOf(data).planned.get(key) ?? [];
+}
+
+/** The metering point a valve was assigned to at a moment (half-open). */
+export function mpAt(data: FarmData, device: string, at: number): MeteringPoint | undefined {
+  return (indexOf(data).mps.get(device) ?? []).find((m) =>
+    m.assignments.some(
+      (a) => a.device_id === device && (a.begin === null || a.begin <= at) && (a.end === null || at < a.end)
+    )
+  );
+}
