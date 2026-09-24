@@ -384,7 +384,7 @@ ever shrinks.
 | # | Step | Behaviour change | Proof |
 |---|---|---|---|
 | 1 | Test hygiene: remove the duplicate `test_irrigation_locations_seed_once_from_names`; add `tests/unit/` to pytest; boundary ratchet (12 known violations) | none (tests only) | pytest green |
-| 2 | Golden snapshot tool | none (tooling) | runs on dev + prod |
+| 2 | Golden snapshot tool `scripts/golden_snapshot.py` (capture/diff, `--at` pins all windows) | none (tooling) | dev and prod each captured twice: no difference; mutation check catches registry/card/service changes |
 | 3 | Phase 0: `farm/` + `contract.py` | none | snapshot diff empty |
 | 4 | L1: `TuyaPort`, `transport/quota.py`, `transport/breaker.py` | breaker per hub | snapshot diff empty; driver/breaker unit tests |
 | 4b | L1: `HubSettings` + options flow step (plan, limit, mirror) | new options; defaults = today | snapshot diff empty; options flow test; prod without options = unchanged |
@@ -403,7 +403,12 @@ which is simpler.
 1. Hub ownership: explicit owner table (config) or a derived rule?
 2. Retire core `tuya`: repoint the pump/tank automations first. Out of scope,
    but it removes the third copy.
-3. Is the ICS feed in use? If not, drop it from the frozen surface.
+3. **ICS feed: broken since it shipped, so nobody uses it** (found in step 2).
+   `_validate_token` awaits `hass.auth.async_validate_access_token`, which is a
+   *sync* `@callback`. The resulting TypeError is swallowed, so every request
+   gets 401, including on prod. The golden snapshot records the status (401).
+   Decide separately: remove the feed (recommended, since nobody noticed it
+   was missing), or fix it in its own release. Not inside a refactor step.
 
 ## 10. Soak test: DP-only timers (before step 6, prod action, needs approval)
 
