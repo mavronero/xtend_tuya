@@ -4,6 +4,7 @@
 import { LitElement, html, css } from "lit";
 import { property } from "lit/decorators.js";
 import { DAY_MS } from "./format.ts";
+import { farmTokens } from "./theme.ts";
 
 export class XtWeekBars extends LitElement {
   @property({ attribute: false }) daily: number[] = [];
@@ -30,7 +31,9 @@ export class XtWeekBars extends LitElement {
     );
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: flex;
       align-items: flex-end;
@@ -42,12 +45,13 @@ export class XtWeekBars extends LitElement {
     span {
       flex: 1;
       border-radius: 2px;
-      background: var(--divider-color, #e0e0e0);
+      background: var(--xt-track);
     }
     span.on {
-      background: var(--state-switch-active-color, #f9a825);
+      background: var(--xt-water);
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("xt-week-bars")) customElements.define("xt-week-bars", XtWeekBars);

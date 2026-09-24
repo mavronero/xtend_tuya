@@ -5,6 +5,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { Site } from "../farm/data.ts";
 import { childSites, NO_SITE } from "../farm/site-summary.ts";
+import { farmTokens } from "./theme.ts";
 
 export class XtSiteTree extends LitElement {
   @property({ attribute: false }) sites: Site[] = [];
@@ -65,7 +66,9 @@ export class XtSiteTree extends LitElement {
     `;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: flex;
       flex-direction: column;
@@ -100,7 +103,7 @@ export class XtSiteTree extends LitElement {
       --mdc-icon-size: 18px;
       width: 18px;
       flex: none;
-      color: var(--secondary-text-color);
+      color: var(--xt-dim);
     }
     .label {
       flex: 1;
@@ -110,14 +113,15 @@ export class XtSiteTree extends LitElement {
       white-space: nowrap;
     }
     .dim {
-      color: var(--secondary-text-color);
+      color: var(--xt-dim);
     }
     .count {
-      color: var(--secondary-text-color);
+      color: var(--xt-dim);
       font-size: 0.8rem;
       font-variant-numeric: tabular-nums;
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("xt-site-tree")) customElements.define("xt-site-tree", XtSiteTree);

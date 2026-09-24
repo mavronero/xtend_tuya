@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { summarize } from "../frontend/src/farm/valve-summary.ts";
 import { applyFilter, sectionize, subtree, sitePath, NO_FILTER } from "../frontend/src/farm/valve-filter.ts";
 import { summarizeSite, pumpForSite, childSites, NO_SITE } from "../frontend/src/farm/site-summary.ts";
+import { summarizeMp, mpRuns } from "../frontend/src/farm/mp-summary.ts";
 
 const H = 3_600_000;
 const now = new Date(2026, 8, 24, 12, 0).getTime(); // local noon
@@ -130,38 +131,75 @@ assert.deepEqual(
 );
 assert.deepEqual(sectionize([c], sites).map((s) => s.key), ["offline"]); // empty sections dropped
 
-// --- sites -------------------------------------------------------------
+// --- metering points + sites ------------------------------------------
+const mp = (id, name, site_id, assignments, extra = {}) => ({
+  id,
+  name,
+  site_id,
+  valves: assignments.filter((a) => a.end === null).map((a) => a.device_id),
+  assignments,
+  expected_lpm: null,
+  pump: null,
+  ...extra,
+});
+// mp1: valve "x" served until 2 days ago, then "a" took over (exchange).
+data.runs.push(run("x", now - 3 * 24 * H, 10, 100), run("x", now - 20 * 24 * H, 10, 100));
 Object.assign(data, {
   locations: [
-    { id: "mp1", name: "FF East 07", site_id: "east", valve: "a" },
-    { id: "mp2", name: "HM Olive", site_id: "hm", valve: "b" },
-    { id: "mp3", name: "Old bed", site_id: "hm", valve: "c" },
-    { id: "mp4", name: "Empty bed", site_id: "farm", valve: null },
-    { id: "mp5", name: "Loose", site_id: null, valve: null },
+    mp("mp1", "FF East 07", "east", [
+      { device_id: "x", begin: null, end: now - 2 * 24 * H },
+      { device_id: "a", begin: now - 2 * 24 * H, end: null },
+    ], { expected_lpm: 20 }),
+    mp("mp2", "HM Olive", "hm", [{ device_id: "b", begin: null, end: null }]),
+    mp("mp3", "Old bed", "hm", [{ device_id: "c", begin: null, end: null }]),
+    mp("mp4", "Empty bed", "farm", []),
+    mp("mp5", "Loose", null, []),
   ],
   pumps: [{ id: "p1", name: "Big Farm 1", meter_entity: "sensor.big_farm_1" }],
   pumpAssignments: [{ pump_id: "p1", target_kind: "site", target_id: "farm" }],
 });
+
+// History follows the place: x's run 3 days ago counts for mp1, a's older
+// run (9 days ago, before a arrived) does not.
+const r1 = mpRuns(data.locations[0], data);
+assert.deepEqual(r1.map((r) => r.liters), [100, 100, 96, 90]);
+
+const m1 = summarizeMp(data.locations[0], data, all, now);
+assert.deepEqual(m1.valves.map((v) => [v.number, v.status]), [["907", "watering"]]);
+assert.equal(m1.status, "watering");
+assert.equal(m1.week.runs, 3); // x 3 days ago + a yesterday + a today
+assert.equal(m1.week.liters, 286);
+assert.equal(m1.next.start, now + 18 * H);
+// 386 L over 36 min = 10.7 L/min vs expected 20 -> flow_low
+assert.ok(Math.abs(m1.avg_lpm - 386 / 36) < 1e-9);
+assert.deepEqual(m1.badges, ["flow_low"]);
+
+const m2 = summarizeMp(data.locations[1], data, all, now);
+assert.deepEqual(m2.badges, ["low_battery", "stale", "missed", "no_flow"]);
+const m4 = summarizeMp(data.locations[3], data, all, now);
+assert.deepEqual([m4.status, m4.badges, m4.last], ["empty", ["no_valve"], null]);
+
+const mps = data.locations.map((m) => summarizeMp(m, data, all, now));
 assert.deepEqual(childSites(sites, null).map((s) => s.id), ["farm", "hm"]);
 assert.deepEqual(pumpForSite(data, "east").via, "Big Farm");
 assert.equal(pumpForSite(data, "farm").via, null);
 assert.equal(pumpForSite(data, "hm"), null);
 
-const farm = summarizeSite("farm", data, all);
+const farm = summarizeSite("farm", data, mps);
 assert.equal(farm.path, "Big Farm");
 assert.deepEqual(farm.children, ["east"]);
 assert.equal(farm.mps, 2); // mp1 in FF East + the empty mp4
-assert.deepEqual([farm.valves, farm.online, farm.watering, farm.attention, farm.offline], [1, 1, 1, 0, 0]);
-assert.equal(farm.week.liters, 186);
+assert.deepEqual([farm.valves, farm.online, farm.watering, farm.attention, farm.offline], [1, 1, 1, 2, 0]);
+assert.equal(farm.week.liters, 286);
 assert.deepEqual(farm.pump, { name: "Big Farm 1", via: null });
-assert.deepEqual(summarizeSite("east", data, all).pump, { name: "Big Farm 1", via: "Big Farm" });
+assert.deepEqual(summarizeSite("east", data, mps).pump, { name: "Big Farm 1", via: "Big Farm" });
 
-const hm = summarizeSite("hm", data, all);
+const hm = summarizeSite("hm", data, mps);
 assert.deepEqual([hm.mps, hm.valves, hm.online, hm.attention, hm.offline], [2, 2, 1, 1, 1]);
 assert.equal(hm.next, null);
 assert.equal(hm.last, now - 5 * H);
 
-const loose = summarizeSite(NO_SITE, data, all);
+const loose = summarizeSite(NO_SITE, data, mps);
 assert.deepEqual([loose.name, loose.mps, loose.valves], ["No site", 1, 0]);
 
 console.log("ok");

@@ -5,6 +5,7 @@ import { LitElement, html, css } from "lit";
 import { property } from "lit/decorators.js";
 import type { Site } from "../farm/data.ts";
 import { NO_FILTER, sitePath, type StatusFilter, type ValveFilter } from "../farm/valve-filter.ts";
+import { farmTokens } from "./theme.ts";
 
 const STATUSES: [StatusFilter, string][] = [
   ["all", "All"],
@@ -57,7 +58,9 @@ export class XtValveFilterBar extends LitElement {
     `;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: flex;
       flex-wrap: wrap;
@@ -71,7 +74,7 @@ export class XtValveFilterBar extends LitElement {
       font: inherit;
       color: var(--primary-text-color);
       background: var(--card-background-color, #fff);
-      border: 1px solid var(--divider-color, #e0e0e0);
+      border: 1px solid var(--xt-track);
       border-radius: 18px;
       padding: 6px 12px;
       min-height: 36px;
@@ -98,7 +101,8 @@ export class XtValveFilterBar extends LitElement {
       opacity: 0.75;
       font-variant-numeric: tabular-nums;
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("xt-valve-filter-bar")) customElements.define("xt-valve-filter-bar", XtValveFilterBar);

@@ -17,13 +17,14 @@ import type { MeteringPoint, Site } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { childSites, NO_SITE, summarizeSite, type SiteSummary } from "./farm/site-summary.ts";
 import { sitePath, subtree } from "./farm/valve-filter.ts";
-import type { ValveSummary } from "./farm/valve-summary.ts";
+import { summarizeMp, type MpSummary } from "./farm/mp-summary.ts";
 import { liters } from "./components/format.ts";
 import { navigate } from "./components/navigate.ts";
 import "./components/site-card.ts";
 import "./components/site-tree.ts";
-import "./components/valve-card.ts";
+import "./components/mp-card.ts";
 import "./components/week-bars.ts";
+import { farmTokens } from "./components/theme.ts";
 
 type Hass = HomeAssistantLike & {
   user?: { is_admin?: boolean };
@@ -142,7 +143,7 @@ export class IrrigationSitesCard extends LitElement {
               ${sum.watering
                 ? html`<span class="water" title="Valves watering now"><i></i>${sum.watering} watering</span>`
                 : nothing}
-              ${sum.attention ? html`<span class="warn" title="Valves with a warning">${sum.attention} need attention</span>` : nothing}
+              ${sum.attention ? html`<span class="warn" title="Metering points with a warning">${sum.attention} need attention</span>` : nothing}
               <span title="Last 7 days"
                 ><xt-week-bars .daily=${sum.week.daily}></xt-week-bars>${sum.week.runs} runs · ${liters(sum.week.liters)}</span
               >
@@ -197,13 +198,8 @@ export class IrrigationSitesCard extends LitElement {
     </form>`;
   }
 
-  private _mpCard(mp: MeteringPoint, byDevice: Map<string, ValveSummary>) {
-    const v = mp.valve ? byDevice.get(mp.valve) : undefined;
-    const card = v
-      ? html`<xt-valve-card .summary=${v} .siteContext=${mp.site_id}></xt-valve-card>`
-      : html`<ha-card class="empty-mp"
-          ><strong>${mp.name}</strong><span>No valve assigned</span></ha-card
-        >`;
+  private _mpCard(mp: MeteringPoint, sum: MpSummary) {
+    const card = html`<xt-mp-card .summary=${sum}></xt-mp-card>`;
     if (!this._edit) return card;
     const sites = this._farm.data.sites
       .map((s) => ({ id: s.id, path: sitePath(this._farm.data.sites, s.id) }))
@@ -227,14 +223,16 @@ export class IrrigationSitesCard extends LitElement {
     if (!this._farm.loaded) return html`<ha-card><div class="msg">Loading sites…</div></ha-card>`;
     const data = this._farm.data;
     const valves = this._farm.summaries();
-    const byDevice = new Map(valves.map((v) => [v.device_id, v]));
+    const now = Date.now();
+    const mpSums = data.locations.map((m) => summarizeMp(m, data, valves, now));
+    const mpById = new Map(mpSums.map((m) => [m.id, m]));
     const hasNoSite = data.locations.some((m) => !m.site_id);
     const sel = this._selected && (this._selected === NO_SITE || data.sites.some((s) => s.id === this._selected)) ? this._selected : null;
     const site = sel && sel !== NO_SITE ? data.sites.find((s) => s.id === sel) ?? null : null;
-    const sum = sel ? summarizeSite(sel, data, valves) : null;
+    const sum = sel ? summarizeSite(sel, data, mpSums) : null;
 
     const childIds = sel ? sum!.children : [...childSites(data.sites, null).map((s) => s.id), ...(hasNoSite ? [NO_SITE] : [])];
-    const children = childIds.map((id) => summarizeSite(id, data, valves));
+    const children = childIds.map((id) => summarizeSite(id, data, mpSums));
     const mps = sel
       ? data.locations
           .filter((m) => (sel === NO_SITE ? !m.site_id : m.site_id === sel))
@@ -243,12 +241,12 @@ export class IrrigationSitesCard extends LitElement {
     const counts: Record<string, number> = {};
     for (const s of data.sites) counts[s.id] = data.locations.filter((m) => subtree(data.sites, s.id).has(m.site_id ?? "")).length;
     counts[NO_SITE] = data.locations.filter((m) => !m.site_id).length;
-    const withLoc = valves.filter((v) => v.location);
+    const placed = mpSums.flatMap((m) => m.valves);
     const total = {
       sites: data.sites.length,
       mps: data.locations.length,
-      valves: withLoc.length,
-      online: withLoc.filter((v) => v.status !== "offline").length,
+      valves: placed.length,
+      online: placed.filter((v) => v.status !== "offline").length,
     };
 
     return html`<div class="layout" @xt-site-open=${(e: CustomEvent<string | null>) => this._open(e.detail)} @xt-valve-open=${(e: CustomEvent<string>) => navigate(e.detail)}>
@@ -267,7 +265,7 @@ export class IrrigationSitesCard extends LitElement {
           : nothing}
         ${mps.length
           ? html`<h3>Metering points <span class="count">${mps.length}</span></h3>
-              <div class="grid">${mps.map((m) => this._mpCard(m, byDevice))}</div>`
+              <div class="grid">${mps.map((m) => this._mpCard(m, mpById.get(m.id)!))}</div>`
           : nothing}
         ${!sel && !data.sites.length
           ? html`<div class="msg">No sites yet. Sites are created from the Tuya rooms once the valves report them, or by hand in Edit.</div>`
@@ -276,10 +274,11 @@ export class IrrigationSitesCard extends LitElement {
     </div>`;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: block;
-      --xt-dim: var(--secondary-text-color, #727272);
     }
     .layout {
       display: grid;
@@ -354,32 +353,17 @@ export class IrrigationSitesCard extends LitElement {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--state-switch-active-color, #f9a825);
+      background: var(--xt-water);
     }
     .figures .warn {
       padding: 1px 8px;
       border-radius: 10px;
-      background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent);
+      background: color-mix(in srgb, var(--xt-warn) 18%, transparent);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
       gap: 12px;
-    }
-    .empty-mp {
-      padding: 12px 14px;
-      height: 100%;
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      color: var(--xt-dim);
-      font-size: 0.9rem;
-    }
-    .empty-mp strong {
-      color: var(--primary-text-color);
-      font-size: 1.05rem;
-      font-weight: 500;
     }
     .mp-edit {
       display: flex;
@@ -435,16 +419,17 @@ export class IrrigationSitesCard extends LitElement {
       color: inherit;
     }
     .danger:not(:disabled) {
-      color: var(--error-color, #db4437);
+      color: var(--xt-bad);
     }
     .msg {
       padding: 12px 0;
       color: var(--xt-dim);
     }
     .err {
-      color: var(--error-color, #db4437);
+      color: var(--xt-bad);
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("irrigation-sites-card")) customElements.define("irrigation-sites-card", IrrigationSitesCard);

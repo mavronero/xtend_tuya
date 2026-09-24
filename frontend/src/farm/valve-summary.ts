@@ -31,8 +31,7 @@ export interface ValveSummary {
   has_flow_meter: boolean;
   last: RunInfo | null;
   next: RunInfo | null;
-  /** Last 7 local days, oldest first: liters with a flow meter, else minutes. */
-  week: { runs: number; liters: number; minutes: number; daily: number[]; unit: "L" | "min" };
+  week: Week;
   missed: number;
   badges: Badge[];
   location: { id: string; name: string } | null;
@@ -61,6 +60,31 @@ function startOfLocalDay(ms: number): number {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
+}
+
+export interface Week {
+  runs: number;
+  liters: number;
+  minutes: number;
+  /** Last 7 local days, oldest first: liters when metered, else minutes. */
+  daily: number[];
+  unit: "L" | "min";
+}
+
+/** The last 7 local days of a list of runs. */
+export function weekStats(runs: RunInfo[], now: number, metered: boolean): Week {
+  const weekStart = startOfLocalDay(now) - 6 * DAY_MS;
+  const week: Week = { runs: 0, liters: 0, minutes: 0, daily: [0, 0, 0, 0, 0, 0, 0], unit: metered ? "L" : "min" };
+  for (const r of runs) {
+    if (r.start < weekStart) continue;
+    // Rounded: a DST day is 23 or 25 hours long.
+    const day = Math.min(6, Math.round((startOfLocalDay(r.start) - weekStart) / DAY_MS));
+    week.runs += 1;
+    week.liters += r.liters ?? 0;
+    week.minutes += r.minutes;
+    week.daily[day] += metered ? r.liters ?? 0 : r.minutes;
+  }
+  return week;
 }
 
 export function summarize(
@@ -102,22 +126,6 @@ export function summarize(
   const missed = pairPlanRuns(recentPlans, recentRuns, now).filter((e) => e.kind === "missed").length;
 
   const has_flow_meter = !!v.volume_sensor;
-  const today = startOfLocalDay(now);
-  const weekStart = today - 6 * DAY_MS;
-  const daily = [0, 0, 0, 0, 0, 0, 0];
-  let weekRuns = 0;
-  let weekLiters = 0;
-  let weekMinutes = 0;
-  for (const x of runs) {
-    if (x.start < weekStart) continue;
-    const day = Math.min(6, Math.floor((startOfLocalDay(x.start) - weekStart) / DAY_MS + 0.5));
-    const minutes = (x.r.duration_seconds ?? 0) / 60;
-    const liters = typeof x.r.liters === "number" ? x.r.liters : 0;
-    weekRuns += 1;
-    weekLiters += liters;
-    weekMinutes += minutes;
-    daily[day] += has_flow_meter ? liters : minutes;
-  }
 
   const battery = offline ? null : num(v.battery_level ? states[v.battery_level] : undefined);
   const lastReport = v.last_report ? Date.parse(states[v.last_report]?.state ?? "") : NaN;
@@ -147,7 +155,11 @@ export function summarize(
     has_flow_meter,
     last,
     next: nextPlan ? { start: nextPlan.start, minutes: (nextPlan.end - nextPlan.start) / 60_000, liters: null } : null,
-    week: { runs: weekRuns, liters: weekLiters, minutes: weekMinutes, daily, unit: has_flow_meter ? "L" : "min" },
+    week: weekStats(
+      runs.map((x) => info(x.r, x.start)),
+      now,
+      has_flow_meter
+    ),
     missed,
     badges,
     location: location ? { id: location.id, name: location.name } : null,

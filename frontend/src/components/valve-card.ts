@@ -6,8 +6,9 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import type { Badge, RunInfo, ValveSummary } from "../farm/valve-summary.ts";
-import { since, time, when } from "./format.ts";
+import { batteryIcon, since, time, when } from "./format.ts";
 import "./week-bars.ts";
+import { farmTokens } from "./theme.ts";
 
 const BADGE_TEXT: Record<Badge, string> = {
   low_battery: "Low battery",
@@ -23,13 +24,6 @@ const BADGE_TITLE: Record<Badge, string> = {
   no_flow: "The last run measured no water",
 };
 
-/** mdi:battery-10 … mdi:battery, like HA's own battery icon. */
-function batteryIcon(pct: number): string {
-  if (pct >= 95) return "mdi:battery";
-  if (pct < 10) return "mdi:battery-outline";
-  return `mdi:battery-${Math.floor(pct / 10) * 10}`;
-}
-
 function runText(r: RunInfo): string {
   const parts = [when(r.start), `${Math.round(r.minutes)} min`];
   if (r.liters !== null) parts.push(`${Math.round(r.liters)} L`);
@@ -44,8 +38,6 @@ function baseName(s: ValveSummary): string {
 
 export class XtValveCard extends LitElement {
   @property({ attribute: false }) summary?: ValveSummary;
-  /** Site the card is shown in; its name is then left out of the place line. */
-  @property({ attribute: false }) siteContext: string | null = null;
 
   private _open(): void {
     if (!this.summary) return;
@@ -83,8 +75,7 @@ export class XtValveCard extends LitElement {
     // The metering point usually carries the valve's name; show it only
     // when it says something new, then the site.
     const mp = s.location && s.location.name !== baseName(s) ? s.location.name : null;
-    const site = s.site && s.site.id !== this.siteContext ? s.site.name : null;
-    const place = s.location ? [mp, site].filter(Boolean).join(" · ") : "No location";
+    const place = s.location ? [mp, s.site?.name].filter(Boolean).join(" · ") : "No location";
     return html`<ha-card class=${s.status} @click=${this._open} tabindex="0" role="link" aria-label=${s.name}>
       <div class="head">
         <span class="name" title=${s.name}>${baseName(s)}</span>
@@ -118,11 +109,11 @@ export class XtValveCard extends LitElement {
     </ha-card>`;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: block;
-      --xt-water: var(--state-switch-active-color, #f9a825);
-      --xt-dim: var(--secondary-text-color, #727272);
     }
     ha-card {
       padding: 12px 14px;
@@ -170,10 +161,10 @@ export class XtValveCard extends LitElement {
       flex: none;
     }
     .battery.low ha-icon {
-      color: var(--error-color, #db4437);
+      color: var(--xt-bad);
     }
     .battery.low {
-      color: var(--error-color, #db4437);
+      color: var(--xt-bad);
       font-weight: 600;
     }
     .dim {
@@ -200,7 +191,7 @@ export class XtValveCard extends LitElement {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--success-color, #4caf50);
+      background: var(--xt-ok);
     }
     .status.watering {
       font-weight: 500;
@@ -210,7 +201,7 @@ export class XtValveCard extends LitElement {
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--xt-water) 30%, transparent);
     }
     .status.offline i {
-      background: var(--disabled-text-color, #bdbdbd);
+      background: var(--xt-off);
     }
     dl {
       display: grid;
@@ -244,14 +235,15 @@ export class XtValveCard extends LitElement {
       font-size: 0.75rem;
       padding: 1px 8px;
       border-radius: 10px;
-      background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent);
+      background: color-mix(in srgb, var(--xt-warn) 18%, transparent);
       color: var(--primary-text-color);
     }
     .badge.missed,
     .badge.no_flow {
-      background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent);
+      background: color-mix(in srgb, var(--xt-bad) 18%, transparent);
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("xt-valve-card")) customElements.define("xt-valve-card", XtValveCard);

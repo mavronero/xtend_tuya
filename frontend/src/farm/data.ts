@@ -23,12 +23,23 @@ export interface Site {
   parent_id: string | null;
 }
 
+/** A valve's dated stay at a metering point; ms, null = open-ended. */
+export interface Assignment {
+  device_id: string;
+  begin: number | null;
+  end: number | null;
+}
+
 export interface MeteringPoint {
   id: string;
   name: string;
   site_id: string | null;
-  /** Tuya id of the valve it holds now, if any. */
-  valve: string | null;
+  /** Tuya ids of the valves it holds now (normally one). */
+  valves: string[];
+  assignments: Assignment[];
+  expected_lpm: number | null;
+  /** Pump feeding it now; `via` names the site it is inherited from. */
+  pump: { name: string; via: string | null } | null;
 }
 
 export interface Pump {
@@ -71,7 +82,14 @@ interface CallApi {
 }
 
 interface LocationsResponse {
-  locations?: { id: string; name: string; site_id?: string | null; devices?: { device_id: string; end: string | null }[] }[];
+  locations?: {
+    id: string;
+    name: string;
+    site_id?: string | null;
+    expected_lpm?: number | null;
+    pump?: { name: string; inherited_from: string | null } | null;
+    devices?: { device_id: string; begin: string | null; end: string | null }[];
+  }[];
   sites?: Site[];
   pumps?: Pump[];
   pump_assignments?: PumpAssignment[];
@@ -116,13 +134,26 @@ async function fetchFarmData(hass: CallApi, now: number): Promise<FarmData> {
       `calendars/calendar.irrigation_planned?start=${iso(now - 2 * DAY_MS)}&end=${iso(now + 8 * DAY_MS)}`
     ),
   ]);
+  const ms = (iso: string | null) => (iso ? Date.parse(iso) : null);
+  const siteName = new Map((locations?.sites ?? []).map((s) => [s.id, s.name]));
   const mps: MeteringPoint[] = [];
   const locationOf: Record<string, MeteringPoint> = {};
   for (const loc of locations?.locations ?? []) {
-    const open = (loc.devices ?? []).find((d) => d.end === null);
-    const mp = { id: loc.id, name: loc.name, site_id: loc.site_id ?? null, valve: open?.device_id ?? null };
+    const devices = loc.devices ?? [];
+    const pump = loc.pump
+      ? { name: loc.pump.name, via: loc.pump.inherited_from ? siteName.get(loc.pump.inherited_from) ?? null : null }
+      : null;
+    const mp: MeteringPoint = {
+      id: loc.id,
+      name: loc.name,
+      site_id: loc.site_id ?? null,
+      valves: devices.filter((d) => d.end === null).map((d) => d.device_id),
+      assignments: devices.map((d) => ({ device_id: d.device_id, begin: ms(d.begin), end: ms(d.end) })),
+      expected_lpm: loc.expected_lpm ?? null,
+      pump,
+    };
     mps.push(mp);
-    for (const d of loc.devices ?? []) if (d.end === null) locationOf[d.device_id] = mp;
+    for (const id of mp.valves) locationOf[id] = mp;
   }
   const slots: PlannedSlot[] = [];
   for (const e of planned ?? []) {

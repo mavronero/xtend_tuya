@@ -1,9 +1,10 @@
 /** What a site card and a site header show (pure): the site's whole subtree
- * aggregated from the valve summaries, plus its pump. */
+ * aggregated from its metering points (places, so the history survives
+ * valve exchanges), plus its pump. */
 
 import type { FarmData, Pump, Site } from "./data.ts";
-import { needsAttention, sitePath, subtree } from "./valve-filter.ts";
-import type { ValveSummary } from "./valve-summary.ts";
+import type { MpSummary } from "./mp-summary.ts";
+import { sitePath, subtree } from "./valve-filter.ts";
 
 /** Pseudo site for metering points that belong to no site. */
 export const NO_SITE = "__no_site__";
@@ -20,6 +21,7 @@ export interface SiteSummary {
   valves: number;
   online: number;
   watering: number;
+  /** Metering points with a warning. */
   attention: number;
   offline: number;
   last: number | null;
@@ -44,25 +46,22 @@ export function pumpForSite(data: FarmData, siteId: string): { pump: Pump; via: 
   return null;
 }
 
-export function summarizeSite(siteId: string, data: FarmData, valves: ValveSummary[]): SiteSummary {
+export function summarizeSite(siteId: string, data: FarmData, mps: MpSummary[]): SiteSummary {
   const noSite = siteId === NO_SITE;
   const site = noSite ? null : data.sites.find((s) => s.id === siteId) ?? null;
   const ids = noSite ? null : subtree(data.sites, siteId);
-  const inScope = (id: string | null | undefined) => (ids ? !!id && ids.has(id) : !id);
-  const mine = valves.filter((v) => v.location && inScope(v.site?.id));
-  const online = mine.filter((v) => v.status !== "offline");
+  const mine = mps.filter((m) => (ids ? !!m.site_id && ids.has(m.site_id) : !m.site_id));
+  const valves = mine.flatMap((m) => m.valves);
   const daily = [0, 0, 0, 0, 0, 0, 0];
   let runs = 0;
   let liters = 0;
-  for (const v of mine) {
-    runs += v.week.runs;
-    liters += v.week.liters;
-    if (v.week.unit === "L") v.week.daily.forEach((x, i) => (daily[i] += x));
+  for (const m of mine) {
+    runs += m.week.runs;
+    liters += m.week.liters;
+    if (m.week.unit === "L") m.week.daily.forEach((x, i) => (daily[i] += x));
   }
-  const times = (pick: (v: ValveSummary) => number | undefined) =>
-    mine.map(pick).filter((x): x is number => typeof x === "number");
-  const lasts = times((v) => v.last?.start);
-  const nexts = times((v) => v.next?.start);
+  const lasts = mine.map((m) => m.last?.start).filter((x): x is number => typeof x === "number");
+  const nexts = mine.map((m) => m.next?.start).filter((x): x is number => typeof x === "number");
   const pump = noSite ? null : pumpForSite(data, siteId);
   return {
     id: siteId,
@@ -70,12 +69,12 @@ export function summarizeSite(siteId: string, data: FarmData, valves: ValveSumma
     path: site ? sitePath(data.sites, site.id) : "No site",
     parent_id: site?.parent_id ?? null,
     children: noSite ? [] : childSites(data.sites, siteId).map((s) => s.id),
-    mps: data.locations.filter((m) => inScope(m.site_id)).length,
-    valves: mine.length,
-    online: online.length,
-    watering: online.filter((v) => v.status === "watering").length,
-    attention: online.filter(needsAttention).length,
-    offline: mine.length - online.length,
+    mps: mine.length,
+    valves: valves.length,
+    online: valves.filter((v) => v.status !== "offline").length,
+    watering: valves.filter((v) => v.status === "watering").length,
+    attention: mine.filter((m) => m.status !== "offline" && m.badges.length > 0).length,
+    offline: valves.filter((v) => v.status === "offline").length,
     last: lasts.length ? Math.max(...lasts) : null,
     next: nexts.length ? Math.min(...nexts) : null,
     week: { runs, liters, daily },

@@ -5,6 +5,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import type { Section } from "../farm/valve-filter.ts";
 import "./valve-card.ts";
+import { farmTokens } from "./theme.ts";
 
 export class XtValveSection extends LitElement {
   @property({ attribute: false }) section?: Section;
@@ -29,7 +30,9 @@ export class XtValveSection extends LitElement {
     `;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: block;
       margin-bottom: 20px;
@@ -49,10 +52,10 @@ export class XtValveSection extends LitElement {
     }
     .title ha-icon {
       margin-left: auto;
-      color: var(--secondary-text-color);
+      color: var(--xt-dim);
     }
     .count {
-      color: var(--secondary-text-color);
+      color: var(--xt-dim);
       font-weight: 400;
       font-size: 0.9em;
     }
@@ -69,7 +72,8 @@ export class XtValveSection extends LitElement {
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
       gap: 12px;
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("xt-valve-section")) customElements.define("xt-valve-section", XtValveSection);

@@ -7,6 +7,7 @@ import { property } from "lit/decorators.js";
 import type { SiteSummary } from "../farm/site-summary.ts";
 import { liters, when } from "./format.ts";
 import "./week-bars.ts";
+import { farmTokens } from "./theme.ts";
 
 export class XtSiteCard extends LitElement {
   @property({ attribute: false }) summary?: SiteSummary;
@@ -52,7 +53,7 @@ export class XtSiteCard extends LitElement {
       ${s.attention || s.offline
         ? html`<div class="badges">
             ${s.attention
-              ? html`<span class="badge warn" title="Valves with a warning (battery, no report, missed run, no water)"
+              ? html`<span class="badge warn" title="Metering points with a warning (battery, no report, missed run, no water, flow)"
                   >${s.attention} need attention</span
                 >`
               : nothing}
@@ -62,11 +63,11 @@ export class XtSiteCard extends LitElement {
     </ha-card>`;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       display: block;
-      --xt-water: var(--state-switch-active-color, #f9a825);
-      --xt-dim: var(--secondary-text-color, #727272);
     }
     ha-card {
       padding: 12px 14px;
@@ -124,7 +125,7 @@ export class XtSiteCard extends LitElement {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--success-color, #4caf50);
+      background: var(--xt-ok);
     }
     .status.watering {
       font-weight: 500;
@@ -165,12 +166,13 @@ export class XtSiteCard extends LitElement {
       font-size: 0.75rem;
       padding: 1px 8px;
       border-radius: 10px;
-      background: color-mix(in srgb, var(--disabled-text-color, #bdbdbd) 30%, transparent);
+      background: color-mix(in srgb, var(--xt-off) 30%, transparent);
     }
     .badge.warn {
-      background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent);
+      background: color-mix(in srgb, var(--xt-warn) 18%, transparent);
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("xt-site-card")) customElements.define("xt-site-card", XtSiteCard);

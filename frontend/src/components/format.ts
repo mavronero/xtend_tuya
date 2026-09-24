@@ -34,3 +34,10 @@ export function since(ms: number, now = Date.now()): string {
 export function liters(l: number): string {
   return `${Math.round(l).toLocaleString()} L`;
 }
+
+/** mdi:battery-10 … mdi:battery, like HA's own battery icon. */
+export function batteryIcon(pct: number): string {
+  if (pct >= 95) return "mdi:battery";
+  if (pct < 10) return "mdi:battery-outline";
+  return `mdi:battery-${Math.floor(pct / 10) * 10}`;
+}
