@@ -189,7 +189,6 @@ entity_parser/valves/            (upstream plugin mechanism; replaces entity_par
     t3_status.py                 sat_N (battery, sun flag, next run), flow_sta_N (volume + duration)
     counter_custom.py            QT-08W "dur,vol" / bare number; T3 CSV "mode,flag,dur,vol,ts", 0xFFFE sentinel
     run_times.py                 start_time / close_time
-  specs/<product_id>.json        checked-in Tuya spec (from fixtures; never local keys)
   timer_state.py                 TimerState: single writer for slots
   driver.py                      ValveDriver(port, profile): the command side
   entities.py                    entity descriptors: read state, write nothing
@@ -242,8 +241,11 @@ tested with the payloads captured in the decode docs. Examples:
 - `counter_custom` QT-08W: `"30,17"`, or a bare number (→ none). T3: CSV with
   sentinel 65534 = aborted.
 
-A **spec conformance test** checks each profile's `DpMap` against
-`specs/<product_id>.json`. It catches typos in DP codes (the product itself
+A **spec conformance test** checks each profile's `DpMap` against the
+product's real Tuya spec, which is already in the prod fixtures (no copied
+spec files). In the specs the byte DPs are typed `String`, not `Raw` (DP
+instruction mode), so the test checks existence and direction (read = in the
+status spec, write = a writable function). It catches typos in DP codes (the product itself
 spells DP 113 `sta_3`) and type mismatches before anything reaches a device.
 
 ### 4.5 Timer state: single writer
@@ -427,7 +429,7 @@ ever shrinks.
 | 3a | Fix: offline valves discovered (6b21fef3), released right after 3 | past runs of offline valves back in the calendar | dev diff: only additions |
 | 4 | L1: `TuyaPort` (`transport/port.py`), `transport/quota.py` (moved), `transport/breaker.py`; timer/control services use only the port | breaker per hub; after a trip, remaining cloud writes in the same call are skipped (were still sent); a 60001001 on a GET also trips | dev: snapshot diff empty; all 6 services on a QT-08W + T3 give identical results and DP effects; unit tests on the real port; ratchet 12 → 6 |
 | 4b | L1: `HubSettings` (`transport/settings.py`) + options step "Tuya plan and SmartLife sync"; quota card shows "no limit" for paid | new options; defaults = today; with the mirror off, resync refuses (it would clear every HA timer) | dev: snapshot diff empty, service results identical, step renders with translations; harness: flow validates, stores, reloads, quota tracker unlimited. Not covered by a test: "Configure API" keeping `hub_settings` (code review only) |
-| 5 | L2a: codecs out (pure) + `specs/` + conformance test; entities use the codecs | none | snapshot diff empty; codec tests on captures |
+| 5 | L2a: `entity_parser/fdm5kw/codecs/` (time_task, single_run, t3_status, counter_custom, run_times; pure, stdlib only, bytes in/out); wrappers and services use them; T3 timer wrappers are single inheritance with a swapped `decode` (the MRO diamond is gone); dead `_decode_start_time` and stale docstrings removed; `test_t3_decode.py` (shipped inside the integration) replaced by `tests/unit/test_codecs.py` | none | 1,040,000 old/new parity comparisons (random + edge frames); codec tests on every captured payload; conformance vs the fixture specs; >200 real prod DP values decode; `test_codecs_are_pure`; dev: 1,331 valve entity values identical, snapshot diff empty, services identical |
 | 6 | L2b: profiles + `ValveDriver` on the port; services return `CommandResult` | optional response | snapshot diff empty; driver tests. **Prerequisite:** soak test of DP-only timers (below) |
 | 7 | L2c: `TimerState` single writer | none intended | rehearsal on dev (set/delete/resync/SmartLife disable); highest risk |
 | 8 | Boundary test without xfails; mypy strict green | none | CI |

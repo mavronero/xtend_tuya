@@ -115,3 +115,20 @@ def test_no_new_layer_violations():
 def test_known_violations_list_is_current():
     fixed = KNOWN_VIOLATIONS - current_violations()
     assert not fixed, f"fixed, remove from KNOWN_VIOLATIONS: {sorted(fixed)}"
+
+
+def test_codecs_are_pure():
+    """codecs/ (principle 2): stdlib only, nothing from HA, Tuya libs or the integration."""
+    import sys
+
+    codecs = ROOT / "entity_parser" / "fdm5kw" / "codecs"
+    impure = []
+    for path in codecs.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and node.level:
+                if node.level > 1 or (node.module or "").split(".")[0] not in {p.stem for p in codecs.glob("*.py")} | {""}:
+                    impure.append((path.name, "." * node.level + (node.module or "")))
+                continue
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) else []
+            impure += [(path.name, n) for n in names if n.split(".")[0] not in sys.stdlib_module_names | {"__future__"}]
+    assert not impure, impure

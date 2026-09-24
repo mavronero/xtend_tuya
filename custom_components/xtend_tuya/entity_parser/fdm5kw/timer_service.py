@@ -19,22 +19,19 @@ import json
 import logging
 
 from ...transport.port import CloudResult, TuyaPort, port_for_device
+from .codecs import time_task as tt
 from .const import (
-    DAYS_OF_WEEK,
     TUYA_ERR_DEVICE_POOL_QUOTA,
     TUYA_ERR_DEVICE_POOL_QUOTA_MSG,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-TIME_TASK_CODE = "time_task"
-# QT-08W-T3 valves carry the indexed `time_task_0` DP instead of `time_task`,
-# with a 12-byte payload (per-timer index at byte[1], not byte[0]). Same
-# sliding-window model — only the DP code + byte layout differ, so the write
-# path branches on device.status presence. See t3_valve_dp_decode memory.
-TIME_TASK_CODE_T3 = "time_task_0"
-MODE_DURATION = 0
-MODE_VOLUME = 1
+# QT-08W-T3 valves carry the indexed `time_task_0` DP instead of `time_task`
+# (byte layouts in codecs/time_task.py). Same sliding-window model, so the
+# write path branches on device.status presence.
+TIME_TASK_CODE = tt.QT08W_CODE
+TIME_TASK_CODE_T3 = tt.T3_CODE
 
 _QUOTA_NOTIFICATION_ID = "xtend_tuya_fdm5kw_cloud_quota"
 
@@ -72,121 +69,8 @@ def _handle_cloud_result(hass, op: str, device_id: str, result: CloudResult) -> 
         _notify_quota_exceeded(hass)
 
 
-def _days_to_mask(days: list[str] | int | None) -> int:
-    if days is None:
-        return 0
-    if isinstance(days, int):
-        return days & 0x7F
-    mask = 0
-    for d in days:
-        try:
-            mask |= 1 << DAYS_OF_WEEK.index(d.capitalize())
-        except ValueError:
-            _LOGGER.warning("Unknown day %r (expected one of %s)", d, DAYS_OF_WEEK)
-    return mask
-
-
-def _mask_to_loops(mask: int) -> str:
-    return "".join("1" if mask & (1 << i) else "0" for i in range(7))
-
-
-def _mode_to_int(mode: str) -> int:
-    if mode == "duration":
-        return MODE_DURATION
-    if mode == "volume":
-        return MODE_VOLUME
-    raise ValueError(f"mode must be 'duration' or 'volume', got {mode!r}")
-
-
-def build_time_task_payload(
-    slot: int,
-    mode: int,
-    value: int,
-    hour: int,
-    minute: int,
-    days_mask: int,
-    enabled: bool,
-) -> str:
-    """Build base64-encoded 11-byte time_task DP payload.
-
-    Byte layout (verified 2026-06-05 against SmartLife app toggles):
-    [slot, enabled, mode, value(4B BE), hour, minute, days_mask, const=1].
-    byte[1] is the enable flag (1=active, 0=disabled) — SmartLife flips
-    exactly this byte on toggle, keeping the rest of the payload. byte[10]
-    is a constant 1 (NOT the enable flag, as the old spec assumed).
-    """
-    if not 0 <= slot <= 6:
-        raise ValueError(f"slot must be 0–6, got {slot}")
-    payload = bytes(
-        [
-            slot & 0xFF,
-            1 if enabled else 0,
-            mode & 0xFF,
-            (value >> 24) & 0xFF,
-            (value >> 16) & 0xFF,
-            (value >> 8) & 0xFF,
-            value & 0xFF,
-            hour & 0xFF,
-            minute & 0xFF,
-            days_mask & 0x7F,
-            1,
-        ]
-    )
-    return base64.b64encode(payload).decode("ascii")
-
-
-def build_delete_payload(slot: int) -> str:
-    """Build base64 payload that clears a slot (count=0)."""
-    if not 0 <= slot <= 6:
-        raise ValueError(f"slot must be 0–6, got {slot}")
-    return base64.b64encode(bytes([slot] + [0] * 10)).decode("ascii")
-
-
-def build_time_task_payload_t3(
-    index: int,
-    mode: int,
-    value: int,
-    hour: int,
-    minute: int,
-    days_mask: int,
-    enabled: bool,
-) -> str:
-    """Build base64 12-byte time_task_0 DP payload for QT-08W-T3.
-
-    Byte layout (decoded live 2026-07-15, two duration timers on 706):
-    [00, index, index, mode, value(4B BE), hour, minute, days_mask, enabled].
-    byte[1] is the per-timer index (NOT byte[0] as on old valves); byte[2]
-    mirrors the index in SmartLife's own writes; mode 0=duration(s)/1=vol(L),
-    days bit0=Mon. A raw write of this shape applied on-device (48 s echo,
-    cloud didn't roll back) — see t3_valve_dp_decode memory.
-    """
-    if not 0 <= index <= 6:
-        raise ValueError(f"index must be 0–6, got {index}")
-    payload = bytes(
-        [
-            0,
-            index & 0xFF,
-            index & 0xFF,
-            mode & 0xFF,
-            (value >> 24) & 0xFF,
-            (value >> 16) & 0xFF,
-            (value >> 8) & 0xFF,
-            value & 0xFF,
-            hour & 0xFF,
-            minute & 0xFF,
-            days_mask & 0x7F,
-            1 if enabled else 0,
-        ]
-    )
-    return base64.b64encode(payload).decode("ascii")
-
-
-def build_delete_payload_t3(index: int) -> str:
-    """Clear a T3 slot: all-zero 12-byte payload at the given index. index 0
-    is the all-zeros frame confirmed to clear on 706 (2026-07-15)."""
-    if not 0 <= index <= 6:
-        raise ValueError(f"index must be 0–6, got {index}")
-    return base64.b64encode(bytes([0, index] + [0] * 10)).decode("ascii")
+def _b64(frame: bytes) -> str:
+    return base64.b64encode(frame).decode("ascii")
 
 
 def _is_t3(port: TuyaPort, device_id: str) -> bool:
@@ -268,7 +152,7 @@ async def _post_cloud_timer(
         )
         return
     time_str = f"{hour:02d}:{minute:02d}"
-    loops = _mask_to_loops(days_mask)
+    loops = tt.mask_to_loops(days_mask)
     start_time_sec = hour * 3600 + minute * 60
     # SmartLife's scheduler UI requires the rich `value` shape — verified
     # against the Mavronero account on 2026-05-12. A minimal body still
@@ -277,8 +161,8 @@ async def _post_cloud_timer(
     func_value = {
         "startTimeStr": time_str,
         "loops": loops,
-        "duration": value if mode == MODE_DURATION else 0,
-        "capacity": value if mode == MODE_VOLUME else 0,
+        "duration": value if mode == tt.MODE_DURATION else 0,
+        "capacity": value if mode == tt.MODE_VOLUME else 0,
         "startTime": start_time_sec,
         "start": True,
         "current": 0,
@@ -338,7 +222,7 @@ async def _delete_cloud_timer_by_match(
         return
     resp = listing.payload
     time_str = f"{hour:02d}:{minute:02d}"
-    loops = _mask_to_loops(days_mask)
+    loops = tt.mask_to_loops(days_mask)
     matched = False
     for category in resp.get("result", []):
         for group in category.get("groups", []):
@@ -381,9 +265,9 @@ async def set_timer(hass, data: dict) -> bool:
     slot: int = int(data["slot"])
     hour: int = int(data["hour"])
     minute: int = int(data["minute"])
-    mode: int = _mode_to_int(data.get("mode", "duration"))
+    mode: int = tt.mode_from_name(data.get("mode", "duration"))
     value: int = int(data["value"])
-    days_mask: int = _days_to_mask(data.get("days"))
+    days_mask: int = tt.days_to_mask(data.get("days"))
     enabled: bool = bool(data.get("enabled", True))
 
     port = port_for_device(hass, device_id)
@@ -403,14 +287,8 @@ async def set_timer(hass, data: dict) -> bool:
     # and the cloud doesn't roll it back.
     is_t3 = _is_t3(port, device_id)
     task_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
-    if is_t3:
-        b64 = build_time_task_payload_t3(
-            slot, mode, value, hour, minute, days_mask, enabled
-        )
-    else:
-        b64 = build_time_task_payload(
-            slot, mode, value, hour, minute, days_mask, enabled
-        )
+    timer = tt.Timer(slot, hour, minute, mode, value, days_mask, enabled)
+    b64 = _b64(tt.encode_t3(timer) if is_t3 else tt.encode_qt08w(timer))
     if not await _write_time_task(port, device_id, b64, code=task_code):
         return False
 
@@ -574,7 +452,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
             continue
         key = (
             f"{int(s.get('hour', 0)):02d}:{int(s.get('minute', 0)):02d}",
-            _mask_to_loops(int(s.get("days_mask", 0))),
+            tt.mask_to_loops(int(s.get("days_mask", 0))),
         )
         if key in cloud_keys:
             continue  # legit — cloud agrees it exists
@@ -588,10 +466,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
                 slot_idx, device_id,
             )
             continue
-        clear_payload = (
-            build_delete_payload_t3(slot_idx) if is_t3
-            else build_delete_payload(slot_idx)
-        )
+        clear_payload = _b64(tt.clear_t3(slot_idx) if is_t3 else tt.clear_qt08w(slot_idx))
         clear_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
         if await _write_time_task(
             port, device_id, clear_payload, code=clear_code
@@ -637,12 +512,8 @@ async def delete_timer(hass, data: dict) -> bool:
     # T3 uses the indexed 12-byte clear + time_task_0 code; the cloud
     # delete-by-match below is code-agnostic (matches on time/loops).
     is_t3 = _is_t3(port, device_id)
-    if is_t3:
-        b64 = build_delete_payload_t3(slot)
-        task_code = TIME_TASK_CODE_T3
-    else:
-        b64 = build_delete_payload(slot)
-        task_code = TIME_TASK_CODE
+    b64 = _b64(tt.clear_t3(slot) if is_t3 else tt.clear_qt08w(slot))
+    task_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
     if not await _write_time_task(port, device_id, b64, code=task_code):
         return False
 

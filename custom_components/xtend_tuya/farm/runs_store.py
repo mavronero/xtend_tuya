@@ -32,7 +32,6 @@ from functools import partial
 from typing import Any, Callable
 
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,

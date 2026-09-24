@@ -3,7 +3,6 @@
 from __future__ import annotations
 import base64
 import logging
-import struct
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
@@ -36,12 +35,14 @@ from ...ha_tuya_integration.tuya_integration_imports import (
 from ...farm.water_math import plausible_delta
 from ...const import XTDPCode
 from . import location_service
+from .codecs import counter_custom, run_times, single_run, t3_status
+from .codecs import time_task as tt
 
 _LOGGER = logging.getLogger(__name__)
 
 # DP codes not yet in XTDPCode — use string literals until PR is merged
-DP_ONE_CONTROL = "one_control"
-DP_TIME_TASK = "time_task"
+DP_ONE_CONTROL = single_run.ONE_CONTROL_CODE
+DP_TIME_TASK = tt.QT08W_CODE
 DP_RUN_TASK_STA = "run_task_sta"
 DP_CUR_CAP = "cur_cap"
 DP_START_TIME = "start_time"
@@ -51,7 +52,7 @@ DP_START_TIME = "start_time"
 # per running valve. Simon asked for 10s in the 2026-05-12 review.
 FLOW_RATE_REFRESH = timedelta(seconds=10)
 
-from .const import DEVICE_CATEGORY, DAYS_OF_WEEK
+from .const import DEVICE_CATEGORY
 
 
 # ---------------------------------------------------------------------------
@@ -132,21 +133,16 @@ class DPCodeLastReportWrapper(XTDPCodeRawStatusWrapper):
 
 
 class DPCodeTimestampWrapper(XTDPCodeRawStatusWrapper):
-    """Decodes start_time / close_time: 6 bytes [year_offset, month, day, hour, minute, second]."""
+    """start_time / close_time as 'YYYY-MM-DD HH:MM:SS' (codecs/run_times.py)."""
 
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
         if decoded := super().read_device_status(device):
-            if len(decoded) == 6:
-                y, mo, d, h, mi, s = struct.unpack("BBBBBB", decoded)
-                # 0xFF bytes = no data / unset
-                if y == 255 or mo == 0 or mo > 12 or d == 0 or d > 31:
-                    return None
-                return f"20{y:02d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}"
+            return run_times.decode(bytes(decoded))
         return None
 
 
 class DPCodeOneControlWrapper(XTDPCodeRawStatusWrapper):
-    """Decodes one_control: 6 bytes [mode, param_hi, param_mid_hi, param_mid_lo, param_lo, ?]."""
+    """one_control status: (lead, value) of the last single watering (codecs/single_run.py)."""
 
     def __init__(self, dpcode: str, type_information: TuyaRawTypeInformation) -> None:
         super().__init__(dpcode, type_information)
@@ -155,43 +151,22 @@ class DPCodeOneControlWrapper(XTDPCodeRawStatusWrapper):
 
     def update_data(self, device: TuyaCustomerDevice) -> None:
         if decoded := super().read_device_status(device):
-            if len(decoded) >= 6:
-                self.mode = decoded[0]
-                self.value = int.from_bytes(decoded[1:5], byteorder="big")
+            if parsed := single_run.decode_one_control(bytes(decoded)):
+                self.mode, self.value = parsed
 
 
 class DPCodeOneControlModeWrapper(DPCodeOneControlWrapper):
-    """Returns the one_control *status* mode label.
-
-    one_control status mirrors the last command payload [lead, value(4B BE), flag].
-    Verified live 2026-06-09 by triggering single-waterings on 964 and reading status:
-        idle (no single-watering):  [0,0,0,0,0,0]      value 0
-        duration run/armed:         [0,0,0,V,V,1]      lead 0, value = seconds  (964=900, 977=10)
-        volume run/armed:           [1,0,0,0,V,1]      lead 1, value = liters   (964 volume 5L → [1,0,0,0,5,1])
-    So lead byte 0 = duration, 1 = volume — the same encoding as time_task's mode
-    byte (0=duration, 1=volume). The pre-4.4.183 note in irrigation-dp-decoding.md
-    (0=idle / 1=duration / 3=volume) was stale and is wrong on every count.
-
-    A zero value means no single-watering is set -> "idle" (covers both a truly idle
-    valve and a just-finished run, where the device clears the value but keeps the
-    last lead byte). A non-zero value -> the lead byte gives the mode.
-    """
+    """"idle" / "duration" / "volume" (lead 0 = duration, 1 = volume, verified 2026-06-09)."""
 
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
         self.update_data(device)
         if self.mode is None:
             return None
-        if not self.value:
-            return "idle"
-        if self.mode == 0:
-            return "duration"
-        if self.mode == 1:
-            return "volume"
-        return f"unknown ({self.mode})"
+        return single_run.one_control_mode(self.mode, self.value or 0)
 
 
 class DPCodeOneControlValueWrapper(DPCodeOneControlWrapper):
-    """Returns the one_control parameter value (duration in sec or volume in L)."""
+    """The one_control parameter value (duration in sec or volume in L)."""
 
     def read_device_status(self, device: TuyaCustomerDevice) -> int | None:
         self.update_data(device)
@@ -199,25 +174,12 @@ class DPCodeOneControlValueWrapper(DPCodeOneControlWrapper):
 
 
 class DPCodeTimeTaskWrapper(XTDPCodeRawStatusWrapper):
-    """Decodes time_task: 11 bytes.
+    """The timer in the sliding-window timer DP (layouts in codecs/time_task.py).
 
-    Layout (corrected 2026-06-05 against live SmartLife app toggles):
-    [slot_index, enabled, mode, value(4 bytes uint32 BE), hour, minute,
-     days_bitmask, const].
-    - byte[1] = enable flag: 1=active, 0=disabled. SmartLife flips exactly
-      this byte when you toggle a timer off/on; the rest of the payload is
-      retained. (The old spec mislabelled this "count/always 1" — every
-      sample then was active so byte[1] and byte[10] couldn't be told apart.)
-    - byte[10] = constant 1 (NOT "enabled", as previously assumed).
-    A true delete is byte[1]==0 with an all-zero payload; a merely disabled
-    timer is byte[1]==0 with its real payload intact.
-
-    The DP acts as a sliding window — only shows the last-written timer slot.
-    The device stores all timers internally. Each edit pushes that slot's data.
-
-    Mode: 0=duration (value in seconds), 1=volume (value in liters)
-    Days bitmask: bit0=Mon, bit1=Tue, ..., bit6=Sun
+    `decode` is the product's codec; the T3 variants below only swap it.
     """
+
+    decode = staticmethod(tt.decode_qt08w)
 
     def __init__(self, dpcode: str, type_information: TuyaRawTypeInformation) -> None:
         super().__init__(dpcode, type_information)
@@ -226,38 +188,9 @@ class DPCodeTimeTaskWrapper(XTDPCodeRawStatusWrapper):
 
     def update_data(self, device: TuyaCustomerDevice) -> None:
         if decoded := super().read_device_status(device):
-            if len(decoded) < 11:
-                return
-            self.slot_index = decoded[0]
-            entry = decoded[2:11]
-            # byte[1] is the enable flag (1=active, 0=disabled), NOT a count.
-            # A true delete is byte[1]==0 AND an all-zero payload; a disabled
-            # timer keeps its full payload with byte[1]==0 — keep it (greyed),
-            # don't drop it (that was the "timer vanishes in HA" bug).
-            enabled = decoded[1]
-            if enabled == 0 and not any(entry):
-                self.timer = None
-                return
-            mode = entry[0]
-            value = int.from_bytes(entry[1:5], byteorder="big")
-            hour = entry[5]
-            minute = entry[6]
-            days_mask = entry[7]
-            # entry[8] == decoded[10] is a constant 1, not the enable flag.
-            days = [
-                DAYS_OF_WEEK[i] for i in range(7) if days_mask & (1 << i)
-            ]
-            self.timer = {
-                "slot": self.slot_index,
-                "hour": hour,
-                "minute": minute,
-                "mode": "duration" if mode == 0 else "volume",
-                "value": value,
-                "value_unit": "s" if mode == 0 else "L",
-                "days": days,
-                "days_mask": days_mask,
-                "enabled": bool(enabled),
-            }
+            if (frame := self.decode(bytes(decoded))) is not None:
+                self.slot_index = frame.index
+                self.timer = frame.timer.as_attribute() if frame.timer else None
 
 
 class DPCodeTimeTaskSlotWrapper(DPCodeTimeTaskWrapper):
@@ -470,24 +403,6 @@ if _republish_valve_location not in location_service.REFRESH_LISTENERS:
 # ---------------------------------------------------------------------------
 
 
-def _decode_start_time(raw_b64: Any) -> datetime | None:
-    """Decode the 6-byte time_task DP timestamp into a naive local datetime."""
-    try:
-        import base64
-        b = base64.b64decode(raw_b64) if isinstance(raw_b64, str) else bytes(raw_b64)
-    except Exception:
-        return None
-    if len(b) != 6:
-        return None
-    y, mo, d, h, mi, s = b
-    if y == 255 or mo == 0 or mo > 12 or d == 0 or d > 31:
-        return None
-    try:
-        return datetime(2000 + y, mo, d, h, mi, s)
-    except ValueError:
-        return None
-
-
 class Fdm5kwFlowRateEntity(XTSensorEntity):
     """Derived instantaneous flow-rate sensor (liters/minute).
 
@@ -613,224 +528,113 @@ class Fdm5kwFlowRateEntity(XTSensorEntity):
 # QT-08W (which lacks these codes) — same coexistence model as every other
 # fdm5kw descriptor.
 
-DP_T3_SAT = "sat_0"
-DP_T3_FLOW_STA = "flow_sta_0"
-DP_T3_COUNTER = "counter_custom"
+DP_T3_SAT = t3_status.SAT_CODE
+DP_T3_FLOW_STA = t3_status.FLOW_STA_CODE
+DP_T3_COUNTER = counter_custom.CODE
+DP_T3_TIME_TASK = tt.T3_CODE
 
 
 class DPCodeSat0BatteryWrapper(XTDPCodeRawStatusWrapper):
-    """T3 battery %: sat_0 byte[3] low 7 bits (high bit = charge/sun flag).
-
-    sat_0 = 00 01 00 [BB] 00 01 00 [Y M D H M] 00 (13 B). 706 read 0x64=100,
-    matching SmartLife's 100%.
-    """
+    """T3 battery % from sat_0 (codecs/t3_status.py)."""
 
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
         decoded = super().read_device_status(device)
-        if decoded and len(decoded) >= 4:
-            # ponytail: a lone byte3=0x00 glitch was seen once (07-13); returns
-            # 0% for that frame. Debounce here if it proves noisy in the field.
-            return str(decoded[3] & 0x7F)
+        if decoded and (percent := t3_status.battery_percent(bytes(decoded))) is not None:
+            return str(percent)
         return None
 
 
-def next_occurrence(
-    naive: datetime, days_mask: int, now: datetime, max_days: int = 9
-) -> datetime:
-    """Roll a schedule stamp forward to its next real occurrence.
-
-    `days_mask` bit 0 = Monday, the same convention the timer decoder and
-    writer use; 0 means "no day info", i.e. every day.
-    Naive arithmetic on purpose: adding days to a tz-aware datetime shifts
-    the wall-clock time across a DST boundary, and a 16:00 timer stays at
-    16:00.
-    """
-    if naive > now:
-        return naive
-    candidate = naive + timedelta(days=max((now - naive).days, 0))
-    for _ in range(max_days):
-        if candidate > now and (
-            not days_mask or days_mask & (1 << candidate.weekday())
-        ):
-            return candidate
-        candidate += timedelta(days=1)
-    return naive
-
-
 class DPCodeSat0NextRunWrapper(XTDPCodeRawStatusWrapper):
-    """T3 next-irrigation time from sat_0 bytes[7..11] = [Y-2000, M, D, H, M].
-    0xFF year / month 0 (idle frame `..ff ff ff ff ff`) = no schedule -> None.
+    """T3 next irrigation from sat_0.
 
-    The DATE part rots: 6 of 11 valves published a stamp in the past, one of
-    them three weeks old, while the H:M always matched the live timer — the
-    firmware stops refreshing the date and SmartLife recomputes the next
-    occurrence from the schedule instead (audit D5). Do the same: roll the
-    stamp forward, honouring the day mask of the timer currently in the
-    time_task_0 DP when its H:M agrees.
+    The firmware stops refreshing the DATE part while H:M stays right (6 of 11
+    valves published a past stamp, one three weeks old; audit D5), so roll it
+    forward the way SmartLife does, honouring the day mask of the timer in
+    time_task_0 when its H:M agrees.
     """
 
     def read_device_status(self, device: TuyaCustomerDevice) -> datetime | None:
         decoded = super().read_device_status(device)
-        if not decoded or len(decoded) < 12:
+        naive = t3_status.next_run_stamp(bytes(decoded)) if decoded else None
+        if naive is None:
             return None
-        y, mo, d, h, mi = decoded[7], decoded[8], decoded[9], decoded[10], decoded[11]
-        if y == 0xFF or mo == 0 or mo > 12 or d == 0 or d > 31:
-            return None
-        try:
-            naive = datetime(2000 + y, mo, d, h, mi)
-        except ValueError:
-            return None
-        rolled = next_occurrence(naive, _scheduled_days_mask(device, h, mi), datetime.now())
+        days_mask = _scheduled_days_mask(device, naive.hour, naive.minute)
+        rolled = t3_status.next_occurrence(naive, days_mask, datetime.now())
         return rolled.replace(tzinfo=DEFAULT_TIME_ZONE)
 
 
 def _scheduled_days_mask(device: TuyaCustomerDevice, hour: int, minute: int) -> int:
-    """Day mask of the time_task_0 timer matching `hour`:`minute`, else 0.
+    """Day mask of the time_task_0 timer at `hour`:`minute`, else 0 (= every day).
 
-    The DP is a sliding window that only holds the last-written slot, so this
-    is a best effort — 0 falls back to "every day", which is what these
-    valves mostly run anyway.
+    The DP only holds the last-written timer, so this is a best effort.
     """
-    raw = device.status.get(DP_T3_TIME_TASK)
+    raw = device.status.get(tt.T3_CODE)
     if not isinstance(raw, str) or not raw:
         return 0
     try:
-        frame = base64.b64decode(raw)
+        frame = tt.decode_t3(base64.b64decode(raw))
     except ValueError:
         return 0
-    if len(frame) < 12 or frame[8] != hour or frame[9] != minute:
+    timer = frame.timer if frame else None
+    if timer is None or timer.hour != hour or timer.minute != minute:
         return 0
-    return frame[10]
+    return timer.days_mask
 
 
 class DPCodeFlowStaVolumeWrapper(XTDPCodeRawStatusWrapper):
-    """T3 watering volume (L): flow_sta_0 bytes[1:5] BE. Live-cumulative during a
-    run, holds the last run's final total when idle. Captured mid-run 07-14:
-    climbed 80..113 L; final frame bytes[1:5]=00 00 00 71 = 113 L (=app 113 L).
-    """
+    """T3 watering volume (L) from flow_sta_0: live during a run, then the run total."""
 
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
         decoded = super().read_device_status(device)
-        if decoded and len(decoded) >= 5:
-            # Raw counter, no ceiling — see water_math (audit D3/R16).
-            return str(int.from_bytes(decoded[1:5], "big"))
+        if decoded and (liters := t3_status.flow_volume_liters(bytes(decoded))) is not None:
+            return str(liters)
         return None
 
 
-class DPCodeCounterCustomWrapper(XTDPCodeRawStatusWrapper):
-    """T3 counter_custom — a plain CSV STRING (not base64), last completed run:
-    'mode,flag,duration_s,volume_L,timestamp'. e.g. '0,1,600,113,20260714161000'.
-    duration 65534 (0xFFFE) = aborted/interrupted sentinel."""
+class DPCodeCounterCustomLastRunWrapper(XTDPCodeRawStatusWrapper):
+    """T3 last completed run: the counter_custom CSV as the state (codecs/counter_custom.py).
 
-    def _csv(self, device: TuyaCustomerDevice) -> str | None:
-        """counter_custom as CSV text regardless of source form. Depending on
-        which manager populated device.status, the value arrives as the raw
-        CSV or base64-encoded (multi-source value-form race, seen live
-        4.4.236-238) — normalize both to CSV."""
-        raw = device.status.get(self.dpcode)
-        if not isinstance(raw, str) or not raw:
-            return None
-        if "," in raw:
-            return raw
-        try:
-            decoded = base64.b64decode(raw).decode("ascii")
-        except (ValueError, UnicodeDecodeError):
-            return None
-        return decoded if "," in decoded else None
-
-    def _parse(self, device: TuyaCustomerDevice) -> dict | None:
-        raw = self._csv(device)
-        if raw is None:
-            return None
-        parts = raw.split(",")
-        if len(parts) < 5:
-            return None
-        try:
-            return {"duration": int(parts[2]), "volume": int(parts[3]), "ts": parts[4]}
-        except ValueError:
-            return None
-
-
-class DPCodeCounterCustomLastRunWrapper(DPCodeCounterCustomWrapper):
-    """Raw counter_custom CSV as the state. The runs_store listens on this
-    entity to record T3 completed runs (the old-valve path keys off
-    start/end-time sensors the T3 firmware doesn't provide)."""
+    The runs store listens on this entity to record T3 runs (the QT-08W path
+    keys off start/end-time sensors the T3 firmware does not provide).
+    """
 
     # NOTE 1: do NOT gate binding in find_dpcode here. Entity creation is
     # decided by XTEntity._supports_description ("dpcode in device.status"),
     # not by the wrapper — a find_dpcode that returns None does not suppress
     # the entity, it just drops it to the generic raw handler (live regression
     # 4.4.237). Old valves report counter_custom as a bare number ('9000');
-    # _parse rejects it and the sensor stays 'unknown' — those dead entities
+    # parse rejects it and the sensor stays 'unknown' — those dead entities
     # are disabled in the entity registry instead (one-time, persisted).
     # NOTE 2: this override is load-bearing — without it the inherited RAW
     # read base64-"decodes" the CSV into byte garbage (4.4.237/238 dropped it
     # by accident and every last-run state broke).
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
-        if self._parse(device) is None:
+        raw = device.status.get(self.dpcode)
+        if counter_custom.parse(raw) is None:
             return None
-        return self._csv(device)
-
-
-DP_T3_TIME_TASK = "time_task_0"
+        return counter_custom.as_csv(raw)
 
 
 class DPCodeT3TimeTaskWrapper(DPCodeTimeTaskWrapper):
-    """T3 time_task_0 — 12 bytes, same sliding-window + per-timer-index model as
-    the old valve, but a different layout (verified live 2026-07-15):
-      [00, index, b2, mode, value(4B BE), hour, minute, days_mask, enabled]
-    - byte[1] = per-timer index (the T3 equivalent of the old byte[0] slot) —
-      PROVEN with two duration timers (A idx0, B idx1). NOT the enable flag.
-    - byte[3] = mode (0=duration/seconds, 1=volume/liters).
-    - byte[11] = enabled (1=active, 0=disabled).
-    - byte[2] = a create/order marker (1 only on the create push), ignored.
-    Ghost caveat (proven live): a SmartLife delete does NOT clear the DP or set
-    enabled=0 — the device keeps re-reporting the stale timer. So, exactly like
-    the old valve, deletions are invisible on the DP and need the reactive
-    resync path; only an all-zero payload counts as an empty slot here.
+    """T3 time_task_0: same sliding-window model, 12-byte layout.
+
+    Ghost caveat (proven live): a SmartLife delete neither clears the DP nor
+    sets enabled=0, so deletions are invisible here and need the resync path.
     """
 
-    def update_data(self, device: TuyaCustomerDevice) -> None:
-        if decoded := super().read_device_status(device):
-            if len(decoded) < 12:
-                return
-            self.slot_index = decoded[1]
-            mode = decoded[3]
-            value = int.from_bytes(decoded[4:8], byteorder="big")
-            hour = decoded[8]
-            minute = decoded[9]
-            days_mask = decoded[10]
-            enabled = decoded[11]
-            # Empty/cleared slot = an all-zero payload (what a slot clear writes).
-            if not value and not hour and not minute and not days_mask and not enabled:
-                self.timer = None
-                return
-            days = [DAYS_OF_WEEK[i] for i in range(7) if days_mask & (1 << i)]
-            self.timer = {
-                "slot": self.slot_index,
-                "hour": hour,
-                "minute": minute,
-                "mode": "duration" if mode == 0 else "volume",
-                "value": value,
-                "value_unit": "s" if mode == 0 else "L",
-                "days": days,
-                "days_mask": days_mask,
-                "enabled": bool(enabled),
-            }
+    decode = staticmethod(tt.decode_t3)
 
 
-# The Slot/Summary/Registry variants reuse the old read/accumulate logic and
-# only swap in the T3 decoder via MRO (T3 update_data resolves before the base).
-class DPCodeT3TimeTaskSlotWrapper(DPCodeTimeTaskSlotWrapper, DPCodeT3TimeTaskWrapper):
-    pass
+class DPCodeT3TimeTaskSlotWrapper(DPCodeTimeTaskSlotWrapper):
+    decode = staticmethod(tt.decode_t3)
 
 
-class DPCodeT3TimeTaskSummaryWrapper(DPCodeTimeTaskSummaryWrapper, DPCodeT3TimeTaskWrapper):
-    pass
+class DPCodeT3TimeTaskSummaryWrapper(DPCodeTimeTaskSummaryWrapper):
+    decode = staticmethod(tt.decode_t3)
 
 
-class DPCodeT3TimeTaskRegistryWrapper(DPCodeTimeTaskRegistryWrapper, DPCodeT3TimeTaskWrapper):
-    pass
+class DPCodeT3TimeTaskRegistryWrapper(DPCodeTimeTaskRegistryWrapper):
+    decode = staticmethod(tt.decode_t3)
 
 
 # ---------------------------------------------------------------------------
