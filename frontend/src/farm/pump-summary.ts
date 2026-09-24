@@ -113,7 +113,9 @@ export function balance(
   stats: StatSeries,
   from: number,
   to: number,
-  period: "hour" | "day"
+  period: "hour" | "day",
+  /** Count only the valves of these metering points (a site filter). */
+  onlyMp?: (mp: MeteringPoint) => boolean
 ): Balance {
   const buckets = new Map<number, Bucket>();
   const bucket = (ms: number) => {
@@ -128,7 +130,9 @@ export function balance(
 
   let pumpTotal: number | null = null;
   for (const r of stats[pump.meter_entity] ?? []) {
-    if (r.start < from || r.start >= to || typeof r.change !== "number") continue;
+    // A meter never delivers negative water: a negative change is a counter
+    // reset or broken statistics, not a flow. Skip it rather than subtract.
+    if (r.start < from || r.start >= to || typeof r.change !== "number" || r.change < 0) continue;
     const b = bucket(r.start);
     b.pump = (b.pump ?? 0) + r.change * M3;
     pumpTotal = (pumpTotal ?? 0) + r.change * M3;
@@ -141,7 +145,7 @@ export function balance(
     const end = Date.parse(r.end);
     if (end < from || end >= to || typeof r.liters !== "number") continue;
     const mp = mpAt(data, r.device_id, end);
-    if (!mp || pumpOfMpAt(data, mp, end) !== pump.id) continue;
+    if (!mp || pumpOfMpAt(data, mp, end) !== pump.id || (onlyMp && !onlyMp(mp))) continue;
     valves += r.liters;
     bucket(Date.parse(r.start)).valves += r.liters;
   }
@@ -151,7 +155,7 @@ export function balance(
   for (const c of connectionsIn(data, pump.id, from, to)) {
     if (c.role !== "consumer" || !c.meter_entity) continue;
     for (const r of stats[c.meter_entity] ?? []) {
-      if (r.start < from || r.start >= to || typeof r.change !== "number" || !openAt(c, r.start)) continue;
+      if (r.start < from || r.start >= to || typeof r.change !== "number" || r.change < 0 || !openAt(c, r.start)) continue;
       consumers += r.change * M3;
       bucket(r.start).consumers += r.change * M3;
     }

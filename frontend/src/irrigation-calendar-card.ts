@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { offlineSpans, packLanes, pairPlanRuns, Pairable, type HistoryPoint } from "./calendar-lanes";
 import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
+import { discoverValves, type HomeAssistantLike } from "./farm/discovery.ts";
 import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
 import { farmTokens } from "./components/theme.ts";
 import "./components/valve-filter-bar.ts";
@@ -155,6 +156,10 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _filter: ValveFilter = loadFilter();
   @state() private _farm: FarmData = EMPTY_FARM_DATA;
   private _farmLoaded = false;
+  /** Valves found at runtime when the config carries none (then a new or
+   * renamed valve shows without re-syncing the dashboard). */
+  private _found: Valve[] | null = null;
+  private _foundAt = 0;
   /** Registry entity -> offline stretches in the loaded range (timeline). */
   @state() private _offline = new Map<string, [number, number][]>();
   @state() private _loading = false;
@@ -215,9 +220,29 @@ export class IrrigationCalendarCard extends LitElement {
     return [from, addDays(from, this._mode === "timeline" ? this._range : 1)];
   }
 
+  /** The valves: from the config if it lists them (saved dashboards), else
+   * discovered from HA, refreshed at most once a minute. */
+  private _valves(): Valve[] {
+    if (this._config?.valves?.length) return this._config.valves;
+    const hass = this.hass as unknown as HomeAssistantLike;
+    if (hass?.entities && (!this._found || Date.now() - this._foundAt > 60_000)) {
+      this._found = discoverValves(hass).map((v) => ({
+        device_id: v.device_id,
+        registry_entity: v.registry_entity,
+        valve_name: v.valve_name,
+        view_path: v.view_path,
+        home: v.valve_home,
+        room: v.valve_room,
+        battery: v.battery_level ?? null,
+      }));
+      this._foundAt = Date.now();
+    }
+    return this._found ?? [];
+  }
+
   private _valveByRegistry(): Map<string, Valve> {
     const m = new Map<string, Valve>();
-    for (const v of this._config?.valves ?? []) m.set(v.registry_entity, v);
+    for (const v of this._valves()) m.set(v.registry_entity, v);
     return m;
   }
 
@@ -272,7 +297,7 @@ export class IrrigationCalendarCard extends LitElement {
   /** Offline stretches of every valve's registry sensor in the range
    * (Trello Sijuj2Dd: the timeline shows whether a valve was online). */
   private async _loadOffline(from: Date, to: Date): Promise<void> {
-    const ids = (this._config?.valves ?? []).map((v) => v.registry_entity);
+    const ids = this._valves().map((v) => v.registry_entity);
     const out = new Map<string, [number, number][]>();
     // ponytail: chunks keep the URL short; one request per 40 valves.
     for (let i = 0; i < ids.length; i += 40) {
@@ -362,7 +387,7 @@ export class IrrigationCalendarCard extends LitElement {
     const f = this._filter;
     const inSite = f.site ? subtree(this._farm.sites, f.site) : null;
     const q = f.search.trim().toLowerCase();
-    return (this._config?.valves ?? []).filter((v) => {
+    return this._valves().filter((v) => {
       const p = this._placeOf(v);
       if (inSite && !(p.site && inSite.has(p.site))) return false;
       return !q || [v.valve_name, p.mp, p.siteName].some((x) => x?.toLowerCase().includes(q));

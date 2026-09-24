@@ -20,6 +20,8 @@ export class XtValveFilterBar extends LitElement {
   @property({ attribute: false }) counts: Partial<Record<StatusFilter, number>> = {};
   /** Show the status chips (the calendar only needs site and search). */
   @property({ type: Boolean }) statuses = true;
+  /** Show the search field. */
+  @property({ type: Boolean }) search = true;
 
   private _set(patch: Partial<ValveFilter>): void {
     this.value = { ...this.value, ...patch };
@@ -51,6 +53,7 @@ export class XtValveFilterBar extends LitElement {
         )}
       </div>
       <input
+        ?hidden=${!this.search}
         type="search"
         placeholder="Search valve, metering point, site"
         aria-label="Search"
@@ -86,6 +89,7 @@ export class XtValveFilterBar extends LitElement {
       flex: 1;
       min-width: 180px;
     }
+    input[hidden],
     .chips[hidden] {
       display: none;
     }

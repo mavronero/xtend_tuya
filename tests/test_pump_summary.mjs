@@ -82,6 +82,15 @@ assert.ok(Math.abs(at(3).pump - 300) < 1e-9);
 assert.equal(at(3).valves, 100);
 assert.equal(at(2).pump, null); // no meter row: unknown, not zero
 
+// A negative change (meter reset, broken statistics) is skipped, not subtracted.
+const reset = balance(data, data.pumps[0], { "sensor.p1_m3": [hourRow(3, 0.3), hourRow(2, -1900)] }, now - 36 * H, now, "hour");
+assert.ok(Math.abs(reset.pump - 300) < 1e-9);
+
+// Site filter: only FF East's valves count; the pump total stays whole.
+const east = balance(data, data.pumps[0], stats, now - 36 * H, now, "hour", (m) => m.site_id === "east");
+assert.equal(east.valves, 100); // v1 only; v3 (Honeymoon) is left out
+assert.ok(Math.abs(east.pump - 450) < 1e-9);
+
 // No meter data at all: no pump total, no unaccounted.
 const empty = balance(data, data.pumps[1], {}, now - 24 * H, now, "day");
 assert.equal(empty.pump, null);

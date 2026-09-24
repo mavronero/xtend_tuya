@@ -19,7 +19,7 @@ import type { MeteringPoint, Pump } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { summarizeMp, type MpSummary } from "./farm/mp-summary.ts";
 import { balance, pumpFeeds, type StatSeries } from "./farm/pump-summary.ts";
-import { sitePath, subtree } from "./farm/valve-filter.ts";
+import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
 import { volume } from "./components/format.ts";
 import { navigate } from "./components/navigate.ts";
 import { NO_PUMP, type PumpListItem } from "./components/pump-list.ts";
@@ -28,6 +28,7 @@ import "./components/mp-card.ts";
 import "./components/pump-list.ts";
 import "./components/pump-chart.ts";
 import "./components/device-picker.ts";
+import "./components/valve-filter-bar.ts";
 import { farmTokens } from "./components/theme.ts";
 import { pageStyles } from "./components/page-styles.ts";
 import { css } from "lit";
@@ -81,6 +82,8 @@ export class IrrigationPumpsCard extends LitElement {
   @state() private _selected: string | null = pumpFromUrl();
   @state() private _range: Range = loadRange();
   @state() private _stats: StatSeries = {};
+  /** Site filter (with sub-sites): limits the valves in balance and feeds. */
+  @state() private _site: string | null = null;
   @state() private _edit = false;
   @state() private _busy = false;
   @state() private _error: string | null = null;
@@ -294,11 +297,18 @@ export class IrrigationPumpsCard extends LitElement {
     </div>`;
   }
 
+  /** Metering-point test for the site filter, or undefined without one. */
+  private _inSite(): ((mp: MeteringPoint) => boolean) | undefined {
+    if (!this._site) return undefined;
+    const ids = subtree(this._farm.data.sites, this._site);
+    return (mp) => !!mp.site_id && ids.has(mp.site_id);
+  }
+
   private _balance(p: Pump) {
     const { ms, period } = RANGES[this._range];
     // Recomputed when the pump, range, data or statistics change, and at
     // most once a minute otherwise (the range end moves with the clock).
-    const key = `${p.id}|${this._range}|${Math.floor(Date.now() / 60_000)}`;
+    const key = `${p.id}|${this._range}|${this._site}|${Math.floor(Date.now() / 60_000)}`;
     const memo = this._balanceMemo;
     if (!memo || memo.key !== key || memo.data !== this._farm.data || memo.stats !== this._stats) {
       const now = Date.now();
@@ -306,11 +316,12 @@ export class IrrigationPumpsCard extends LitElement {
         key,
         data: this._farm.data,
         stats: this._stats,
-        value: balance(this._farm.data, p, this._stats, now - ms, now, period),
+        value: balance(this._farm.data, p, this._stats, now - ms, now, period, this._inSite()),
       };
     }
     const b = this._balanceMemo!.value;
     const pct = (l: number) => (b.pump ? ` · ${Math.round((l / b.pump) * 100)} %` : "");
+    const siteName = this._site ? sitePath(this._farm.data.sites, this._site) : null;
     return html`<section>
       <div class="section-head">
         <h3>Water balance</h3>
@@ -322,12 +333,18 @@ export class IrrigationPumpsCard extends LitElement {
       </div>
       <div class="tiles">
         <div title="What the pump's meter counted"><span class="dim">Pump delivered</span><b>${b.pump === null ? "no data" : volume(b.pump)}</b></div>
-        <div title="Runs of the valves this pump fed at the time"><span class="dim">Valves</span><b>${volume(b.valves)}</b><span class="dim">${pct(b.valves)}</span></div>
-        <div title="Metered devices connected as consumers"><span class="dim">Metered consumers</span><b>${volume(b.consumers)}</b><span class="dim">${pct(b.consumers)}</span></div>
-        <div title="Pump minus valves minus consumers: tanks, taps, unmetered valves, leaks">
-          <span class="dim">Unaccounted</span><b>${b.unaccounted === null ? "–" : volume(b.unaccounted)}</b
-          ><span class="dim">${b.unaccounted === null ? "" : pct(b.unaccounted)}</span>
+        <div title="Runs of the valves this pump fed at the time${siteName ? `, in ${siteName}` : ""}">
+          <span class="dim">${siteName ? `Valves in ${siteName}` : "Valves"}</span><b>${volume(b.valves)}</b><span class="dim">${pct(b.valves)}</span>
         </div>
+        <div title="Metered devices connected as consumers"><span class="dim">Metered consumers</span><b>${volume(b.consumers)}</b><span class="dim">${pct(b.consumers)}</span></div>
+        ${siteName
+          ? html`<div title="Unaccounted water needs the whole pump: clear the site filter">
+              <span class="dim">Unaccounted</span><b>–</b><span class="dim">whole pump only</span>
+            </div>`
+          : html`<div title="Pump minus valves minus consumers: tanks, taps, unmetered valves, leaks">
+              <span class="dim">Unaccounted</span><b>${b.unaccounted === null ? "–" : volume(b.unaccounted)}</b
+              ><span class="dim">${b.unaccounted === null ? "" : pct(b.unaccounted)}</span>
+            </div>`}
       </div>
       <xt-pump-chart .buckets=${b.buckets} period=${period}></xt-pump-chart>
     </section>`;
@@ -335,7 +352,13 @@ export class IrrigationPumpsCard extends LitElement {
 
   private _feeds(p: Pump, mpSums: Map<string, MpSummary>) {
     const data = this._farm.data;
-    const f = pumpFeeds(data, p.id, Date.now());
+    const f0 = pumpFeeds(data, p.id, Date.now());
+    const only = this._inSite();
+    const keep = (id: string) => {
+      const loc = data.locations.find((l) => l.id === id);
+      return !only || (!!loc && only(loc));
+    };
+    const f = { ...f0, mps: f0.mps.filter(keep), overridden: f0.overridden.filter((o) => keep(o.mp)) };
     const card = (id: string) => html`<xt-mp-card .summary=${mpSums.get(id)}></xt-mp-card>`;
     const inTree = new Set<string>();
     const groups = f.sites
@@ -357,7 +380,7 @@ export class IrrigationPumpsCard extends LitElement {
       ${this._edit ? this._assignForm(p) : nothing}
       ${!f.mps.length && !groups.length ? html`<div class="msg">This pump is not assigned to a site or metering point yet.</div>` : nothing}
       ${groups.map(
-        (g) => html`<div class="group">
+        (g) => g.mps.length === 0 && this._site ? nothing : html`<div class="group">
             <span>${g.path}</span><span class="dim">assigned here · ${g.mps.length}</span>
             ${this._edit
               ? html`<button class="link danger" ?disabled=${this._busy}
@@ -545,6 +568,13 @@ export class IrrigationPumpsCard extends LitElement {
           : nothing}
         ${pump
           ? html`${this._figures(pump, { mps: fed.length, valves: valveCount })}
+              <xt-valve-filter-bar
+                .sites=${data.sites}
+                .value=${{ ...NO_FILTER, site: this._site }}
+                .statuses=${false}
+                .search=${false}
+                @xt-filter-changed=${(e: CustomEvent<ValveFilter>) => (this._site = e.detail.site)}
+              ></xt-valve-filter-bar>
               ${this._edit ? this._pumpForm(pump) : nothing} ${this._balance(pump)} ${this._feeds(pump, mpSums)}
               ${this._connections(pump, valveCount)}`
           : nothing}
