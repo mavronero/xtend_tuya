@@ -1,4 +1,4 @@
-"""Controllable-quota accounting (audit C6), against the real MultiManager.note_cloud_write.
+"""Controllable-quota accounting (audit C6) and the send_commands alias fallback (C10), against the real MultiManager.
 
 A Tuya Trial project can control 10 distinct devices per calendar month. Cloud
 timer POST/DELETE through account.call_api burn that allowance just like
@@ -46,3 +46,53 @@ def test_reads_refusals_and_non_device_writes_are_free():
 
 def test_hub_without_tracker_is_a_no_op():
     MultiManager.note_cloud_write(SimpleNamespace(controllable_quota=None), "POST", "/v1.0/devices/x/timers", OK)
+
+
+# --- C10: alias fallback in MultiManager.send_commands -----------------------
+
+
+class AliasAccount:
+    """Refuses the primary code; accepts the alias only on the given filter pass(es)."""
+
+    def __init__(self, alias_ok_on: set[bool]):
+        self.alias_ok_on = alias_ok_on
+        self.calls: list[tuple[str, bool]] = []
+
+    def send_command(self, device_id, command, reverse_filters):
+        self.calls.append((command["code"], reverse_filters))
+        return command["code"] == "switch_alias" and reverse_filters in self.alias_ok_on
+
+
+def _send(account):
+    device = SimpleNamespace(category="sfkzq", get_status_code_aliases=lambda code: ["switch_alias"])
+    counted: list[str] = []
+    hub = SimpleNamespace(
+        device_map={"v1": device},
+        virtual_function_handler=SimpleNamespace(get_category_virtual_functions=lambda category: []),
+        accounts={"iot": account},
+        _note_controllable_command=lambda acc, device_id: counted.append(device_id),
+    )
+    return MultiManager.send_commands(hub, "v1", [{"code": "switch", "value": True}]), counted
+
+
+def test_alias_success_is_not_resent_nor_overwritten():
+    """C10: an alias the first filter pass accepts must not be sent a second
+    time with reverse filters, and its success must survive."""
+    account = AliasAccount(alias_ok_on={False})
+    ok, counted = _send(account)
+    assert ok is True
+    assert account.calls == [("switch", False), ("switch", True), ("switch_alias", False)]
+    assert counted == ["v1"]
+
+
+def test_alias_falls_back_to_reverse_filters():
+    account = AliasAccount(alias_ok_on={True})
+    ok, counted = _send(account)
+    assert ok is True
+    assert account.calls[-2:] == [("switch_alias", False), ("switch_alias", True)]
+    assert counted == ["v1"]
+
+
+def test_alias_refused_everywhere_is_a_failure():
+    ok, counted = _send(AliasAccount(alias_ok_on=set()))
+    assert ok is False and counted == []
