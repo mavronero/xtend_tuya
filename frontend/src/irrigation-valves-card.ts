@@ -13,9 +13,8 @@
 
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
-import { discoverValves, fetchLocations, type HomeAssistantLike, type ValveEntities } from "./farm/discovery.ts";
-import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
-import { summarize, type ValveSummary } from "./farm/valve-summary.ts";
+import type { HomeAssistantLike } from "./farm/discovery.ts";
+import { FarmController } from "./farm/controller.ts";
 import {
   ALL_SECTIONS,
   NO_FILTER,
@@ -25,6 +24,7 @@ import {
   type StatusFilter,
   type ValveFilter,
 } from "./farm/valve-filter.ts";
+import { navigate } from "./components/navigate.ts";
 import "./components/valve-filter-bar.ts";
 import "./components/valve-section.ts";
 
@@ -36,7 +36,6 @@ interface CardConfig {
   collapsed?: SectionKey[];
 }
 
-const REFRESH_MS = 60_000;
 const FILTER_KEY = "xt-valves-filter";
 
 function loadFilter(): ValveFilter {
@@ -58,12 +57,8 @@ function saveFilter(f: ValveFilter): void {
 export class IrrigationValvesCard extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistantLike;
   @state() private _config?: CardConfig;
-  @state() private _data: FarmData = EMPTY_FARM_DATA;
   @state() private _filter: ValveFilter = loadFilter();
-  @state() private _error: string | null = null;
-  @state() private _valves: ValveEntities[] = [];
-  @state() private _valvesAt = 0;
-  private _timer?: number;
+  private _farm = new FarmController(this);
 
   setConfig(config: CardConfig): void {
     this._config = config;
@@ -73,61 +68,29 @@ export class IrrigationValvesCard extends LitElement {
     return 12;
   }
 
-  connectedCallback(): void {
-    super.connectedCallback();
-    this._timer = window.setInterval(() => void this._refresh(), REFRESH_MS);
-    void this._refresh();
-  }
-
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
-    if (this._timer) window.clearInterval(this._timer);
-  }
-
-  protected updated(changed: Map<string, unknown>): void {
-    if (changed.has("hass") && !changed.get("hass") && this.hass) void this._refresh();
-  }
-
-  private async _refresh(): Promise<void> {
-    const hass = this.hass;
-    if (!hass) return;
-    try {
-      const [data, locations] = await Promise.all([loadFarmData(hass), fetchLocations(hass)]);
-      // Discovery walks every entity; once a minute is plenty.
-      this._valves = discoverValves(hass, locations);
-      this._valvesAt = Date.now();
-      this._data = data;
-      this._error = null;
-    } catch (e) {
-      this._error = e instanceof Error ? e.message : String(e);
-    }
-  }
-
   private _onFilter(e: CustomEvent<ValveFilter>): void {
     this._filter = e.detail;
     saveFilter(e.detail);
   }
 
   private _onOpen(e: CustomEvent<string>): void {
-    const base = window.location.pathname.split("/")[1] || "lovelace";
-    window.history.pushState(null, "", `/${base}/${e.detail}`);
-    window.dispatchEvent(new Event("location-changed"));
+    navigate(e.detail);
   }
 
   render() {
     if (!this._config || !this.hass) return nothing;
-    if (!this._valvesAt) return html`<ha-card><div class="msg">Loading valves…</div></ha-card>`;
-    const now = Date.now();
-    const all: ValveSummary[] = this._valves.map((v) => summarize(v, this.hass!.states, this._data, now));
+    if (!this._farm.loaded) return html`<ha-card><div class="msg">Loading valves…</div></ha-card>`;
+    const all = this._farm.summaries();
+    const data = this._farm.data;
     const fixedSite = this._config.site ?? null;
     const base: ValveFilter = { ...this._filter, site: fixedSite ?? this._filter.site };
-    const scoped = applyFilter(all, { ...base, status: "all" }, this._data.sites);
+    const scoped = applyFilter(all, { ...base, status: "all" }, data.sites);
     const counts: Partial<Record<StatusFilter, number>> = {};
     for (const s of ["all", "watering", "attention", "offline"] as StatusFilter[]) {
-      counts[s] = s === "all" ? scoped.length : applyFilter(scoped, { ...NO_FILTER, status: s }, this._data.sites).length;
+      counts[s] = s === "all" ? scoped.length : applyFilter(scoped, { ...NO_FILTER, status: s }, data.sites).length;
     }
-    const shown = applyFilter(scoped, { ...NO_FILTER, status: base.status }, this._data.sites);
-    const sections = sectionize(shown, this._data.sites, this._config.sections ?? ALL_SECTIONS);
+    const shown = applyFilter(scoped, { ...NO_FILTER, status: base.status }, data.sites);
+    const sections = sectionize(shown, data.sites, this._config.sections ?? ALL_SECTIONS);
     const collapsed = new Set(this._config.collapsed ?? ["offline"]);
 
     return html`
@@ -135,12 +98,12 @@ export class IrrigationValvesCard extends LitElement {
         ${this._config.filter === false
           ? nothing
           : html`<xt-valve-filter-bar
-              .sites=${fixedSite ? [] : this._data.sites}
+              .sites=${fixedSite ? [] : data.sites}
               .value=${base}
               .counts=${counts}
               @xt-filter-changed=${this._onFilter}
             ></xt-valve-filter-bar>`}
-        ${this._error ? html`<div class="msg err">Could not load farm data: ${this._error}</div>` : nothing}
+        ${this._farm.error ? html`<div class="msg err">Could not load farm data: ${this._farm.error}</div>` : nothing}
         ${sections.length
           ? sections.map(
               (s) => html`<xt-valve-section .section=${s} ?collapsed=${collapsed.has(s.key)}></xt-valve-section>`

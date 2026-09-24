@@ -6,6 +6,8 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import type { Badge, RunInfo, ValveSummary } from "../farm/valve-summary.ts";
+import { since, time, when } from "./format.ts";
+import "./week-bars.ts";
 
 const BADGE_TEXT: Record<Badge, string> = {
   low_battery: "Low battery",
@@ -28,32 +30,8 @@ function batteryIcon(pct: number): string {
   return `mdi:battery-${Math.floor(pct / 10) * 10}`;
 }
 
-const DAY_MS = 86_400_000;
-
-function dayLabel(ms: number, now = Date.now()): string {
-  const d = new Date(ms);
-  const day0 = new Date(now);
-  day0.setHours(0, 0, 0, 0);
-  const diff = Math.floor((d.getTime() - day0.getTime()) / DAY_MS);
-  if (diff === 0) return "Today";
-  if (diff === -1) return "Yesterday";
-  if (diff === 1) return "Tomorrow";
-  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
-}
-
-function time(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function since(ms: number, now = Date.now()): string {
-  const min = Math.round((now - ms) / 60_000);
-  if (min < 60) return `${min} min`;
-  const h = Math.round(min / 60);
-  return h < 48 ? `${h} h` : `${Math.round(h / 24)} d`;
-}
-
 function runText(r: RunInfo): string {
-  const parts = [`${dayLabel(r.start)} ${time(r.start)}`, `${Math.round(r.minutes)} min`];
+  const parts = [when(r.start), `${Math.round(r.minutes)} min`];
   if (r.liters !== null) parts.push(`${Math.round(r.liters)} L`);
   return parts.join(" · ");
 }
@@ -66,6 +44,8 @@ function baseName(s: ValveSummary): string {
 
 export class XtValveCard extends LitElement {
   @property({ attribute: false }) summary?: ValveSummary;
+  /** Site the card is shown in; its name is then left out of the place line. */
+  @property({ attribute: false }) siteContext: string | null = null;
 
   private _open(): void {
     if (!this.summary) return;
@@ -86,29 +66,11 @@ export class XtValveCard extends LitElement {
   }
 
   private _week(s: ValveSummary) {
-    const max = Math.max(...s.week.daily, 0);
     const unit = s.week.unit;
     const total = unit === "L" ? `${Math.round(s.week.liters)} L` : `${Math.round(s.week.minutes)} min`;
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
-    const day = (i: number) =>
-      new Date(today.getTime() - (6 - i) * DAY_MS).toLocaleDateString(undefined, {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      });
     return html`<div class="week">
       <ha-icon icon="mdi:chart-bar" title="Last 7 days"></ha-icon>
-      <div class="bars">
-        ${s.week.daily.map(
-          (v, i) =>
-            html`<span
-              title="${day(i)}: ${Math.round(v)} ${unit}"
-              style="height:${max > 0 ? Math.max(8, (v / max) * 100) : 8}%"
-              class=${v > 0 ? "on" : ""}
-            ></span>`
-        )}
-      </div>
+      <xt-week-bars .daily=${s.week.daily} unit=${unit}></xt-week-bars>
       <span class="dim" title="Last 7 days: number of runs and total ${unit === "L" ? "water" : "watering time"}"
         >${s.week.runs} runs · ${total}</span
       >
@@ -121,7 +83,8 @@ export class XtValveCard extends LitElement {
     // The metering point usually carries the valve's name; show it only
     // when it says something new, then the site.
     const mp = s.location && s.location.name !== baseName(s) ? s.location.name : null;
-    const place = s.location ? [mp, s.site?.name].filter(Boolean).join(" · ") : "No location";
+    const site = s.site && s.site.id !== this.siteContext ? s.site.name : null;
+    const place = s.location ? [mp, site].filter(Boolean).join(" · ") : "No location";
     return html`<ha-card class=${s.status} @click=${this._open} tabindex="0" role="link" aria-label=${s.name}>
       <div class="head">
         <span class="name" title=${s.name}>${baseName(s)}</span>
@@ -271,22 +234,6 @@ export class XtValveCard extends LitElement {
     .week ha-icon {
       align-self: center;
       margin-right: -2px;
-    }
-    .bars {
-      display: flex;
-      align-items: flex-end;
-      gap: 3px;
-      height: 22px;
-      width: 70px;
-      flex: none;
-    }
-    .bars span {
-      flex: 1;
-      border-radius: 2px;
-      background: var(--divider-color, #e0e0e0);
-    }
-    .bars span.on {
-      background: var(--xt-water);
     }
     .badges {
       display: flex;

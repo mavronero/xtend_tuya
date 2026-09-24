@@ -99,16 +99,29 @@ class IrrigationValvesStrategy extends HTMLElement {
 
 /** Irrigation Locations (permanent irrigated places; valves come and go). */
 function locationsView(): DashboardView {
+  // Sites as master-detail (Trello Sijuj2Dd "Location" view), full width
+  // like the calendar. The metering-point list stays below until its edit
+  // dialog (name, expected L/min, coordinates) moves into the sites card.
   return {
-    title: "Locations",
+    title: "Sites",
     path: "locations",
     icon: "mdi:map-marker-radius",
     type: "sections",
-    max_columns: 2,
+    max_columns: 3,
     sections: [
       {
         type: "grid",
-        column_span: 2,
+        column_span: 3,
+        cards: [
+          {
+            type: "custom:irrigation-sites-card",
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
+      {
+        type: "grid",
+        column_span: 3,
         cards: [
           {
             type: "custom:irrigation-locations-card",

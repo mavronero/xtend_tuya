@@ -1,0 +1,36 @@
+/** Date and duration wording shared by the farm cards. */
+
+export const DAY_MS = 86_400_000;
+
+/** "Today", "Yesterday", "Tomorrow", else "Mon 22 Sept". */
+export function dayLabel(ms: number, now = Date.now()): string {
+  const d = new Date(ms);
+  const day0 = new Date(now);
+  day0.setHours(0, 0, 0, 0);
+  const diff = Math.floor((d.getTime() - day0.getTime()) / DAY_MS);
+  if (diff === 0) return "Today";
+  if (diff === -1) return "Yesterday";
+  if (diff === 1) return "Tomorrow";
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+export function time(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export function when(ms: number): string {
+  return `${dayLabel(ms)} ${time(ms)}`;
+}
+
+/** "12 min", "5 h", "3 d" since ms. */
+export function since(ms: number, now = Date.now()): string {
+  const min = Math.round((now - ms) / 60_000);
+  if (min < 60) return `${min} min`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h} h` : `${Math.round(h / 24)} d`;
+}
+
+/** "1,240 L" */
+export function liters(l: number): string {
+  return `${Math.round(l).toLocaleString()} L`;
+}
