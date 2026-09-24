@@ -14,6 +14,7 @@ from homeassistant.const import (
     PERCENTAGE,
 )
 from homeassistant.components.sensor import SensorStateClass, SensorDeviceClass
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util.dt import DEFAULT_TIME_ZONE
 from tuya_device_handlers.definition.sensor import (
@@ -34,7 +35,8 @@ from ...ha_tuya_integration.tuya_integration_imports import (
 )
 from .codecs.liters import plausible_delta
 from ...const import XTDPCode
-from . import location_service
+from . import location_service, timer_state
+from .timer_state import TimerState
 from .codecs import counter_custom, run_times, single_run, t3_status
 from .codecs import time_task as tt
 
@@ -224,78 +226,22 @@ class DPCodeTimeTaskSummaryWrapper(DPCodeTimeTaskWrapper):
 
 
 class DPCodeTimeTaskRegistryWrapper(DPCodeTimeTaskWrapper):
-    """Accumulates all 7 timer slots across DP updates.
+    """Feeds every timer DP report into the valve's TimerState (timer_state.py).
 
-    The device's time_task DP is a sliding window that only shows the
-    last-written slot. This wrapper maintains a dict of all 7 slots,
-    updating each slot as its data comes through the DP. The registry
-    persists across HA restarts via the companion entity's state
-    restoration. The device DP is the single source of truth — no cloud
-    timer registry is consulted.
+    The state is the registry of all 7 slots; this wrapper only decodes
+    reports for it and returns the active count as the sensor state.
     """
-
-    NUM_SLOTS = 7
 
     def __init__(self, dpcode: str, type_information: TuyaRawTypeInformation) -> None:
         super().__init__(dpcode, type_information)
-        self.slots: dict[int, dict | None] = {i: None for i in range(self.NUM_SLOTS)}
-        # The DP is a sliding window that shows the last write/delete. Apply
-        # each unique payload to slots once; without this guard, every state
-        # read would re-apply the last delete and wipe a previously restored
-        # slot.
-        self._last_applied_payload: bytes | None = None
+        self.timer_state = TimerState()
 
     def read_device_status(self, device: TuyaCustomerDevice) -> str | None:
-        """Parse DP, apply once per unique payload, return active count."""
         raw = super().read_device_status(device)
-        payload = bytes(raw) if isinstance(raw, (bytes, bytearray)) else None
-        if payload is not None and payload != self._last_applied_payload:
-            self.update_data(device)
-            if self.timer is not None:
-                idx = self.timer["slot"]
-                if 0 <= idx < self.NUM_SLOTS:
-                    self.slots[idx] = dict(self.timer)
-                    # Tuya's cloud registry can map two timers onto the same
-                    # device slot (seen live on 969: 04:05 and 22:05 both as
-                    # slot 1). When that slot's push carries a time+days that
-                    # another slot already holds, the other entry is a stale
-                    # duplicate of this same timer — drop it so the registry
-                    # doesn't show one timer twice / a ghost that never fires.
-                    for other, s in self.slots.items():
-                        if (
-                            other != idx
-                            and s
-                            and s.get("hour") == self.timer["hour"]
-                            and s.get("minute") == self.timer["minute"]
-                            and s.get("days_mask") == self.timer["days_mask"]
-                        ):
-                            _LOGGER.warning(
-                                "time_task slot %d duplicates slot %d (%02d:%02d) — dropping stale entry",
-                                other,
-                                idx,
-                                self.timer["hour"],
-                                self.timer["minute"],
-                            )
-                            self.slots[other] = None
-            elif self.slot_index is not None and 0 <= self.slot_index < self.NUM_SLOTS:
-                # count=0 means slot was deleted
-                self.slots[self.slot_index] = None
-            self._last_applied_payload = payload
-        active = sum(1 for s in self.slots.values() if s and s.get("enabled"))
-        return str(active)
-
-    def get_slots_dict(self) -> dict[str, dict | None]:
-        """Return slots keyed by string index (for JSON-safe HA attributes)."""
-        return {str(k): v for k, v in self.slots.items()}
-
-    def restore_slots(self, data: dict) -> None:
-        """Hydrate slots from HA state restoration."""
-        for i in range(self.NUM_SLOTS):
-            slot_data = data.get(str(i)) or data.get(i)
-            if isinstance(slot_data, dict):
-                self.slots[i] = slot_data
-            else:
-                self.slots[i] = None
+        if isinstance(raw, (bytes, bytearray)):
+            payload = bytes(raw)
+            self.timer_state.apply_report(payload, self.decode(payload))
+        return str(self.timer_state.active_count)
 
 
 # ---------------------------------------------------------------------------
@@ -306,26 +252,21 @@ class DPCodeTimeTaskRegistryWrapper(DPCodeTimeTaskWrapper):
 class Fdm5kwTimerRegistryEntity(XTSensorEntity):
     """Sensor that exposes all 7 timer slots as attributes.
 
-    State value = count of active (enabled) timers.
-    Attributes contain the full slot registry for the irrigation-timer-card.
-    Slots accumulate from the device's time_task DP push events; the
-    registry survives HA restarts via state restoration.
+    State value = count of active (enabled) timers. Attributes carry the slot
+    registry for the timer card and the valve contract the farm layer reads
+    (farm/contract.py). The slots live in the valve's TimerState; it survives
+    HA restarts through this sensor's restored state.
     """
-
-    # device_id → live entity instance
-    INSTANCES: dict[str, "Fdm5kwTimerRegistryEntity"] = {}
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         wrapper = self._dpcode_wrapper
         if not isinstance(wrapper, DPCodeTimeTaskRegistryWrapper):
             return None
-        slots = wrapper.get_slots_dict()
-        active = sum(1 for s in slots.values() if s and s.get("enabled"))
         location = location_service.get_location(self.device.id) or {}
         return {
-            "slots": slots,
-            "active_count": active,
+            "slots": wrapper.timer_state.attribute(),
+            "active_count": wrapper.timer_state.active_count,
             "valve_name": self.device.name,
             "valve_home": location.get("home"),
             "valve_room": location.get("room"),
@@ -334,9 +275,8 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
         }
 
     async def async_added_to_hass(self) -> None:
-        """Restore slot registry from previous HA state."""
+        """Restore the slots and make them reachable for the timer service."""
         await super().async_added_to_hass()
-        Fdm5kwTimerRegistryEntity.INSTANCES[self.device.id] = self
 
         # Populate the valve home/room map (and put the owning hub on a slow
         # refresh) the first time any timer sensor is added. Fire-and-forget:
@@ -346,14 +286,19 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
             self.hass.async_create_task(
                 location_service.async_ensure_scheduled(self.hass, multi_manager)
             )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, location_service.SIGNAL_LOCATIONS_UPDATED, self.async_write_ha_state
+            )
+        )
 
         wrapper = self._dpcode_wrapper
         if not isinstance(wrapper, DPCodeTimeTaskRegistryWrapper):
             return
 
-        # Prime the idempotency guard with the device's current DP payload
-        # before restoring slots; otherwise the next state read would re-apply
-        # the last DP push (often a delete) and trample the restored data.
+        # Prime the once-per-payload guard with the device's current DP before
+        # restoring; otherwise the next state read would re-apply the last DP
+        # push (often a delete) over the restored slots.
         try:
             wrapper.read_device_status(self.device)
         except Exception:
@@ -367,35 +312,22 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
         if last_state is not None:
             slots_data = last_state.attributes.get("slots")
             if isinstance(slots_data, dict):
-                wrapper.restore_slots(slots_data)
-                _LOGGER.debug(
-                    "Restored timer registry for %s: %s",
-                    self.entity_id,
-                    slots_data,
-                )
+                wrapper.timer_state.restore(slots_data)
+                _LOGGER.debug("Restored timer registry for %s: %s", self.entity_id, slots_data)
+
+        self.async_on_remove(
+            timer_state.register(
+                self.hass,
+                self.device.id,
+                timer_state.LiveTimers(wrapper.timer_state, self.async_write_ha_state),
+            )
+        )
 
         # Force a state write so attributes (valve_name, slots, etc.) reach
         # the frontend immediately. Without this, devices that haven't seen
         # a fresh DP push since boot keep the prior boot's attributes — the
         # dashboard strategy then falls back to device_id for the tile name.
         self.async_write_ha_state()
-
-    async def async_will_remove_from_hass(self) -> None:
-        Fdm5kwTimerRegistryEntity.INSTANCES.pop(self.device.id, None)
-        await super().async_will_remove_from_hass()
-
-
-def _republish_valve_location() -> None:
-    """Re-publish timer-registry state so newly-fetched home/room attributes
-    reach the frontend immediately (the map fills async, after the entities'
-    first state write). Runs in the event loop via location_service."""
-    for entity in list(Fdm5kwTimerRegistryEntity.INSTANCES.values()):
-        if entity.hass is not None:
-            entity.async_write_ha_state()
-
-
-if _republish_valve_location not in location_service.REFRESH_LISTENERS:
-    location_service.REFRESH_LISTENERS.append(_republish_valve_location)
 
 
 # ---------------------------------------------------------------------------

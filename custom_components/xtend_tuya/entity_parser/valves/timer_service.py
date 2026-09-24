@@ -17,6 +17,7 @@ import logging
 from ...transport.port import CloudResult, TuyaPort
 from .codecs import time_task as tt
 from .driver import CommandResult, target
+from .timer_state import live_timers
 from .const import (
     TUYA_ERR_DEVICE_POOL_QUOTA,
     TUYA_ERR_DEVICE_POOL_QUOTA_MSG,
@@ -65,19 +66,10 @@ def _b64(frame: bytes) -> str:
 
 
 def _get_prior_slot(hass, device_id: str, slot: int) -> dict | None:
-    """Look up the current slot data from the registry entity so we can
-    match it against the cloud timer registry when deleting/overwriting.
-    Returns None if the entity isn't loaded yet or the slot is empty."""
-    # Local import avoids a circular import at module load time.
-    from .sensor import Fdm5kwTimerRegistryEntity, DPCodeTimeTaskRegistryWrapper
-
-    entity = Fdm5kwTimerRegistryEntity.INSTANCES.get(device_id)
-    if entity is None:
-        return None
-    wrapper = entity._dpcode_wrapper
-    if not isinstance(wrapper, DPCodeTimeTaskRegistryWrapper):
-        return None
-    return wrapper.slots.get(slot)
+    """The slot as HA knows it, to match its cloud entry when deleting or
+    overwriting. None if the valve's timers aren't loaded or the slot is empty."""
+    live = live_timers(hass, device_id)
+    return live.state.slot(slot) if live else None
 
 
 async def _write_time_task(port: TuyaPort, device_id: str, b64_value: str, code: str) -> bool:
@@ -391,16 +383,11 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     if not port.settings.cloud_timer_mirror:
         return {"success": False, "error": "cloud_mirror_disabled"}
 
-    from .sensor import Fdm5kwTimerRegistryEntity
-
-    entity = Fdm5kwTimerRegistryEntity.INSTANCES.get(device_id)
-    if entity is None:
+    live = live_timers(hass, device_id)
+    if live is None:
         _LOGGER.warning("resync: no timer registry entity loaded for %s", device_id)
         return {"success": False, "error": "no_registry_entity"}
-    wrapper = entity._dpcode_wrapper
-    slots: dict = getattr(wrapper, "slots", None)
-    if slots is None:
-        return {"success": False, "error": "no_registry_slots"}
+    slots = {i: live.state.slot(i) for i in range(tt.SLOTS)}
 
     cloud_keys = await _get_cloud_timer_keys(port, device_id)
     if cloud_keys is None:
@@ -452,7 +439,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
             )
             continue
         if await _write_time_task(port, device_id, _b64(codec.clear(slot_idx)), codec.code):
-            slots[slot_idx] = None
+            live.state.clear(slot_idx)
             orphans_cleared += 1
             _LOGGER.warning(
                 "resync: cleared live orphan slot %d on %s (no cloud entry)",
@@ -462,7 +449,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
             orphans_deferred += 1
 
     if orphans_cleared:
-        entity.async_write_ha_state()
+        live.publish()
 
     result = {
         "success": True,

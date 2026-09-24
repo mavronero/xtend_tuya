@@ -189,7 +189,7 @@ entity_parser/valves/            (upstream plugin mechanism; was entity_parser/f
     t3_status.py                 sat_N (battery, sun flag, next run), flow_sta_N (volume + duration)
     counter_custom.py            QT-08W "dur,vol" / bare number; T3 CSV "mode,flag,dur,vol,ts", 0xFFFE sentinel
     run_times.py                 start_time / close_time
-  timer_state.py                 TimerState: single writer for slots (step 7)
+  timer_state.py                 TimerState: single writer for slots; per-hass registry of live states
   driver.py                      target(hass, device_id) -> (port, profile) | CommandResult
   timer_service.py               set / delete / resync timers (the command side)
   control_service.py             start / stop single runs
@@ -417,7 +417,7 @@ that touches its code, and not before, to avoid doing the work twice:
 |---|---|
 | 3 (farm) | none: `test_runs_store`, `test_location_model`, `test_water_math` already import |
 | 4 (L1) | `test_quota_accounting`: the C6 part (note_cloud_write) is done in `tests/unit/`; the C10 part (alias fallback in send_commands) moves to step 8 |
-| 5–7 (L2) | `test_resync_guard`, `test_last_report_ts`, `entity_parser/fdm5kw/test_t3_decode.py` (→ codec tests) |
+| 5–7 (L2) | done: `entity_parser/fdm5kw/test_t3_decode.py` → `tests/unit/test_codecs.py` (step 5), `test_resync_guard` → `tests/unit/test_timer_state.py` (step 7). Left for step 8: `test_last_report_ts` |
 | 8 | the rest (multi_manager internals that the refactor does not touch): `test_device_ownership`, `test_multimap_mirror_guard`, `test_master_map_registry`, `test_device_map_swap`, `test_device_object_identity`, `test_detached_device_build`, `test_device_deepcopy`, `test_dp_collapse_trace`, `test_runtime_data_lookup`, `test_background_load`, `test_entry_hygiene`, `test_quota_accounting` (C10), `test_mq_supervisor`, `test_openapi_timeouts`, `test_sharing_api_retry`, `test_sharing_mq_overrides`, `test_smart_home_device_list_fallback`, `test_stall_sampler` |
 
 The boundary test (`tests/unit/test_layer_boundaries.py`) is a ratchet. Its
@@ -438,7 +438,7 @@ ever shrinks.
 | 5 | L2a: `entity_parser/fdm5kw/codecs/` (time_task, single_run, t3_status, counter_custom, run_times; pure, stdlib only, bytes in/out); wrappers and services use them; T3 timer wrappers are single inheritance with a swapped `decode` (the MRO diamond is gone); dead `_decode_start_time` and stale docstrings removed; `test_t3_decode.py` (shipped inside the integration) replaced by `tests/unit/test_codecs.py` | none | 1,040,000 old/new parity comparisons (random + edge frames); codec tests on every captured payload; conformance vs the fixture specs; >200 real prod DP values decode; `test_codecs_are_pure`; dev: 1,331 valve entity values identical, snapshot diff empty, services identical |
 | 6a | Rename `entity_parser/fdm5kw` → `entity_parser/valves` | none | dev: values and snapshot identical |
 | 6 | L2b: `profiles.py` (QT-08W, T3 and read-only Smart Water Timer + BLE, by product_id with a DP-signature fallback), `driver.py` (`target()` + `CommandResult`), timer/control services profile-driven with no product branches; plugin extension point `XTCustomEntityParser.get_services()` so L1 no longer knows the valve services; the device layer owns its liters plausibility (`codecs/liters.py`) | services may return a `CommandResult` (`success` kept, `dp` / `cloud` / `reason` added); read-only profiles get "unsupported" (previously a Smart Water Timer was sent QT-08W frames) | 79 tests incl. driver tests on a fake port; dev: 1,331 values, snapshot and service effects identical; ratchet 6 → 3. The soak test was skipped (decision b): it only changes L3 wording later |
-| 7 | L2c: `TimerState` single writer | none intended | rehearsal on dev (set/delete/resync/SmartLife disable); highest risk |
+| 7 | L2c: `timer_state.py`: `TimerState` per valve is the only writer of the slots (DP reports, resync clear, restore); live states registered per HA instance in `hass.data` (replaces the class global `INSTANCES`); location updates via a dispatcher signal (replaces the global `REFRESH_LISTENERS`); timer_service no longer reaches into `entity._dpcode_wrapper` | none | 72,399-state parity old vs new accumulation (QT-08W + T3, deletes, duplicates, repeats, short frames); resync mirror test replaced by real tests; dev: 1,331 values incl. the slots of 112 registry sensors identical across restart, a timer survives set → restart → delete, services identical |
 | 8 | Boundary test without xfails; mypy strict green | none | CI |
 | — | Farm features on L3 + contract | — | — |
 

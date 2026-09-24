@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any, Callable
+from typing import Any
 
 from aiohttp import web
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView
@@ -42,9 +43,9 @@ LOCATION_MAP: dict[str, dict[str, str]] = {}
 # class of bug (audit C16). Cleared on unload so a reload re-arms.
 _SCHEDULED: set[str] = set()
 
-# Called (no args) after LOCATION_MAP changes, so entities can re-publish the
-# new home/room attributes without this module importing the sensor module.
-REFRESH_LISTENERS: list[Callable[[], None]] = []
+# Dispatched after LOCATION_MAP changes, so the registry sensors re-publish
+# their home/room attributes without this module importing the sensor module.
+SIGNAL_LOCATIONS_UPDATED = "xtend_tuya_valve_locations_updated"
 
 REFRESH_INTERVAL = timedelta(hours=12)
 
@@ -113,11 +114,7 @@ async def async_refresh(hass: HomeAssistant, multi_manager: Any) -> None:
         _LOGGER.info(
             "fdm5kw: refreshed valve home/room for %d devices", len(mapping)
         )
-        for listener in list(REFRESH_LISTENERS):
-            try:
-                listener()
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("fdm5kw: location refresh listener failed", exc_info=True)
+        async_dispatcher_send(hass, SIGNAL_LOCATIONS_UPDATED)
 
 
 async def async_ensure_scheduled(hass: HomeAssistant, multi_manager: Any) -> None:
