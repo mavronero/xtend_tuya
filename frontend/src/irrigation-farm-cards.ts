@@ -3,3 +3,4 @@
 import "./irrigation-valves-card.ts";
 import "./irrigation-sites-card.ts";
 import "./irrigation-pumps-card.ts";
+import "./irrigation-run-history-card.ts";

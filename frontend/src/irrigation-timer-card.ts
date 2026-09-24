@@ -301,19 +301,23 @@ export class IrrigationTimerCard extends LitElement {
     const valueStr =
       timer.mode === TimerMode.Duration
         ? timer.value < 60
-          ? `${timer.value}s`
+          ? `${timer.value} s`
           : timer.value % 60 === 0
-            ? `${timer.value / 60}min`
-            : `${Math.floor(timer.value / 60)}min ${timer.value % 60}s`
-        : `${timer.value}L`;
+            ? `${timer.value / 60} min`
+            : `${Math.floor(timer.value / 60)} min ${timer.value % 60} s`
+        : `${timer.value} L`;
     const daysStr = DAYS.filter((_, i) => timer.daysMask & (1 << i)).join(", ");
 
     return html`
       <div class="timer-row ${timer.enabled ? "" : "disabled"}">
         <div class="timer-info" @click=${() => this._startEdit(timer)}>
-          <div class="timer-time">${timeStr}</div>
+          <!-- Start and amount on the first row (Trello Sijuj2Dd). -->
+          <div class="timer-time">
+            ${timeStr}<span class="timer-value" title=${timer.mode === TimerMode.Duration ? "Duration" : "Volume"}>
+              · ${valueStr}</span
+            >
+          </div>
           <div class="timer-details">
-            <span class="timer-value">${valueStr}</span>
             <span class="timer-days">${daysStr}</span>
           </div>
         </div>
@@ -578,8 +582,10 @@ export class IrrigationTimerCard extends LitElement {
     }
 
     .timer-value {
+      font-size: 0.7em;
       font-weight: 500;
       color: var(--timer-card-primary);
+      margin-left: 6px;
     }
 
     .add-btn {

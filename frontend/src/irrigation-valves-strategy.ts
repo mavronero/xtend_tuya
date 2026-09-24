@@ -367,15 +367,22 @@ function buildValveView(v: ValveEntities, hours: number): DashboardView {
   const middleCards: unknown[] = [];
   const rightCards: unknown[] = [];
 
-  // Where the valve is installed (irrigation location) + assign/move.
-  leftCards.push({ type: "custom:irrigation-locations-card", device_id: v.device_id });
   const control = buildControlCard(v);
   if (control) leftCards.push(control);
   leftCards.push(buildTimerCard(v));
+  // Where the valve is installed + assign/move, under the timers (Trello
+  // Sijuj2Dd).
+  leftCards.push({ type: "custom:irrigation-locations-card", device_id: v.device_id });
 
   // Last Watering at the top of the history column, per Simon 2026-06-04.
   const last = buildLastWateringCard(v);
   if (last) middleCards.push(last);
+  // Every run as a text list, like SmartLife's history (Trello Sijuj2Dd).
+  middleCards.push({
+    type: "custom:irrigation-run-history-card",
+    device_id: v.device_id,
+    metered: !!v.volume_sensor,
+  });
   const watering = buildWateringHistoryCard(v, hours);
   if (watering) middleCards.push(watering);
 

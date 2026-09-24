@@ -41,6 +41,8 @@ const BUNDLES = {
   "xt-pump-list": "irrigation-farm-cards.js",
   "xt-pump-chart": "irrigation-farm-cards.js",
   "xt-device-picker": "irrigation-farm-cards.js",
+  "irrigation-run-history-card": "irrigation-farm-cards.js",
+  "xt-run-history": "irrigation-farm-cards.js",
   "xt-site-tree": "irrigation-farm-cards.js",
   "irrigation-quota-card": "irrigation-quota-card.js",
   "irrigation-room-groups": "irrigation-room-groups.js",
