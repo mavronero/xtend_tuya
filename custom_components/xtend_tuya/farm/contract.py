@@ -42,7 +42,7 @@ def device_identifiers(tuya_device_id: str) -> set[tuple[str, str]]:
     return {(domain, tuya_device_id) for domain in VALVE_DEVICE_DOMAINS}
 
 
-def tuya_id_of(device: dr.DeviceEntry) -> str | None:
+def tuya_id_of(device: dr.DeviceEntry | dr.ChildDeviceEntry) -> str | None:
     """The Tuya device id a valve's HA device is registered under."""
     return next((ident for domain, ident in device.identifiers if domain in VALVE_DEVICE_DOMAINS), None)
 
