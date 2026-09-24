@@ -45,6 +45,7 @@ const BUNDLES = {
   "xt-run-history": "irrigation-farm-cards.js",
   "irrigation-valve-header-card": "irrigation-farm-cards.js",
   "xt-spinner": "irrigation-farm-cards.js",
+  "irrigation-valve-settings-card": "irrigation-farm-cards.js",
   "xt-site-tree": "irrigation-farm-cards.js",
   "irrigation-quota-card": "irrigation-quota-card.js",
   "irrigation-room-groups": "irrigation-room-groups.js",

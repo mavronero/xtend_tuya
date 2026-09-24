@@ -1,6 +1,8 @@
 import { LitElement, html, css, nothing, PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { IrrigationControlCardConfig } from "./models";
+import { farmTokens } from "./components/theme.ts";
+import { formStyles } from "./components/form-styles.ts";
 
 // HA types (minimal — same shape used in irrigation-timer-card)
 interface HomeAssistant {
@@ -19,8 +21,11 @@ interface HassEntity {
 
 type Mode = "duration" | "volume";
 
-const MODE_DURATION_DEFAULT = 60; // seconds
-const MODE_VOLUME_DEFAULT = 10; // liters
+const MODE_DURATION_DEFAULT = 300; // seconds
+const MODE_VOLUME_DEFAULT = 50; // liters
+// One tap for the usual amounts (the input stays for anything else).
+const DURATION_PRESETS = [300, 600, 900, 1800]; // seconds
+const VOLUME_PRESETS = [50, 100, 200]; // liters
 
 export class IrrigationControlCard extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
@@ -276,31 +281,24 @@ export class IrrigationControlCard extends LitElement {
 
     return html`
       <ha-card>
-        <div class="card-header">
+        <div class="titlebar">
           <ha-icon icon="mdi:water-pump"></ha-icon>
           <div class="title">
-            <span class="name">${name}</span>
-            ${location
-              ? html`<span class="location">${location}</span>`
-              : nothing}
+            <b>Water now</b>
+            <span title=${location ?? ""}>${name}${location ? ` · ${location}` : ""}</span>
           </div>
-          ${this._renderStatusPill(running, inProgress)}
+          ${this._renderStatus(running, inProgress)}
         </div>
-        <div class="card-content">
-          ${inProgress ? this._renderProgress(start) : this._renderControls()}
-        </div>
+        <div class="body">${inProgress ? this._renderProgress(start) : this._renderControls()}</div>
       </ha-card>
     `;
   }
 
-  private _renderStatusPill(running: boolean, inProgress: boolean) {
-    if (inProgress) {
-      return html`<span class="pill running">Watering</span>`;
-    }
-    if (running) {
-      return html`<span class="pill manual">Manual ON</span>`;
-    }
-    return html`<span class="pill idle">Idle</span>`;
+  private _renderStatus(running: boolean, inProgress: boolean) {
+    if (inProgress) return html`<span class="status watering" title="A watering cycle is running"><i></i>Watering</span>`;
+    if (running)
+      return html`<span class="status manual" title="Opened by hand: it will not stop by itself"><i></i>Open, no auto-stop</span>`;
+    return html`<span class="status" title="Closed"><i></i>Idle</span>`;
   }
 
   private _renderProgress(start: Date | null) {
@@ -314,16 +312,11 @@ export class IrrigationControlCard extends LitElement {
       const remaining = Math.max(0, target - cur);
       return html`
         <div class="progress">
-          <div class="progress-text">
-            <span class="big">${cur.toFixed(1)} L</span>
-            <span class="dim"> / ${target} L</span>
-          </div>
-          <div class="bar">
-            <div class="fill" style="width:${pct}%"></div>
-          </div>
-          <div class="progress-sub">${remaining.toFixed(1)} L remaining</div>
+          <div class="progress-text"><span class="big">${remaining.toFixed(0)} L</span><span class="dim">to go of ${target} L</span></div>
+          <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+          <div class="dim">${cur.toFixed(1)} L delivered</div>
         </div>
-        <button class="stop-btn" @click=${this._stop}>Stop</button>
+        <button class="btn wide" @click=${this._stop}><ha-icon icon="mdi:stop"></ha-icon>Stop watering</button>
       `;
     }
 
@@ -348,79 +341,60 @@ export class IrrigationControlCard extends LitElement {
     const pct = total > 0 ? Math.min(100, (elapsed / total) * 100) : 0;
     return html`
       <div class="progress">
-        <div class="progress-text">
-          <span class="big">${formatDuration(remaining)}</span>
-          <span class="dim"> left of ${formatDuration(total)}</span>
-        </div>
-        <div class="bar">
-          <div class="fill" style="width:${pct}%"></div>
-        </div>
-        <div class="progress-sub">
-          ${formatDuration(elapsed)} elapsed
-        </div>
+        <div class="progress-text"><span class="big">${formatDuration(remaining)}</span><span class="dim">left of ${formatDuration(total)}</span></div>
+        <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+        <div class="dim">${formatDuration(elapsed)} elapsed</div>
       </div>
-      <button class="stop-btn" @click=${this._stop}>Stop</button>
+      <button class="btn wide" @click=${this._stop}><ha-icon icon="mdi:stop"></ha-icon>Stop watering</button>
     `;
   }
 
   private _renderControls() {
+    const duration = this._mode === "duration";
+    const presets = duration ? DURATION_PRESETS : VOLUME_PRESETS;
+    // Duration is edited in minutes; the device takes seconds.
+    const shown = duration ? Math.max(1, Math.round(this._target / 60)) : this._target;
     return html`
-      <div class="mode-tabs">
-        <button
-          class=${this._mode === "duration" ? "tab active" : "tab"}
-          @click=${() => this._setMode("duration")}
-        >
-          <ha-icon icon="mdi:timer-outline"></ha-icon>
-          Duration
+      <div class="chips" role="group" aria-label="Water by">
+        <button class="chip ${duration ? "on" : ""}" aria-pressed=${duration} @click=${() => this._setMode("duration")}>
+          <ha-icon icon="mdi:timer-outline"></ha-icon>Time
         </button>
-        <button
-          class=${this._mode === "volume" ? "tab active" : "tab"}
-          @click=${() => this._setMode("volume")}
-        >
-          <ha-icon icon="mdi:water"></ha-icon>
-          Volume
+        <button class="chip ${duration ? "" : "on"}" aria-pressed=${!duration} @click=${() => this._setMode("volume")}>
+          <ha-icon icon="mdi:water"></ha-icon>Amount
         </button>
       </div>
-
-      <div class="target-row">
-        <label>${this._mode === "duration" ? "Duration" : "Volume"}</label>
-        <div class="target-input">
-          <input
-            type="number"
-            min="1"
-            max=${this._mode === "duration" ? 86400 : 9999}
-            .value=${String(
-              this._mode === "duration"
-                ? Math.max(1, Math.round(this._target))
-                : this._target
-            )}
-            @change=${(e: Event) => {
-              const raw = parseFloat((e.target as HTMLInputElement).value);
-              if (Number.isFinite(raw) && raw > 0) {
-                this._target = raw;
-              }
-            }}
-          />
-          <span class="unit">${this._mode === "duration" ? "sec" : "L"}</span>
-          <button class="start-btn inline" @click=${this._startSingleWatering}>
-            <ha-icon icon="mdi:play"></ha-icon>
-            Single watering
-          </button>
-        </div>
+      <div class="chips" role="group" aria-label="Quick amounts">
+        ${presets.map(
+          (v) => html`<button class="chip ${this._target === v ? "on" : ""}" @click=${() => (this._target = v)}>
+            ${duration ? `${v / 60} min` : `${v} L`}
+          </button>`
+        )}
       </div>
-
-      <div class="primary-actions">
-        <button
-          class="manual-btn ${this._isOn() ? "on" : ""}"
-          @click=${this._toggleManual}
-          title=${this._isOn()
-            ? "Manually stop the valve"
-            : "Manually open the valve (no auto-stop)"}
-        >
-          <ha-icon icon=${this._isOn() ? "mdi:toggle-switch" : "mdi:toggle-switch-off-outline"}></ha-icon>
-          Manual ${this._isOn() ? "OFF" : "ON"}
-        </button>
+      <div class="field">
+        <input
+          type="number"
+          min="1"
+          max=${duration ? 1440 : 9999}
+          aria-label=${duration ? "Minutes" : "Liters"}
+          .value=${String(shown)}
+          @change=${(e: Event) => {
+            const raw = parseFloat((e.target as HTMLInputElement).value);
+            if (Number.isFinite(raw) && raw > 0) this._target = duration ? Math.round(raw * 60) : raw;
+          }}
+        />
+        <span class="unit">${duration ? "min" : "L"}</span>
       </div>
+      <button class="btn primary wide" @click=${this._startSingleWatering}>
+        <ha-icon icon="mdi:play"></ha-icon>Start watering · ${duration ? `${shown} min` : `${shown} L`}
+      </button>
+      <button
+        class="btn wide ${this._isOn() ? "warn" : ""}"
+        @click=${this._toggleManual}
+        title=${this._isOn() ? "Close the valve" : "Open the valve by hand: it will not stop by itself"}
+      >
+        <ha-icon icon=${this._isOn() ? "mdi:valve-closed" : "mdi:valve-open"}></ha-icon>
+        ${this._isOn() ? "Close valve" : "Open valve (no auto-stop)"}
+      </button>
     `;
   }
 
@@ -432,230 +406,38 @@ export class IrrigationControlCard extends LitElement {
     this._mode = m;
   }
 
-  static styles = css`
-    :host {
-      --ic-primary: var(--primary-color, #03a9f4);
-      --ic-bg: var(--card-background-color, #fff);
-      --ic-text: var(--primary-text-color, #212121);
-      --ic-secondary: var(--secondary-text-color, #727272);
-      --ic-divider: var(--divider-color, #e0e0e0);
-      --ic-success: var(--success-color, #4caf50);
-      --ic-warning: var(--warning-color, #ff9800);
-    }
-
-    .card-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 16px 16px 0;
-      font-size: 1.1em;
-      font-weight: 500;
-      color: var(--ic-text);
-    }
-
-    .card-header ha-icon {
-      color: var(--ic-primary);
-    }
-
-    .card-header .title {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
-
-    .card-header .title .name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .card-header .title .location {
-      font-size: 0.7em;
-      font-weight: 400;
-      opacity: 0.6;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .pill {
-      font-size: 0.75em;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .pill.idle {
-      background: var(--ic-divider);
-      color: var(--ic-secondary);
-    }
-    .pill.running {
-      background: var(--ic-primary);
-      color: white;
-    }
-    .pill.manual {
-      background: var(--ic-warning);
-      color: white;
-    }
-
-    .card-content {
-      padding: 16px;
-    }
-
-    /* Mode tabs */
-    .mode-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-    .tab {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 10px;
-      border: 1px solid var(--ic-divider);
-      border-radius: 8px;
-      background: transparent;
-      color: var(--ic-secondary);
-      font-size: 0.95em;
-      cursor: pointer;
-    }
-    .tab.active {
-      background: var(--ic-primary);
-      color: white;
-      border-color: var(--ic-primary);
-    }
-
-    /* Target input */
-    .target-row {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 12px;
-    }
-    .target-row label {
-      font-size: 0.85em;
-      font-weight: 500;
-      color: var(--ic-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .target-input {
-      display: flex;
-      align-items: stretch;
-      gap: 8px;
-    }
-    .target-input input {
-      flex: 1;
-      min-width: 0;
-      padding: 10px 12px;
-      border: 1px solid var(--ic-divider);
-      border-radius: 8px;
-      background: var(--ic-bg);
-      color: var(--ic-text);
-      font-size: 1.1em;
-      outline: none;
-    }
-    .target-input input:focus {
-      border-color: var(--ic-primary);
-    }
-    .target-input .unit {
-      align-self: center;
-      color: var(--ic-secondary);
-      font-size: 0.95em;
-    }
-    .target-input .start-btn.inline {
-      flex: 0 0 auto;
-      padding: 0 14px;
-      white-space: nowrap;
-    }
-
-    /* Primary actions */
-    .primary-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .start-btn,
-    .manual-btn,
-    .stop-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 12px;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.95em;
-      font-weight: 500;
-      cursor: pointer;
-    }
-    .start-btn {
-      background: var(--ic-primary);
-      color: white;
-    }
-    .manual-btn {
-      flex: 1;
-      background: transparent;
-      border: 1px solid var(--ic-divider);
-      color: var(--ic-text);
-    }
-    .manual-btn.on {
-      background: var(--ic-warning);
-      color: white;
-      border-color: var(--ic-warning);
-    }
-    .stop-btn {
-      width: 100%;
-      margin-top: 16px;
-      background: transparent;
-      border: 1px solid var(--ic-divider);
-      color: var(--ic-text);
-    }
-
-    .dim {
-      color: var(--ic-secondary);
-    }
-
-    /* Progress view */
-    .progress {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .progress-text {
-      display: flex;
-      align-items: baseline;
-      gap: 4px;
-      font-variant-numeric: tabular-nums;
-    }
-    .progress-text .big {
-      font-size: 2em;
-      font-weight: 600;
-      color: var(--ic-text);
-    }
-    .progress-text .dim {
-      font-size: 1em;
-    }
-    .bar {
-      height: 8px;
-      background: var(--ic-divider);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .fill {
-      height: 100%;
-      background: var(--ic-primary);
-      transition: width 0.5s linear;
-    }
-    .progress-sub {
-      font-size: 0.85em;
-      color: var(--ic-secondary);
-    }
-  `;
+  static styles = [
+    farmTokens,
+    formStyles,
+    css`
+      .progress {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .progress-text {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-variant-numeric: tabular-nums;
+      }
+      .progress-text .big {
+        font-size: 2em;
+        font-weight: 500;
+      }
+      .bar {
+        height: 8px;
+        background: var(--xt-track);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .fill {
+        height: 100%;
+        background: var(--xt-water);
+        transition: width 0.5s linear;
+      }
+    `,
+  ];
 }
 
 function formatDuration(seconds: number): string {

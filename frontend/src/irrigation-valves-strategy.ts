@@ -423,28 +423,13 @@ function buildControlCard(v: ValveEntities): unknown | null {
 }
 
 function buildOtherSettingsCard(v: ValveEntities): unknown | null {
-  const cards: unknown[] = [];
-  if (v.sleep_mode)
-    cards.push({
-      type: "entities",
-      title: "Other settings",
-      show_header_toggle: false,
-      entities: [{ entity: v.sleep_mode, name: "Sleep Mode" }],
-    });
-  // Rain/Snow delay as a tile with −/+ buttons instead of an entities row —
-  // more responsive to tap, esp. on the companion app (Trello ExgyBKSb).
-  if (v.rain_snow_delay)
-    cards.push({
-      type: "tile",
-      entity: v.rain_snow_delay,
-      name: "Rain/Snow Delay",
-      features: [{ type: "numeric-input", style: "buttons" }],
-    });
-  if (cards.length === 0) return null;
+  // Own card in the farm style: HA's entities/tile cards ignore the short
+  // names here and repeat the valve name on every row.
+  if (!v.sleep_mode && !v.rain_snow_delay) return null;
   return {
-    type: "vertical-stack",
-    cards,
-    layout_options: { grid_columns: 4, grid_rows: "auto" },
+    type: "custom:irrigation-valve-settings-card",
+    sleep_mode: v.sleep_mode,
+    rain_snow_delay: v.rain_snow_delay,
   };
 }
 
@@ -1373,6 +1358,8 @@ class IrrigationValveDetailCard extends HTMLElement {
     if (id === this._shownId) return;
     this._shownId = id;
 
+    // Something visible while the data and HA's card helpers load.
+    this.innerHTML = `<div style="display:grid;place-items:center;padding:48px;color:var(--secondary-text-color)">Loading valve…</div>`;
     const valve = id ? discoverValves(hass, await fetchLocations(hass)).find((v) => v.device_id === id) : undefined;
     if (id !== this._shownId) return; // navigated on while loading
     this._children = [];
