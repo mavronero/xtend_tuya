@@ -1250,6 +1250,15 @@ interface CardHelpers {
   createCardElement(config: unknown): HTMLElement & { hass?: unknown };
 }
 
+// This page is a panel view, and HA's panel view styles zero the card radius
+// and border on the elements inside it (square, edgeless cards). Inline on
+// each card element beats that rule: HA's defaults plus the farm cards' edge
+// (components/theme.ts).
+const CARD_LOOK =
+  "--ha-card-border-radius:12px;--ha-card-border-width:1px;" +
+  "--ha-card-border-color:color-mix(in srgb,var(--primary-text-color,#212121) 14%,transparent);" +
+  "--ha-card-box-shadow:0 1px 3px rgba(0,0,0,0.07)";
+
 class IrrigationValveDetailCard extends HTMLElement {
   private _hass: HomeAssistantLike | null = null;
   private _hours = 24;
@@ -1303,6 +1312,7 @@ class IrrigationValveDetailCard extends HTMLElement {
       `<div class="cols" style="display:grid;gap:16px;align-items:start;` +
       `grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))"></div>`;
     const header = helpers.createCardElement({ type: "custom:irrigation-valve-header-card", device_id: valve.device_id });
+    header.style.cssText = CARD_LOOK;
     header.hass = hass;
     this._children.push(header);
     (root.querySelector(".head") as HTMLElement).appendChild(header);
@@ -1312,18 +1322,14 @@ class IrrigationValveDetailCard extends HTMLElement {
       col.style.cssText = "display:flex;flex-direction:column;gap:16px;min-width:0";
       for (const cfg of section.cards) {
         const el = helpers.createCardElement(cfg);
+        el.style.cssText = CARD_LOOK;
         el.hass = hass;
         this._children.push(el);
         col.appendChild(el);
       }
       cols.appendChild(col);
     }
-    // Same card edge as the farm cards (components/theme.ts), also for HA's
-    // own graphs on this page: the default edge nearly vanishes.
-    this.style.cssText =
-      "display:block;padding:16px;max-width:1400px;margin:0 auto;" +
-      "--ha-card-border-color:color-mix(in srgb,var(--primary-text-color,#212121) 14%,transparent);" +
-      "--ha-card-box-shadow:0 1px 3px rgba(0,0,0,0.07)";
+    this.style.cssText = "display:block;padding:16px;max-width:1400px;margin:0 auto";
     this.replaceChildren(root);
   }
 
