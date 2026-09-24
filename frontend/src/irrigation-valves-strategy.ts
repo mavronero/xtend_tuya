@@ -981,7 +981,6 @@ interface StoredRun {
   start: string;
   end: string;
   duration_seconds: number;
-  liters?: number | null;
 }
 interface HistoryPoint {
   s: string;
@@ -1030,8 +1029,8 @@ class IrrigationValveMatrix extends HTMLElement {
   private _hass: HomeAssistantLike | null = null;
   private _config: MatrixConfig | null = null;
   private _segments: Record<string, MatrixSegment[]> = {};
-  // Liters per TUYA DEVICE ID within the window, summed from the runs store
-  // (same source as the bars and the TIME column).
+  // Per-switch minutes open and per-volume-sensor liters within the
+  // history window — both derived from the same history fetch as the bars.
   private _waterL: Record<string, number> = {};
   // Recorded runs from the runs store, keyed by TUYA DEVICE ID. These are
   // the amber bars and the TIME column; the switch history only supplies
@@ -1104,7 +1103,10 @@ class IrrigationValveMatrix extends HTMLElement {
     const switches = this._config.valves
       .map((v) => v.switch)
       .filter((e): e is string => !!e);
-    if (switches.length === 0 && !this._config.valves.some((v) => v.device_id)) return;
+    const volumes = this._config.valves
+      .map((v) => v.volume)
+      .filter((e): e is string => !!e);
+    if (switches.length === 0 && volumes.length === 0) return;
     this._fetching = true;
     const now = Date.now();
     const start = now - this._hours() * 3_600_000;
@@ -1119,7 +1121,7 @@ class IrrigationValveMatrix extends HTMLElement {
         type: "history/history_during_period",
         start_time: new Date(start).toISOString(),
         end_time: new Date(now).toISOString(),
-        entity_ids: switches,
+        entity_ids: [...switches, ...volumes],
         minimal_response: true,
         no_attributes: true,
       });
@@ -1127,7 +1129,12 @@ class IrrigationValveMatrix extends HTMLElement {
       for (const entity of switches) {
         nextSegs[entity] = this._buildSegments(raw[entity] ?? [], start, now);
       }
+      const nextWater: Record<string, number> = {};
+      for (const entity of volumes) {
+        nextWater[entity] = this._sumPositiveDeltas(raw[entity] ?? []);
+      }
       this._segments = nextSegs;
+      this._waterL = nextWater;
       await this._fetchRuns(start, now);
       this._render();
     } catch (err) {
@@ -1136,6 +1143,50 @@ class IrrigationValveMatrix extends HTMLElement {
     } finally {
       this._fetching = false;
     }
+  }
+
+  // Total liters delivered within the window. Mirror of the Python
+  // water_math.sum_plausible_deltas — keep the two in step.
+  //
+  // The volume sensor is the device's raw liters counter, and the fleet
+  // runs it in two shapes: most valves reset it to 0 at the start of every
+  // cycle, some run it as a lifetime odometer (audit D3/R16). Summing
+  // plausible positive deltas counts every cycle exactly once either way.
+  //
+  // The old absolute 9000 L ceiling ("no valve can deliver more in one
+  // run") dropped EVERY sample from an odometer valve, so those rows read
+  // 0 L forever. Plausibility belongs on the delta: the impeller's limit is
+  // a flow rate, not a total. Rate check (4.4.212): valve 824 summed
+  // 10,303 L over 1.5 h runtime (~114 L/min) from sub-ceiling garbage, so
+  // reject any delta implying more than 50 L/min (2× the meter's spec,
+  // margin for the ~10 s publish jitter), floored at 50 L so a burst
+  // arriving in the same second isn't rejected by a ~0 elapsed time. An
+  // impossible sample is DISCARDED rather than becoming `prev`, so the drop
+  // back off a spike isn't mistaken for a cycle reset.
+  private _sumPositiveDeltas(points: HistoryPoint[]): number {
+    const MAX_RATE_L_PER_MIN = 50;
+    const MIN_PLAUSIBLE_DELTA_L = 50;
+    let total = 0;
+    let prev: number | null = null;
+    let prevLu = 0;
+    for (const p of points) {
+      const v = parseFloat(p.s);
+      if (!Number.isFinite(v)) continue;
+      if (prev !== null) {
+        // A drop = the counter reset at a cycle start, so everything it has
+        // climbed back to since the reset is this cycle's water.
+        const delta = v >= prev ? v - prev : v;
+        const ceiling = Math.max(
+          MIN_PLAUSIBLE_DELTA_L,
+          (MAX_RATE_L_PER_MIN * Math.max(p.lu - prevLu, 0)) / 60
+        );
+        if (delta > ceiling) continue;
+        if (delta > 0) total += delta;
+      }
+      prev = v;
+      prevLu = p.lu;
+    }
+    return total;
   }
 
   // Recorded runs, straight from the materialized runs store. This is the
@@ -1161,7 +1212,6 @@ class IrrigationValveMatrix extends HTMLElement {
     const span = endMs - startMs;
     const segs: Record<string, MatrixSegment[]> = {};
     const mins: Record<string, number> = {};
-    const liters: Record<string, number> = {};
     try {
       const r = await hass.callApi<{ runs?: StoredRun[] }>(
         "GET",
@@ -1177,13 +1227,6 @@ class IrrigationValveMatrix extends HTMLElement {
         if (e < startMs || s > endMs) continue;
         mins[run.device_id] =
           (mins[run.device_id] ?? 0) + (run.duration_seconds ?? 0) / 60;
-        // Liters come from the runs store, not from the recorder: summing
-        // counter deltas over sparse recorder rows let lifetime-odometer
-        // jumps through (907: 141,186 L instead of ~1,900 L over 30 days,
-        // 2026-09-24). A run's liters were fixed when it ended.
-        if (typeof run.liters === "number") {
-          liters[run.device_id] = (liters[run.device_id] ?? 0) + run.liters;
-        }
         const left = Math.max(s, startMs);
         const right = Math.min(e, endMs);
         (segs[run.device_id] ??= []).push({
@@ -1198,7 +1241,6 @@ class IrrigationValveMatrix extends HTMLElement {
       }
       this._runSegments = segs;
       this._runMin = mins;
-      this._waterL = liters;
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("irrigation-valve-matrix: runs fetch failed", err);
@@ -1298,11 +1340,9 @@ class IrrigationValveMatrix extends HTMLElement {
     return `${Math.round(min)} min`;
   }
 
-  private _waterText(v: MatrixRow): string {
-    // "–" = no flow meter on this valve; a metered valve with no run in the
-    // window watered 0 L.
-    const liters = v.device_id ? this._waterL[v.device_id] : undefined;
-    if (liters === undefined) return v.volume ? "0 L" : "–";
+  private _waterText(entity?: string): string {
+    if (!entity || !(entity in this._waterL)) return "–";
+    const liters = this._waterL[entity];
     if (liters <= 0) return "0 L";
     if (liters < 10) return `${liters.toFixed(1)} L`;
     return `${Math.round(liters)} L`;
@@ -1478,7 +1518,7 @@ class IrrigationValveMatrix extends HTMLElement {
         )
         .join("");
       const run = this._runText(v);
-      const water = this._waterText(v);
+      const water = this._waterText(v.volume);
       return `<div class="row ${
         v.path ? "clickable" : ""
       }" data-path="${escapeHtml(v.path || "")}">
