@@ -61,7 +61,7 @@ def demo():
     assert iot.count("clear_issue(") >= 5, "every raised issue needs a clear path"
 
     # C16
-    loc = (SRC / "entity_parser" / "fdm5kw" / "location_service.py").read_text()
+    loc = (SRC / "entity_parser" / "valves" / "location_service.py").read_text()
     assert "key = id(multi_manager)" not in loc
     assert "key = entry.entry_id" in loc
     assert "entry.async_on_unload(\n        async_track_time_interval" in loc

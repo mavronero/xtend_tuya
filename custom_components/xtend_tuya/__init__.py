@@ -374,10 +374,10 @@ async def _async_load_entry_body(
     # accounts' homes into the shared LOCATION_MAP. Fire-and-forget and fully
     # guarded: a location fetch must never block or break setup.
     try:
-        from .entity_parser.fdm5kw import location_service as _fdm5kw_location
+        from .entity_parser.valves import location_service as _valve_location
 
         hass.async_create_task(
-            _fdm5kw_location.async_ensure_scheduled(hass, multi_manager)
+            _valve_location.async_ensure_scheduled(hass, multi_manager)
         )
     except Exception:  # noqa: BLE001
         LOGGER.debug("fdm5kw: location bootstrap scheduling failed", exc_info=True)

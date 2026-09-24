@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2] / "custom_components" / "xtend_tuya"
 # over as the refactor steps land. `calendar` is the farm's platform shim.
 FARM_PREFIX = "farm"
 FARM_SHIMS = {"calendar"}
-L2_PREFIX = "entity_parser.fdm5kw"
+L2_PREFIX = "entity_parser.valves"
 
 FARM_MAY_IMPORT = {FARM_PREFIX, "const"}
 L2_FORBIDDEN_PREFIXES = ("multi_manager", "util", "lib")
@@ -27,13 +27,13 @@ L2_PORT = "transport.port"  # the only transport module L2 may use
 KNOWN_VIOLATIONS = {
     # L1 -> farm / L2 (farm wires itself up once it is its own integration; step 6: services move to the L2 driver)
     ("__init__", "farm.frontend"),
-    ("__init__", "entity_parser.fdm5kw.location_service"),
-    ("multi_manager.shared.services.services", "entity_parser.fdm5kw.control_service"),
-    ("multi_manager.shared.services.services", "entity_parser.fdm5kw.timer_service"),
+    ("__init__", "entity_parser.valves.location_service"),
+    ("multi_manager.shared.services.services", "entity_parser.valves.control_service"),
+    ("multi_manager.shared.services.services", "entity_parser.valves.timer_service"),
     # L2 -> L1 internals (steps 5-6: entities read DeviceSnapshot via TuyaPort)
-    ("entity_parser.fdm5kw.sensor", "multi_manager.multi_manager"),
+    ("entity_parser.valves.sensor", "multi_manager.multi_manager"),
     # L2 -> farm (step 5: the L2 codec gets its own counter math)
-    ("entity_parser.fdm5kw.sensor", "farm.water_math"),
+    ("entity_parser.valves.sensor", "farm.water_math"),
 }
 
 
@@ -121,7 +121,7 @@ def test_codecs_are_pure():
     """codecs/ (principle 2): stdlib only, nothing from HA, Tuya libs or the integration."""
     import sys
 
-    codecs = ROOT / "entity_parser" / "fdm5kw" / "codecs"
+    codecs = ROOT / "entity_parser" / "valves" / "codecs"
     impure = []
     for path in codecs.glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):

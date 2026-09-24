@@ -1,7 +1,7 @@
 """Self-check for the resync empty-cloud-registry guard (audit C7).
 
 Standalone (no Home Assistant import) — mirrors the orphan decision in
-entity_parser/fdm5kw/timer_service.resync_from_cloud.
+entity_parser/valves/timer_service.resync_from_cloud.
 
 resync treated ANY successful cloud GET as authoritative. A
 success-but-empty response (device offline, project moved, registry not yet

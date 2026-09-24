@@ -179,7 +179,7 @@ with no "no profile" special case.
 ### 4.2 Package layout
 
 ```
-entity_parser/valves/            (upstream plugin mechanism; replaces entity_parser/fdm5kw/)
+entity_parser/valves/            (upstream plugin mechanism; was entity_parser/fdm5kw/, renamed in step 6a)
   init.py                        plugin entry
   model.py                       ValveRef, Capabilities, TimerSpec, TimerSlot, CommandResult
   profiles.py                    ValveProfile + one instance per product; PROFILES by product_id

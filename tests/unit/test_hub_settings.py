@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 import pytest
 
-from custom_components.xtend_tuya.entity_parser.fdm5kw import timer_service
+from custom_components.xtend_tuya.entity_parser.valves import timer_service
 from custom_components.xtend_tuya.transport.port import CloudResult, DeviceSnapshot
 from custom_components.xtend_tuya.transport.settings import OPTION_KEY, HubSettings
 

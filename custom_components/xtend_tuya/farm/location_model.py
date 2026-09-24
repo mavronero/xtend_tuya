@@ -5,7 +5,7 @@ the hardware ("701"). When a valve is swapped the history has to follow
 the place, so runs are attributed through time-windowed assignments of a
 Tuya device id to a location instead of through the device itself.
 
-Not to be confused with entity_parser/fdm5kw/location_service.py, where
+Not to be confused with entity_parser/valves/location_service.py, where
 "location" means the Tuya home/room grouping.
 
 Pure stdlib on purpose, so tests/test_location_model.py runs without HA.

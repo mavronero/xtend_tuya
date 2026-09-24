@@ -11,13 +11,13 @@ from datetime import datetime
 
 import pytest
 
-from custom_components.xtend_tuya.entity_parser.fdm5kw.codecs import (
+from custom_components.xtend_tuya.entity_parser.valves.codecs import (
     counter_custom,
     run_times,
     single_run,
     t3_status,
 )
-from custom_components.xtend_tuya.entity_parser.fdm5kw.codecs import time_task as tt
+from custom_components.xtend_tuya.entity_parser.valves.codecs import time_task as tt
 
 b64 = base64.b64decode
 

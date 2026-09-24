@@ -9,7 +9,7 @@ its location in the valve list. Everything is computed from the in-memory runs
 store: never the recorder, so a request stays far below Nabu Casa's 60 s
 proxy cut.
 
-Not the Tuya home/room "location" of entity_parser/fdm5kw/location_service.
+Not the Tuya home/room "location" of entity_parser/valves/location_service.
 """
 
 from __future__ import annotations

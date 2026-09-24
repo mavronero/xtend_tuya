@@ -425,7 +425,7 @@ class ServiceManager:
     async def _handle_fdm5kw_set_timer(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
-        from ....entity_parser.fdm5kw.timer_service import set_timer
+        from ....entity_parser.valves.timer_service import set_timer
 
         ok = await set_timer(self.hass, event.data)
         return {"success": ok}
@@ -433,7 +433,7 @@ class ServiceManager:
     async def _handle_fdm5kw_delete_timer(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
-        from ....entity_parser.fdm5kw.timer_service import delete_timer
+        from ....entity_parser.valves.timer_service import delete_timer
 
         ok = await delete_timer(self.hass, event.data)
         return {"success": ok}
@@ -441,7 +441,7 @@ class ServiceManager:
     async def _handle_fdm5kw_start_watering(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
-        from ....entity_parser.fdm5kw.control_service import start_watering
+        from ....entity_parser.valves.control_service import start_watering
 
         ok = await start_watering(self.hass, event.data)
         return {"success": ok}
@@ -449,7 +449,7 @@ class ServiceManager:
     async def _handle_fdm5kw_stop_watering(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
-        from ....entity_parser.fdm5kw.control_service import stop_watering
+        from ....entity_parser.valves.control_service import stop_watering
 
         ok = await stop_watering(self.hass, event.data)
         return {"success": ok}
@@ -467,6 +467,6 @@ class ServiceManager:
     async def _handle_fdm5kw_resync_timers(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
-        from ....entity_parser.fdm5kw.timer_service import resync_from_cloud
+        from ....entity_parser.valves.timer_service import resync_from_cloud
 
         return await resync_from_cloud(self.hass, event.data)
