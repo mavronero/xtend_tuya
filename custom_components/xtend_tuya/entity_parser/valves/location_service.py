@@ -9,8 +9,8 @@ grouping lives only in the Tuya OpenAPI *Home Management* API:
     /v1.0/homes/{home}/rooms             -> room id + name
     /v1.0/homes/{home}/rooms/{rid}/devices -> which devices are in the room
 
-We fetch it per hub from that hub's `tuya_iot` OpenAPI client, cache the
-result process-wide, and refresh on a slow timer. These are read-only GETs
+We fetch it per hub through that hub's TuyaPort, cache the result
+process-wide, and refresh on a slow timer. These are read-only GETs
 that do NOT count against the 10-controllable-devices/month quota (only
 commands do), and the data is near-static, so the cost is negligible.
 """
@@ -18,6 +18,7 @@ commands do), and the data is near-static, so the cost is negligible.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
@@ -29,21 +30,33 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView
 
-from ...const import DOMAIN, MESSAGE_SOURCE_TUYA_IOT
+from homeassistant.config_entries import ConfigEntry
+
+from ...const import DOMAIN
+from ...transport.port import CloudResult, TuyaPort
 
 _LOGGER = logging.getLogger(__name__)
 
 # device_id -> {"home": str, "room": str}
-LOCATION_MAP: dict[str, dict[str, str]] = {}
+DATA_KEY = f"{DOMAIN}_valve_locations"
 
-# Config entries already put on a refresh timer (avoid stacking intervals and
-# avoid every valve re-walking homes/rooms on startup). Keyed by entry_id, not
-# id(multi_manager): CPython reuses ids after GC, so a new manager could
-# collide with a dead one's id and never build its map — the "Unassigned room"
-# class of bug (audit C16). Cleared on unload so a reload re-arms.
-_SCHEDULED: set[str] = set()
 
-# Dispatched after LOCATION_MAP changes, so the registry sensors re-publish
+@dataclass
+class _Locations:
+    """Per-HA-instance state: the home/room map and the entries on a refresh timer."""
+
+    by_device: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Keyed by entry_id, not id(multi_manager): CPython reuses ids after GC,
+    # so a new manager could collide with a dead one's id and never build its
+    # map (audit C16). Discarded on unload so a reload re-arms.
+    scheduled: set[str] = field(default_factory=set)
+
+
+def _state(hass: HomeAssistant) -> _Locations:
+    return hass.data.setdefault(DATA_KEY, _Locations())
+
+
+# Dispatched after the map changes, so the registry sensors re-publish
 # their home/room attributes without this module importing the sensor module.
 SIGNAL_LOCATIONS_UPDATED = "xtend_tuya_valve_locations_updated"
 
@@ -52,84 +65,65 @@ REFRESH_INTERVAL = timedelta(hours=12)
 _VIEW_REGISTERED_KEY = f"{DOMAIN}_valve_locations_view"
 
 
-def _iot_api(multi_manager: Any) -> Any | None:
-    """Return the hub's OpenAPI client, or None if it has no tuya_iot account."""
-    account = multi_manager.accounts.get(MESSAGE_SOURCE_TUYA_IOT)
-    if account is None or getattr(account, "iot_account", None) is None:
-        return None
-    device_manager = account.iot_account.device_manager
-    api = getattr(device_manager, "api", None)
-    if api is None or getattr(api, "token_info", None) is None:
-        return None
-    return api
-
-
-def _build_map(api: Any) -> dict[str, dict[str, str]]:
-    """Blocking — walk homes -> rooms -> room devices for one hub."""
+async def _build_map(port: TuyaPort) -> dict[str, dict[str, str]]:
+    """Walk homes -> rooms -> room devices of one hub (read-only GETs)."""
     result: dict[str, dict[str, str]] = {}
-    uid = getattr(api.token_info, "uid", "") or ""
+    uid = port.openapi_uid
     if not uid:
         return result
-    homes = api.get(f"/v1.0/users/{uid}/homes")
-    if not isinstance(homes, dict) or not homes.get("success"):
+    homes = await port.cloud("GET", f"/v1.0/users/{uid}/homes")
+    if not homes.ok:
         return result
-    for home in homes.get("result") or []:
+    for home in homes.payload.get("result") or []:
         home_id = home.get("home_id") or home.get("homeId")
         home_name = home.get("name") or ""
         if home_id is None:
             continue
-        rooms = api.get(f"/v1.0/homes/{home_id}/rooms")
+        rooms = _payload(await port.cloud("GET", f"/v1.0/homes/{home_id}/rooms"))
         rooms_result = rooms.get("result") or {}
         # /homes/{id}/rooms returns either {"rooms": [...]} or a bare list,
         # depending on DC/account; tolerate both.
-        if isinstance(rooms_result, list):
-            room_list = rooms_result
-        else:
-            room_list = rooms_result.get("rooms") or []
+        room_list = rooms_result if isinstance(rooms_result, list) else rooms_result.get("rooms") or []
         for room in room_list:
             room_id = room.get("room_id")
             room_name = room.get("name") or ""
             if room_id is None:
                 continue
-            room_devices = api.get(f"/v1.0/homes/{home_id}/rooms/{room_id}/devices")
-            for dev in room_devices.get("result") or []:
+            devices = _payload(await port.cloud("GET", f"/v1.0/homes/{home_id}/rooms/{room_id}/devices"))
+            for dev in devices.get("result") or []:
                 device_id = dev.get("device_id") or dev.get("id") or dev.get("dev_id")
                 if device_id:
                     result[device_id] = {"home": home_name, "room": room_name}
     return result
 
 
-async def async_refresh(hass: HomeAssistant, multi_manager: Any) -> None:
+def _payload(result: CloudResult) -> dict[str, Any]:
+    return result.payload if isinstance(result.payload, dict) else {}
+
+
+async def async_refresh(hass: HomeAssistant, port: TuyaPort) -> None:
     """Refresh the home/room map for one hub. Safe to call repeatedly."""
-    api = _iot_api(multi_manager)
-    if api is None:
+    if not port.has_cloud_account:
         return
     try:
-        mapping = await hass.async_add_executor_job(_build_map, api)
+        mapping = await _build_map(port)
     except Exception:  # noqa: BLE001 - never let a location fetch break setup
         _LOGGER.debug("fdm5kw: valve home/room refresh failed", exc_info=True)
         return
     if mapping:
-        LOCATION_MAP.update(mapping)
-        _LOGGER.info(
-            "fdm5kw: refreshed valve home/room for %d devices", len(mapping)
-        )
+        _state(hass).by_device.update(mapping)
+        _LOGGER.info("fdm5kw: refreshed valve home/room for %d devices", len(mapping))
         async_dispatcher_send(hass, SIGNAL_LOCATIONS_UPDATED)
 
 
-async def async_ensure_scheduled(hass: HomeAssistant, multi_manager: Any) -> None:
-    """Fill the map now and put this hub on a slow refresh timer.
-
-    Guarded per hub: the first valve that lands here triggers one homes/rooms
-    walk and arms the timer; later valves on the same hub are no-ops (they
-    just read the already-filled LOCATION_MAP).
-    """
-    entry = multi_manager.config_entry
+async def async_ensure_scheduled(hass: HomeAssistant, entry: ConfigEntry, port: TuyaPort) -> None:
+    """Fill the map now and put this hub on a slow refresh timer (once per entry)."""
+    scheduled = _state(hass).scheduled
     key = entry.entry_id
-    if key in _SCHEDULED:
+    if key in scheduled:
         return
-    _SCHEDULED.add(key)
-    entry.async_on_unload(lambda: _SCHEDULED.discard(key))
+    scheduled.add(key)
+    entry.async_on_unload(lambda: scheduled.discard(key))
 
     # One view registration across all hubs/entries (same pattern as the
     # calendar ICS view — the view reads the process-wide map at request time).
@@ -137,26 +131,24 @@ async def async_ensure_scheduled(hass: HomeAssistant, multi_manager: Any) -> Non
         hass.http.register_view(XTValveLocationsView())
         hass.data[_VIEW_REGISTERED_KEY] = True
 
-    await async_refresh(hass, multi_manager)
+    await async_refresh(hass, port)
 
     async def _tick(_now: Any) -> None:
-        await async_refresh(hass, multi_manager)
+        await async_refresh(hass, port)
 
     # Bound to the entry: an unregistered 12 h timer kept a dead manager and
     # its API client alive per reload, so the homes/rooms walk multiplied with
     # the reload count.
-    entry.async_on_unload(
-        async_track_time_interval(hass, _tick, REFRESH_INTERVAL)
-    )
+    entry.async_on_unload(async_track_time_interval(hass, _tick, REFRESH_INTERVAL))
 
 
-def get_location(device_id: str) -> dict[str, str] | None:
+def get_location(hass: HomeAssistant, device_id: str) -> dict[str, str] | None:
     """Return {'home', 'room'} for a device, or None if unknown."""
-    return LOCATION_MAP.get(device_id)
+    return _state(hass).by_device.get(device_id)
 
 
 class XTValveLocationsView(HomeAssistantView):
-    """Serve LOCATION_MAP so the dashboard can group OFFLINE valves too.
+    """Serve the home/room map so the dashboard can group OFFLINE valves too.
 
     An unavailable registry sensor loses its valve_home/valve_room state
     attributes, so any grouping built from live states shows offline valves
@@ -172,9 +164,10 @@ class XTValveLocationsView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
-        payload: dict[str, dict[str, str]] = dict(LOCATION_MAP)
+        by_device = _state(hass).by_device
+        payload: dict[str, dict[str, str]] = dict(by_device)
         dev_reg = dr.async_get(hass)
-        for tuya_id, loc in LOCATION_MAP.items():
+        for tuya_id, loc in by_device.items():
             device = dev_reg.async_get_device(identifiers={(DOMAIN, tuya_id)})
             if device is not None:
                 payload[device.id] = loc

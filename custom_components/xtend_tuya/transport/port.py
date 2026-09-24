@@ -57,6 +57,9 @@ class TuyaPort(Protocol):
     def has_cloud_account(self) -> bool: ...
 
     @property
+    def openapi_uid(self) -> str | None: ...
+
+    @property
     def cloud_writes_blocked(self) -> bool: ...
 
     def device(self, device_id: str) -> DeviceSnapshot | None: ...
@@ -88,6 +91,13 @@ class CloudTuyaPort:
     @property
     def has_cloud_account(self) -> bool:
         return self._mm.get_account_by_name(OPENAPI_ACCOUNT) is not None
+
+    @property
+    def openapi_uid(self) -> str | None:
+        """User id of the SmartLife account linked to this hub's OpenAPI project."""
+        account = self._mm.get_account_by_name(OPENAPI_ACCOUNT)
+        api = getattr(getattr(getattr(account, "iot_account", None), "device_manager", None), "api", None)
+        return getattr(getattr(api, "token_info", None), "uid", None) or None
 
     @property
     def cloud_writes_blocked(self) -> bool:

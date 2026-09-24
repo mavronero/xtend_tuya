@@ -20,7 +20,12 @@ they can.
 
 1. **Dependency rule.** Dependencies point down only. Upper layers reach lower
    ones through narrow, typed interfaces: `TuyaPort` and the HA contract. An
-   import-boundary test fails the build when this is violated.
+   import-boundary test fails the build when this is violated. Two
+   exemptions: the composition root (`__init__.py`) wires the layers and may
+   import each layer's entry point. Type-only imports (`if TYPE_CHECKING:`)
+   are not a runtime dependency; L2 entities are handed `XTDevice` /
+   `MultiManager` by the upstream entity factory and may name those types,
+   but may not call into them.
 2. **Functional core, imperative shell.** Protocol knowledge (DP byte formats)
    and domain rules (runs, locations, balance) live in pure modules. These
    import neither HA nor the network, and are tested against captured real
@@ -439,7 +444,8 @@ ever shrinks.
 | 6a | Rename `entity_parser/fdm5kw` → `entity_parser/valves` | none | dev: values and snapshot identical |
 | 6 | L2b: `profiles.py` (QT-08W, T3 and read-only Smart Water Timer + BLE, by product_id with a DP-signature fallback), `driver.py` (`target()` + `CommandResult`), timer/control services profile-driven with no product branches; plugin extension point `XTCustomEntityParser.get_services()` so L1 no longer knows the valve services; the device layer owns its liters plausibility (`codecs/liters.py`) | services may return a `CommandResult` (`success` kept, `dp` / `cloud` / `reason` added); read-only profiles get "unsupported" (previously a Smart Water Timer was sent QT-08W frames) | 79 tests incl. driver tests on a fake port; dev: 1,331 values, snapshot and service effects identical; ratchet 6 → 3. The soak test was skipped (decision b): it only changes L3 wording later |
 | 7 | L2c: `timer_state.py`: `TimerState` per valve is the only writer of the slots (DP reports, resync clear, restore); live states registered per HA instance in `hass.data` (replaces the class global `INSTANCES`); location updates via a dispatcher signal (replaces the global `REFRESH_LISTENERS`); timer_service no longer reaches into `entity._dpcode_wrapper` | none | 72,399-state parity old vs new accumulation (QT-08W + T3, deletes, duplicates, repeats, short frames); resync mirror test replaced by real tests; dev: 1,331 values incl. the slots of 112 registry sensors identical across restart, a timer survives set → restart → delete, services identical |
-| 8 | Boundary test without xfails; mypy strict green | none | CI |
+| 8a | Ratchet to zero: `location_service` runs on `TuyaPort` (new `openapi_uid`), its map and schedule set live in `hass.data`; the registry sensor no longer schedules (the composition root does, per hub); boundary test knows the composition root and type-only imports | none | 0 violations (mutation-checked); location_service unit tests replace the C16 source-text checks; dev: values/snapshot/services identical. The home/room walk cannot run on dev (fake cloud has no OpenAPI uid): check `valve_home` on prod after the release |
+| 8c | `mypy --strict` on transport/, valves codecs/profiles/driver/timer_state, farm contract/location_model/water_math (`mypy.ini`, enforced by `tests/unit/test_typing.py`) | none | 18 files clean |
 | — | Farm features on L3 + contract | — | — |
 
 The dev HA fake cloud (`onprem-staging/ha-dev`) patches

@@ -54,6 +54,7 @@ def to_dt(iso: str) -> datetime:
 
 
 def _find_by_alias(data: dict[str, Any], key: str) -> dict[str, Any] | None:
+    loc: dict[str, Any]
     for loc in data["locations"].values():
         if key in loc["aliases"]:
             return loc
@@ -76,13 +77,14 @@ def _new_location(data: dict[str, Any], name: str, now_iso: str) -> dict[str, An
 
 
 def _open(data: dict[str, Any], device_id: str) -> dict[str, Any] | None:
+    a: dict[str, Any]
     for a in data["assignments"]:
         if a["device_id"] == device_id and a["end"] is None:
             return a
     return None
 
 
-def _add(data, location_id, device_id, begin, source) -> None:
+def _add(data: dict[str, Any], location_id: str, device_id: str, begin: str | None, source: str) -> None:
     data["assignments"].append(
         {
             "location_id": location_id,
@@ -200,7 +202,8 @@ def location_for_run(data: dict[str, Any], device_id: str, run_end_iso: str) -> 
     end = to_dt(run_end_iso)
     for a in data["assignments"]:
         if a["device_id"] == device_id and _in_window(a, end):
-            return data["locations"].get(a["location_id"])
+            found: dict[str, Any] | None = data["locations"].get(a["location_id"])
+            return found
     return None
 
 
@@ -221,7 +224,7 @@ def location_runs(
 
 
 def _get(data: dict[str, Any], location_id: Any) -> dict[str, Any]:
-    loc = data["locations"].get(location_id) if isinstance(location_id, str) else None
+    loc: dict[str, Any] | None = data["locations"].get(location_id) if isinstance(location_id, str) else None
     if loc is None:
         raise ValueError(f"unknown location {location_id!r}")
     return loc

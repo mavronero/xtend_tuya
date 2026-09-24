@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.storage import Store
 
 from .settings import TRIAL_CONTROLLABLE_LIMIT
@@ -62,8 +63,8 @@ class ControllableQuotaTracker:
         self.limit = limit
         self._month = _month_key()
         self._devices: set[str] = set()
-        self._store: Store = Store(hass, STORE_VERSION, f"xtend_tuya_quota_{hub_id}")
-        self._listeners: list = []
+        self._store: Store[dict[str, Any]] = Store(hass, STORE_VERSION, f"xtend_tuya_quota_{hub_id}")
+        self._listeners: list[Callable[[], None]] = []
 
     async def async_load(self) -> None:
         data = await self._store.async_load()
@@ -126,10 +127,10 @@ class ControllableQuotaTracker:
 
     # ----- listener plumbing for the sensor -----
 
-    def add_listener(self, cb) -> None:
+    def add_listener(self, cb: Callable[[], None]) -> None:
         self._listeners.append(cb)
 
-    def remove_listener(self, cb) -> None:
+    def remove_listener(self, cb: Callable[[], None]) -> None:
         if cb in self._listeners:
             self._listeners.remove(cb)
 

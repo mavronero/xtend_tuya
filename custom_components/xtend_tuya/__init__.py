@@ -377,7 +377,7 @@ async def _async_load_entry_body(
         from .entity_parser.valves import location_service as _valve_location
 
         hass.async_create_task(
-            _valve_location.async_ensure_scheduled(hass, multi_manager)
+            _valve_location.async_ensure_scheduled(hass, entry, multi_manager.port)
         )
     except Exception:  # noqa: BLE001
         LOGGER.debug("fdm5kw: location bootstrap scheduling failed", exc_info=True)

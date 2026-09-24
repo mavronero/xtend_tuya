@@ -104,4 +104,5 @@ def register(hass: HomeAssistant, device_id: str, live: LiveTimers) -> Callable[
 
 
 def live_timers(hass: HomeAssistant, device_id: str) -> LiveTimers | None:
-    return hass.data.get(DATA_KEY, {}).get(device_id)
+    registry: dict[str, LiveTimers] = hass.data.get(DATA_KEY, {})
+    return registry.get(device_id)

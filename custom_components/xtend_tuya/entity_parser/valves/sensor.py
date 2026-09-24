@@ -5,7 +5,7 @@ import base64
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from homeassistant.const import (
     EntityCategory,
@@ -24,10 +24,6 @@ from ...sensor import (
     XTSensorEntity,
     XTSensorEntityDescription,
 )
-from ...multi_manager.multi_manager import (
-    XTDevice,
-    MultiManager,
-)
 from ...ha_tuya_integration.tuya_integration_imports import (
     TuyaCustomerDevice,
     TuyaDPCodeRawWrapper,
@@ -39,6 +35,10 @@ from . import location_service, timer_state
 from .timer_state import TimerState
 from .codecs import counter_custom, run_times, single_run, t3_status
 from .codecs import time_task as tt
+
+if TYPE_CHECKING:
+    # Plugin API types: the upstream entity factory passes these to every entity.
+    from ...multi_manager.multi_manager import MultiManager, XTDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -263,7 +263,7 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
         wrapper = self._dpcode_wrapper
         if not isinstance(wrapper, DPCodeTimeTaskRegistryWrapper):
             return None
-        location = location_service.get_location(self.device.id) or {}
+        location = location_service.get_location(self.hass, self.device.id) or {}
         return {
             "slots": wrapper.timer_state.attribute(),
             "active_count": wrapper.timer_state.active_count,
@@ -278,14 +278,8 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
         """Restore the slots and make them reachable for the timer service."""
         await super().async_added_to_hass()
 
-        # Populate the valve home/room map (and put the owning hub on a slow
-        # refresh) the first time any timer sensor is added. Fire-and-forget:
-        # a location fetch must never block or break entity setup.
-        multi_manager = self.device.get_multi_manager(self.hass)
-        if multi_manager is not None:
-            self.hass.async_create_task(
-                location_service.async_ensure_scheduled(self.hass, multi_manager)
-            )
+        # The home/room map is filled and refreshed per hub by the integration
+        # setup (location_service.async_ensure_scheduled); re-publish on updates.
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, location_service.SIGNAL_LOCATIONS_UPDATED, self.async_write_ha_state

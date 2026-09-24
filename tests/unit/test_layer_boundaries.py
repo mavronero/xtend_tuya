@@ -1,10 +1,16 @@
 """Layer boundaries (docs/architecture.md §1, principle 1), as a ratchet.
 
 Imports may only point down: farm (L3) -> contract names; valve drivers (L2)
--> TuyaPort; transport (L1) knows neither. The code does not follow this yet,
-so KNOWN_VIOLATIONS lists every current violation explicitly. The test fails
-when a NEW violation appears, and also when a listed one disappears (delete it
-from the list), so the list always matches the code and only ever shrinks.
+-> TuyaPort; transport (L1) knows neither. KNOWN_VIOLATIONS lists any accepted
+exception explicitly; the test fails on a new violation and on a stale entry,
+so the list only ever shrinks (it reached zero in step 8).
+
+Two textbook exemptions, not loopholes:
+- the composition root (`__init__.py`) wires the layers together and may
+  import each layer's entry points;
+- type-only imports (`if TYPE_CHECKING:`) are not a runtime dependency. L2
+  entities are handed XTDevice / MultiManager by the upstream entity factory
+  and may name those types, but not call into them.
 """
 
 from __future__ import annotations
@@ -21,16 +27,11 @@ FARM_SHIMS = {"calendar"}
 L2_PREFIX = "entity_parser.valves"
 
 FARM_MAY_IMPORT = {FARM_PREFIX, "const"}
+COMPOSITION_ROOT = "__init__"
 L2_FORBIDDEN_PREFIXES = ("multi_manager", "util", "lib")
 L2_PORT = "transport.port"  # the only transport module L2 may use
 
-KNOWN_VIOLATIONS = {
-    # L1 -> farm / L2 (farm wires itself up once it is its own integration; location_service moves behind the port in step 8)
-    ("__init__", "farm.frontend"),
-    ("__init__", "entity_parser.valves.location_service"),
-    # L2 -> L1 internals (steps 5-6: entities read DeviceSnapshot via TuyaPort)
-    ("entity_parser.valves.sensor", "multi_manager.multi_manager"),
-}
+KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 
 def _module_name(path: Path) -> str:
@@ -50,7 +51,16 @@ def _imports(path: Path) -> set[str]:
     if own == "__init__":
         package = []
     found: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text())):
+    tree = ast.parse(path.read_text())
+    type_only = {
+        id(inner)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test)
+        for inner in ast.walk(node)
+    }
+    for node in ast.walk(tree):
+        if id(node) in type_only:
+            continue
         if isinstance(node, ast.ImportFrom):
             if node.level:
                 base = package[: len(package) - (node.level - 1)] if node.level > 1 else package
@@ -82,6 +92,8 @@ def _layer(module: str) -> str:
 
 
 def _violates(importer: str, imported: str) -> bool:
+    if importer == COMPOSITION_ROOT:
+        return False
     layer = _layer(importer)
     if layer == "L3":
         return imported.split(".")[0] not in FARM_MAY_IMPORT
