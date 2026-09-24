@@ -81,56 +81,8 @@ SERVICE_WEBRTC_DEBUG_SCHEMA = vol.Schema(
     }
 )
 
-SERVICE_FDM5KW_SET_TIMER = "fdm5kw_set_timer"
-SERVICE_FDM5KW_SET_TIMER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DEVICE_ID): cv.string,
-        vol.Required("slot"): vol.All(cv.positive_int, vol.Range(min=0, max=6)),
-        vol.Required("hour"): vol.All(cv.positive_int, vol.Range(min=0, max=23)),
-        vol.Required("minute"): vol.All(cv.positive_int, vol.Range(min=0, max=59)),
-        vol.Required("mode"): vol.In(["duration", "volume"]),
-        vol.Required("value"): cv.positive_int,
-        vol.Optional("days"): vol.Any([cv.string], cv.positive_int),
-        vol.Optional("enabled", default=True): cv.boolean,
-    }
-)
-
-SERVICE_FDM5KW_DELETE_TIMER = "fdm5kw_delete_timer"
-SERVICE_FDM5KW_DELETE_TIMER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DEVICE_ID): cv.string,
-        vol.Required("slot"): vol.All(cv.positive_int, vol.Range(min=0, max=6)),
-        vol.Optional("hour"): vol.All(cv.positive_int, vol.Range(min=0, max=23)),
-        vol.Optional("minute"): vol.All(cv.positive_int, vol.Range(min=0, max=59)),
-        vol.Optional("days"): vol.Any([cv.string], cv.positive_int),
-    }
-)
-
-SERVICE_FDM5KW_START_WATERING = "fdm5kw_start_watering"
-SERVICE_FDM5KW_START_WATERING_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DEVICE_ID): cv.string,
-        vol.Required("mode"): vol.In(["duration", "volume"]),
-        vol.Required("value"): cv.positive_int,
-    }
-)
-
-SERVICE_FDM5KW_STOP_WATERING = "fdm5kw_stop_watering"
-SERVICE_FDM5KW_STOP_WATERING_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DEVICE_ID): cv.string,
-    }
-)
-
 SERVICE_FDM5KW_CLEAR_QUOTA_LOCKOUT = "fdm5kw_clear_quota_lockout"
 SERVICE_FDM5KW_CLEAR_QUOTA_LOCKOUT_SCHEMA = vol.Schema({})
-
-SERVICE_FDM5KW_RESYNC_TIMERS = "fdm5kw_resync_timers"
-SERVICE_FDM5KW_RESYNC_TIMERS_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DEVICE_ID): cv.string,
-    }
-)
 
 
 class ServiceManager:
@@ -186,42 +138,6 @@ class ServiceManager:
         )
         self._register_service(
             DOMAIN,
-            SERVICE_FDM5KW_SET_TIMER,
-            self._handle_fdm5kw_set_timer,
-            SERVICE_FDM5KW_SET_TIMER_SCHEMA,
-            True,
-            True,
-            False,
-        )
-        self._register_service(
-            DOMAIN,
-            SERVICE_FDM5KW_DELETE_TIMER,
-            self._handle_fdm5kw_delete_timer,
-            SERVICE_FDM5KW_DELETE_TIMER_SCHEMA,
-            True,
-            True,
-            False,
-        )
-        self._register_service(
-            DOMAIN,
-            SERVICE_FDM5KW_START_WATERING,
-            self._handle_fdm5kw_start_watering,
-            SERVICE_FDM5KW_START_WATERING_SCHEMA,
-            True,
-            True,
-            False,
-        )
-        self._register_service(
-            DOMAIN,
-            SERVICE_FDM5KW_STOP_WATERING,
-            self._handle_fdm5kw_stop_watering,
-            SERVICE_FDM5KW_STOP_WATERING_SCHEMA,
-            True,
-            True,
-            False,
-        )
-        self._register_service(
-            DOMAIN,
             SERVICE_FDM5KW_CLEAR_QUOTA_LOCKOUT,
             self._handle_fdm5kw_clear_quota_lockout,
             SERVICE_FDM5KW_CLEAR_QUOTA_LOCKOUT_SCHEMA,
@@ -229,18 +145,28 @@ class ServiceManager:
             True,
             False,
         )
-        self._register_service(
-            DOMAIN,
-            SERVICE_FDM5KW_RESYNC_TIMERS,
-            self._handle_fdm5kw_resync_timers,
-            SERVICE_FDM5KW_RESYNC_TIMERS_SCHEMA,
-            True,
-            True,
-            False,
-            # Returns per-valve reconcile counts so the dashboard button can
-            # report "cleared N / all clean" instead of a blind fire.
-            supports_response=SupportsResponse.OPTIONAL,
-        )
+        self.register_plugin_services()
+
+    def register_plugin_services(self) -> None:
+        """Services contributed by entity-parser plugins (XTCustomEntityParser.get_services)."""
+        for parser in self.multi_manager.entity_parsers.values():
+            for service in parser.get_services():
+                self._register_service(
+                    DOMAIN,
+                    service.name,
+                    self._plugin_handler(service.handler),
+                    service.schema,
+                    True,
+                    True,
+                    False,
+                    supports_response=service.supports_response,
+                )
+
+    def _plugin_handler(self, handler):
+        async def call(event: XTEventData) -> dict[str, Any] | None:
+            return await handler(self.hass, event.data)
+
+        return call
 
     def _register_service(
         self,
@@ -422,38 +348,6 @@ class ServiceManager:
                         return response
                 return None
 
-    async def _handle_fdm5kw_set_timer(
-        self, event: XTEventData
-    ) -> dict[str, Any] | None:
-        from ....entity_parser.valves.timer_service import set_timer
-
-        ok = await set_timer(self.hass, event.data)
-        return {"success": ok}
-
-    async def _handle_fdm5kw_delete_timer(
-        self, event: XTEventData
-    ) -> dict[str, Any] | None:
-        from ....entity_parser.valves.timer_service import delete_timer
-
-        ok = await delete_timer(self.hass, event.data)
-        return {"success": ok}
-
-    async def _handle_fdm5kw_start_watering(
-        self, event: XTEventData
-    ) -> dict[str, Any] | None:
-        from ....entity_parser.valves.control_service import start_watering
-
-        ok = await start_watering(self.hass, event.data)
-        return {"success": ok}
-
-    async def _handle_fdm5kw_stop_watering(
-        self, event: XTEventData
-    ) -> dict[str, Any] | None:
-        from ....entity_parser.valves.control_service import stop_watering
-
-        ok = await stop_watering(self.hass, event.data)
-        return {"success": ok}
-
     async def _handle_fdm5kw_clear_quota_lockout(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
@@ -464,9 +358,3 @@ class ServiceManager:
         LOGGER.warning("fdm5kw cloud-timer lockout cleared on all hubs")
         return {"success": True}
 
-    async def _handle_fdm5kw_resync_timers(
-        self, event: XTEventData
-    ) -> dict[str, Any] | None:
-        from ....entity_parser.valves.timer_service import resync_from_cloud
-
-        return await resync_from_cloud(self.hass, event.data)

@@ -189,10 +189,12 @@ entity_parser/valves/            (upstream plugin mechanism; was entity_parser/f
     t3_status.py                 sat_N (battery, sun flag, next run), flow_sta_N (volume + duration)
     counter_custom.py            QT-08W "dur,vol" / bare number; T3 CSV "mode,flag,dur,vol,ts", 0xFFFE sentinel
     run_times.py                 start_time / close_time
-  timer_state.py                 TimerState: single writer for slots
-  driver.py                      ValveDriver(port, profile): the command side
-  entities.py                    entity descriptors: read state, write nothing
-  services.py                    HA service shims -> driver (names/schemas unchanged)
+  timer_state.py                 TimerState: single writer for slots (step 7)
+  driver.py                      target(hass, device_id) -> (port, profile) | CommandResult
+  timer_service.py               set / delete / resync timers (the command side)
+  control_service.py             start / stop single runs
+  sensor.py                      entity descriptors + DP wrappers (read side)
+  services.py                    service names/schemas, registered via get_services()
 ```
 
 ### 4.3 Profile (declarative) instead of branches
@@ -265,22 +267,24 @@ with cloud status=0).
 
 ### 4.6 Driver: the command side, and where the quota workarounds live
 
+As built in step 6, the command side is two modules of functions rather than
+a `ValveDriver` class. Their only shared state is the port and profile that
+`target()` resolves per call, so a class would add nothing (principle 9).
+
 ```python
-class ValveDriver:
-    def __init__(self, port: TuyaPort, profiles: Mapping[str, ValveProfile]) -> None
-    async def set_timer(self, valve: ValveRef, spec: TimerSpec) -> CommandResult
-    async def delete_timer(self, valve: ValveRef, slot: int) -> CommandResult
-    async def start(self, valve: ValveRef, run: RunSpec) -> CommandResult
-    async def stop(self, valve: ValveRef) -> CommandResult
-    async def resync(self, valve: ValveRef) -> CommandResult
+def target(hass, device_id) -> Target | CommandResult      # Target = (port, profile)
+async def set_timer(hass, data) -> CommandResult            # timer_service.py
+async def delete_timer(hass, data) -> CommandResult
+async def resync_from_cloud(hass, data) -> dict             # rich counts, unchanged
+async def start_watering(hass, data) -> CommandResult       # control_service.py
+async def stop_watering(hass, data) -> CommandResult
 
 @dataclass(frozen=True)
 class CommandResult:
-    valve: ValveRef
+    device_id: str                                    # ValveRef(device, channel) arrives with the QT-10W
     dp: Literal["ok", "failed", "unsupported"]        # device effect: fires or not
     cloud: Literal["ok", "skipped", "failed", "n/a"]  # SmartLife visibility
-    reason: str | None                                # "quota_lockout", "offline", "unsupported_mode", ...
-    retry_after: datetime | None
+    reason: str | None                                # "quota_lockout", "mirror_disabled", "no_timers", ...
 ```
 
 | Workaround today | After |
@@ -309,8 +313,10 @@ farm/
 calendar.py          top-level shim (HA loads platforms from the integration root)
 ```
 
-L3 reads `Capabilities`, exposed as registry entity attributes, and decides
-with them:
+L3 will read `Capabilities` and decide with them. Exposing them (attribute or
+endpoint) is deferred until the first L3 consumer exists: the Smart Water
+Timer and BLE have no registry sensor to carry an attribute, so the right
+channel depends on that consumer. Uses:
 
 - Watchdog coverage: `run_signal == "none"` means the valve cannot be watched.
 - Leak balance: without a `flow_meter`, water is counted as "unmetered" instead
@@ -430,7 +436,8 @@ ever shrinks.
 | 4 | L1: `TuyaPort` (`transport/port.py`), `transport/quota.py` (moved), `transport/breaker.py`; timer/control services use only the port | breaker per hub; after a trip, remaining cloud writes in the same call are skipped (were still sent); a 60001001 on a GET also trips | dev: snapshot diff empty; all 6 services on a QT-08W + T3 give identical results and DP effects; unit tests on the real port; ratchet 12 → 6 |
 | 4b | L1: `HubSettings` (`transport/settings.py`) + options step "Tuya plan and SmartLife sync"; quota card shows "no limit" for paid | new options; defaults = today; with the mirror off, resync refuses (it would clear every HA timer) | dev: snapshot diff empty, service results identical, step renders with translations; harness: flow validates, stores, reloads, quota tracker unlimited. Not covered by a test: "Configure API" keeping `hub_settings` (code review only) |
 | 5 | L2a: `entity_parser/fdm5kw/codecs/` (time_task, single_run, t3_status, counter_custom, run_times; pure, stdlib only, bytes in/out); wrappers and services use them; T3 timer wrappers are single inheritance with a swapped `decode` (the MRO diamond is gone); dead `_decode_start_time` and stale docstrings removed; `test_t3_decode.py` (shipped inside the integration) replaced by `tests/unit/test_codecs.py` | none | 1,040,000 old/new parity comparisons (random + edge frames); codec tests on every captured payload; conformance vs the fixture specs; >200 real prod DP values decode; `test_codecs_are_pure`; dev: 1,331 valve entity values identical, snapshot diff empty, services identical |
-| 6 | L2b: profiles + `ValveDriver` on the port; services return `CommandResult` | optional response | snapshot diff empty; driver tests. **Prerequisite:** soak test of DP-only timers (below) |
+| 6a | Rename `entity_parser/fdm5kw` → `entity_parser/valves` | none | dev: values and snapshot identical |
+| 6 | L2b: `profiles.py` (QT-08W, T3 and read-only Smart Water Timer + BLE, by product_id with a DP-signature fallback), `driver.py` (`target()` + `CommandResult`), timer/control services profile-driven with no product branches; plugin extension point `XTCustomEntityParser.get_services()` so L1 no longer knows the valve services; the device layer owns its liters plausibility (`codecs/liters.py`) | services may return a `CommandResult` (`success` kept, `dp` / `cloud` / `reason` added); read-only profiles get "unsupported" (previously a Smart Water Timer was sent QT-08W frames) | 79 tests incl. driver tests on a fake port; dev: 1,331 values, snapshot and service effects identical; ratchet 6 → 3. The soak test was skipped (decision b): it only changes L3 wording later |
 | 7 | L2c: `TimerState` single writer | none intended | rehearsal on dev (set/delete/resync/SmartLife disable); highest risk |
 | 8 | Boundary test without xfails; mypy strict green | none | CI |
 | — | Farm features on L3 + contract | — | — |

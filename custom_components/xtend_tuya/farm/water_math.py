@@ -16,6 +16,10 @@ Plausibility belongs on the *delta* between two samples, not on the absolute
 value: the impeller's physical limit is a flow RATE, not a total. Summing
 plausible deltas counts every cycle exactly once in both shapes.
 
+The device layer keeps its own copy of plausible_delta in
+entity_parser/valves/codecs/liters.py (the farm must not import device
+internals). Change both together.
+
 Pure stdlib on purpose — tests/test_water_math.py loads this module by path,
 without Home Assistant.
 """

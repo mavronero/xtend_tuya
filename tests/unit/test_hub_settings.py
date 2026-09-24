@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 import pytest
 
-from custom_components.xtend_tuya.entity_parser.valves import timer_service
+from custom_components.xtend_tuya.entity_parser.valves import driver, timer_service
 from custom_components.xtend_tuya.transport.port import CloudResult, DeviceSnapshot
 from custom_components.xtend_tuya.transport.settings import OPTION_KEY, HubSettings
 
@@ -67,7 +67,7 @@ TIMER = {"device_id": "bf01", "slot": 1, "hour": 7, "minute": 7, "mode": "durati
 @pytest.fixture
 def port(monkeypatch, request):
     fake = FakePort(request.param)
-    monkeypatch.setattr(timer_service, "port_for_device", lambda hass, device_id: fake)
+    monkeypatch.setattr(driver, "port_for_device", lambda hass, device_id: fake)
     monkeypatch.setattr(timer_service, "_get_prior_slot", lambda hass, device_id, slot: None)
     monkeypatch.setattr(timer_service, "_ha_timezone", lambda hass: ("UTC", "+00:00"))
     return fake
@@ -75,14 +75,16 @@ def port(monkeypatch, request):
 
 @pytest.mark.parametrize("port", [HubSettings()], indirect=True)
 async def test_mirror_on_writes_device_and_cloud(port):
-    assert await timer_service.set_timer(None, TIMER)
+    result = await timer_service.set_timer(None, TIMER)
+    assert (result.dp, result.cloud) == ("ok", "ok")
     assert len(port.dp_writes) == 1
     assert port.cloud_calls == ["POST"]
 
 
 @pytest.mark.parametrize("port", [HubSettings(cloud_timer_mirror=False)], indirect=True)
 async def test_mirror_off_writes_device_only(port):
-    assert await timer_service.set_timer(None, TIMER)
+    result = await timer_service.set_timer(None, TIMER)
+    assert (result.dp, result.cloud, result.reason) == ("ok", "n/a", "mirror_disabled")
     assert len(port.dp_writes) == 1
     assert port.cloud_calls == []
 

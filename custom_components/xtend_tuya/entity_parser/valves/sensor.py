@@ -32,7 +32,7 @@ from ...ha_tuya_integration.tuya_integration_imports import (
     TuyaDPCodeRawWrapper,
     TuyaRawTypeInformation,
 )
-from ...farm.water_math import plausible_delta
+from .codecs.liters import plausible_delta
 from ...const import XTDPCode
 from . import location_service
 from .codecs import counter_custom, run_times, single_run, t3_status

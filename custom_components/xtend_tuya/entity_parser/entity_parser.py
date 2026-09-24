@@ -1,16 +1,29 @@
 from __future__ import annotations
 import os
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from functools import partial
 import importlib
 from typing import Any
 from abc import abstractmethod
+import voluptuous as vol
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from ..const import LOGGER
 from ..multi_manager.shared.threading import (
     XTEventLoopProtector,
 )
 import custom_components.xtend_tuya.multi_manager.multi_manager as mm
+
+
+@dataclass(frozen=True)
+class XTPluginService:
+    """A service a plugin adds to the integration's domain (and its HTTP view)."""
+
+    name: str
+    schema: vol.Schema
+    handler: Callable[[HomeAssistant, dict[str, Any]], Awaitable[dict[str, Any] | None]]
+    supports_response: SupportsResponse = SupportsResponse.OPTIONAL
 
 
 class XTCustomEntityParser:
@@ -20,6 +33,10 @@ class XTCustomEntityParser:
     @abstractmethod
     def get_descriptors_to_merge(self, platform: Platform) -> Any:
         pass
+
+    def get_services(self) -> list[XTPluginService]:
+        """Services this plugin registers; the core stays unaware of them."""
+        return []
 
     @staticmethod
     async def setup_entity_parsers(

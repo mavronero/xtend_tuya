@@ -172,3 +172,21 @@ def test_run_time_captures():
     assert run_times.decode(b64("GgQKBg8A")) == "2026-04-10 06:15:00"  # 15-minute session
     assert run_times.decode(bytes([255, 1, 1, 0, 0, 0])) is None
     assert run_times.decode(bytes(5)) is None
+
+
+# --- liters counter plausibility (device copy; farm/water_math.py has the farm's) ---
+
+def test_device_and_farm_plausible_delta_agree():
+    import random
+
+    from custom_components.xtend_tuya.entity_parser.valves.codecs.liters import plausible_delta as device
+    from custom_components.xtend_tuya.farm.water_math import plausible_delta as farm
+
+    rnd = random.Random(3)
+    for _ in range(5000):
+        prev, cur, elapsed = rnd.uniform(0, 2e5), rnd.uniform(0, 2e5), rnd.uniform(0, 600)
+        cur = rnd.choice([cur, prev + rnd.uniform(0, 80), rnd.uniform(0, 30)])
+        assert device(prev, cur, elapsed) == farm(prev, cur, elapsed)
+    assert device(130367.0, 130375.0, 10) == 8.0  # odometer valve
+    assert device(91.0, 3.0, 10) == 3.0  # cycle reset
+    assert device(100.0, 2100.0, 10) is None  # impossible jump

@@ -1,15 +1,11 @@
-"""Dual-write timer services for fdm5kw irrigation valve.
+"""Timer services for the sfkzq valves: set, delete, resync.
 
-The device-side `time_task` DP executes locally and is offline-safe, but
-empirical testing on 2026-05-12 with the Mavronero fleet showed that
-Tuya's cloud rewrites the device DP from the cloud timer registry ~10s
-after a direct DP write. To make HA → SmartLife mutations durable we
-write both: the DP for immediate local execution, then the cloud timer
-registry (via OpenAPI) so the cloud doesn't roll back our change.
-
-Cost: 1–2 OpenAPI calls per user-initiated timer mutation (set/delete).
-Negligible compared to the historical periodic-poll regressions —
-mutations are interactive, not on a timer.
+Each timer is written twice. The DP (`time_task` / `time_task_0`, from the
+valve's profile) is what the device executes, offline-safe. The cloud timer
+registry is a mirror so SmartLife shows the timer; it is optional per hub
+(HubSettings.cloud_timer_mirror) and skipped while the hub's quota breaker is
+open. Results come back as CommandResult: `dp` for the device, `cloud` for the
+mirror. Byte layouts are in codecs/time_task.py.
 """
 
 from __future__ import annotations
@@ -18,20 +14,15 @@ import base64
 import json
 import logging
 
-from ...transport.port import CloudResult, TuyaPort, port_for_device
+from ...transport.port import CloudResult, TuyaPort
 from .codecs import time_task as tt
+from .driver import CommandResult, target
 from .const import (
     TUYA_ERR_DEVICE_POOL_QUOTA,
     TUYA_ERR_DEVICE_POOL_QUOTA_MSG,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# QT-08W-T3 valves carry the indexed `time_task_0` DP instead of `time_task`
-# (byte layouts in codecs/time_task.py). Same sliding-window model, so the
-# write path branches on device.status presence.
-TIME_TASK_CODE = tt.QT08W_CODE
-TIME_TASK_CODE_T3 = tt.T3_CODE
 
 _QUOTA_NOTIFICATION_ID = "xtend_tuya_fdm5kw_cloud_quota"
 
@@ -73,12 +64,6 @@ def _b64(frame: bytes) -> str:
     return base64.b64encode(frame).decode("ascii")
 
 
-def _is_t3(port: TuyaPort, device_id: str) -> bool:
-    """T3 valve = carries the `time_task_0` DP. Detected from live status."""
-    device = port.device(device_id)
-    return device is not None and device.status.get(TIME_TASK_CODE_T3) is not None
-
-
 def _get_prior_slot(hass, device_id: str, slot: int) -> dict | None:
     """Look up the current slot data from the registry entity so we can
     match it against the cloud timer registry when deleting/overwriting.
@@ -95,12 +80,7 @@ def _get_prior_slot(hass, device_id: str, slot: int) -> dict | None:
     return wrapper.slots.get(slot)
 
 
-async def _write_time_task(
-    port: TuyaPort,
-    device_id: str,
-    b64_value: str,
-    code: str = TIME_TASK_CODE,
-) -> bool:
+async def _write_time_task(port: TuyaPort, device_id: str, b64_value: str, code: str) -> bool:
     return await port.send_dp(device_id, [{"code": code, "value": b64_value}])
 
 
@@ -136,9 +116,9 @@ async def _post_cloud_timer(
     mode: int,
     value: int,
     enabled: bool,
-    code: str = TIME_TASK_CODE,
-) -> None:
-    """Cloud timer create so the cloud doesn't roll back our DP write.
+    code: str,
+) -> CloudResult:
+    """Mirror the timer into the cloud registry so SmartLife shows it.
     Schema (verified 2026-05-12 against Mavronero fleet, fdm5kw category):
     - top-level: category, loops, timezone_id, time_zone, instruct
     - each instruct[]: time (HH:mm), functions [{code, value}]
@@ -150,7 +130,7 @@ async def _post_cloud_timer(
             "Cloud timer POST skipped for %s — quota lockout active (DP-only)",
             device_id,
         )
-        return
+        return CloudResult("skipped", "quota_lockout")
     time_str = f"{hour:02d}:{minute:02d}"
     loops = tt.mask_to_loops(days_mask)
     start_time_sec = hour * 3600 + minute * 60
@@ -192,18 +172,22 @@ async def _post_cloud_timer(
         _LOGGER.warning(
             "Cloud timer POST returned no success for %s: %s", device_id, result.reason
         )
+    return result
 
 
 async def _delete_cloud_timer_by_match(
     hass, port: TuyaPort, device_id: str, hour: int, minute: int, days_mask: int
-) -> None:
-    """List cloud timers, delete the one matching time+days. Best-effort."""
+) -> CloudResult:
+    """List cloud timers, delete the one matching time+days. Best-effort.
+
+    The result is the first failed DELETE, else ok (reason "no_cloud_match"
+    when nothing matched)."""
     if port.cloud_writes_blocked:
         _LOGGER.warning(
             "Cloud timer GET/DELETE skipped for %s — quota lockout active",
             device_id,
         )
-        return
+        return CloudResult("skipped", "quota_lockout")
     list_url = f"/v1.0/devices/{device_id}/timers"
     _LOGGER.warning(
         "Cloud timer GET -> %s (match %02d:%02d mask=%d)",
@@ -219,11 +203,12 @@ async def _delete_cloud_timer_by_match(
         _LOGGER.warning(
             "Cloud timer GET non-success for %s, skipping delete", device_id
         )
-        return
+        return listing
     resp = listing.payload
     time_str = f"{hour:02d}:{minute:02d}"
     loops = tt.mask_to_loops(days_mask)
     matched = False
+    outcome = CloudResult("ok")
     for category in resp.get("result", []):
         for group in category.get("groups", []):
             for timer in group.get("timers", []):
@@ -254,13 +239,17 @@ async def _delete_cloud_timer_by_match(
                         deleted.payload if deleted.payload is not None else deleted.reason,
                     )
                     _handle_cloud_result(hass, "DELETE", device_id, deleted)
+                    if outcome.ok and not deleted.ok:
+                        outcome = deleted
     if not matched:
         _LOGGER.warning(
             "Cloud timer no entries matched %s for %s", time_str, device_id
         )
+        return CloudResult("ok", "no_cloud_match")
+    return outcome
 
 
-async def set_timer(hass, data: dict) -> bool:
+async def set_timer(hass, data: dict) -> CommandResult:
     device_id: str = data["device_id"]
     slot: int = int(data["slot"])
     hour: int = int(data["hour"])
@@ -270,37 +259,31 @@ async def set_timer(hass, data: dict) -> bool:
     days_mask: int = tt.days_to_mask(data.get("days"))
     enabled: bool = bool(data.get("enabled", True))
 
-    port = port_for_device(hass, device_id)
-    if port is None:
-        _LOGGER.error("No hub found for device %s", device_id)
-        return False
+    found = target(hass, device_id)
+    if isinstance(found, CommandResult):
+        _LOGGER.error("set_timer: %s for device %s", found.reason, device_id)
+        return found
+    port, codec = found.port, found.profile.timer
+    if codec is None:
+        return CommandResult(device_id, "unsupported", reason="no_timers")
 
     # When this is an edit (not a create), look up the prior slot state so
     # we can delete the cloud entry that's about to be replaced. Avoids
     # duplicate SmartLife timer entries after time/day changes.
     prior = _get_prior_slot(hass, device_id, slot)
 
-    # T3 valves carry the indexed 12-byte `time_task_0` DP; everything else
-    # (cloud dual-write, prior-delete, disabled-skip) is identical — the cloud
-    # POST just uses the `time_task_0` function code. Verified 2026-07-15:
-    # POST /timers with code time_task_0 renders back on GET; DP write applies
-    # and the cloud doesn't roll it back.
-    is_t3 = _is_t3(port, device_id)
-    task_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
+    # The cloud POST uses the profile's DP code as its function code; T3
+    # `time_task_0` renders back on GET (verified 2026-07-15).
     timer = tt.Timer(slot, hour, minute, mode, value, days_mask, enabled)
-    b64 = _b64(tt.encode_t3(timer) if is_t3 else tt.encode_qt08w(timer))
-    if not await _write_time_task(port, device_id, b64, code=task_code):
-        return False
+    if not await _write_time_task(port, device_id, _b64(codec.encode(timer)), codec.code):
+        return CommandResult(device_id, "failed")
 
     if not port.has_cloud_account:
-        _LOGGER.warning(
-            "set_timer: no tuya_iot account for %s (DP write only, cloud may roll back)",
-            device_id,
-        )
-        return True
+        _LOGGER.warning("set_timer: no tuya_iot account for %s (DP write only)", device_id)
+        return CommandResult(device_id, "ok", reason="no_openapi_account")
     if not port.settings.cloud_timer_mirror:
         _LOGGER.info("set_timer: SmartLife mirror off for this hub, %s is DP-only", device_id)
-        return True
+        return CommandResult(device_id, "ok", reason="mirror_disabled")
     _LOGGER.warning(
         "set_timer: tuya_iot account found for %s, proceeding to cloud write",
         device_id,
@@ -338,13 +321,13 @@ async def set_timer(hass, data: dict) -> bool:
             slot,
             device_id,
         )
-        return True
+        return CommandResult(device_id, "ok", reason="disabled_timer_not_mirrored")
 
-    await _post_cloud_timer(
+    posted = await _post_cloud_timer(
         hass, port, device_id, hour, minute, days_mask, mode, value, enabled,
-        code=task_code,
+        code=codec.code,
     )
-    return True
+    return CommandResult(device_id, "ok", cloud=posted.status, reason=posted.reason)
 
 
 async def _get_cloud_timer_keys(port: TuyaPort, device_id: str) -> set[tuple[str, str]] | None:
@@ -396,15 +379,17 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     cap; a write happens only per live orphan found. User-triggered per valve,
     so it can't runaway the quota the way a periodic sweep would."""
     device_id: str = data["device_id"]
-    port = port_for_device(hass, device_id)
-    if port is None or not port.has_cloud_account:
+    found = target(hass, device_id)
+    if isinstance(found, CommandResult) or not found.port.has_cloud_account:
         _LOGGER.warning("resync: no tuya_iot account for %s — cannot reconcile", device_id)
         return {"success": False, "error": "no_cloud_account"}
+    port, codec = found.port, found.profile.timer
+    if codec is None:
+        return {"success": False, "error": "no_timers"}
     # Without the mirror no HA timer is in the cloud, so every enabled slot
     # would look like an orphan and be cleared. Refuse instead.
     if not port.settings.cloud_timer_mirror:
         return {"success": False, "error": "cloud_mirror_disabled"}
-    is_t3 = _is_t3(port, device_id)
 
     from .sensor import Fdm5kwTimerRegistryEntity
 
@@ -466,11 +451,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
                 slot_idx, device_id,
             )
             continue
-        clear_payload = _b64(tt.clear_t3(slot_idx) if is_t3 else tt.clear_qt08w(slot_idx))
-        clear_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
-        if await _write_time_task(
-            port, device_id, clear_payload, code=clear_code
-        ):
+        if await _write_time_task(port, device_id, _b64(codec.clear(slot_idx)), codec.code):
             slots[slot_idx] = None
             orphans_cleared += 1
             _LOGGER.warning(
@@ -493,14 +474,17 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     return result
 
 
-async def delete_timer(hass, data: dict) -> bool:
+async def delete_timer(hass, data: dict) -> CommandResult:
     device_id: str = data["device_id"]
     slot: int = int(data["slot"])
 
-    port = port_for_device(hass, device_id)
-    if port is None:
-        _LOGGER.error("No hub found for device %s", device_id)
-        return False
+    found = target(hass, device_id)
+    if isinstance(found, CommandResult):
+        _LOGGER.error("delete_timer: %s for device %s", found.reason, device_id)
+        return found
+    port, codec = found.port, found.profile.timer
+    if codec is None:
+        return CommandResult(device_id, "unsupported", reason="no_timers")
 
     # Capture the slot's current time/days BEFORE we wipe the DP so we can
     # match the cloud timer entry on the way out.
@@ -509,31 +493,25 @@ async def delete_timer(hass, data: dict) -> bool:
         "delete_timer: device=%s slot=%d prior=%s", device_id, slot, prior
     )
 
-    # T3 uses the indexed 12-byte clear + time_task_0 code; the cloud
-    # delete-by-match below is code-agnostic (matches on time/loops).
-    is_t3 = _is_t3(port, device_id)
-    b64 = _b64(tt.clear_t3(slot) if is_t3 else tt.clear_qt08w(slot))
-    task_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
-    if not await _write_time_task(port, device_id, b64, code=task_code):
-        return False
+    # The cloud delete-by-match below is code-agnostic (matches on time/loops).
+    if not await _write_time_task(port, device_id, _b64(codec.clear(slot)), codec.code):
+        return CommandResult(device_id, "failed")
 
     if not port.has_cloud_account:
-        _LOGGER.warning(
-            "delete_timer: no tuya_iot account for %s (DP-only delete)", device_id
-        )
-        return True
+        _LOGGER.warning("delete_timer: no tuya_iot account for %s (DP-only delete)", device_id)
+        return CommandResult(device_id, "ok", reason="no_openapi_account")
     if not port.settings.cloud_timer_mirror:
         _LOGGER.info("delete_timer: SmartLife mirror off for this hub, %s is DP-only", device_id)
-        return True
+        return CommandResult(device_id, "ok", reason="mirror_disabled")
     if prior is None:
         _LOGGER.warning(
             "delete_timer: no prior slot data for %s slot %d — cannot match cloud entry",
             device_id,
             slot,
         )
-        return True
+        return CommandResult(device_id, "ok", reason="no_prior_slot")
 
-    await _delete_cloud_timer_by_match(
+    removed = await _delete_cloud_timer_by_match(
         hass,
         port,
         device_id,
@@ -541,4 +519,4 @@ async def delete_timer(hass, data: dict) -> bool:
         int(prior.get("minute", 0)),
         int(prior.get("days_mask", 0)),
     )
-    return True
+    return CommandResult(device_id, "ok", cloud=removed.status, reason=removed.reason)

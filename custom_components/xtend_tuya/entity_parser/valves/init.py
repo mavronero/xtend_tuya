@@ -1,4 +1,4 @@
-"""Entity parser plugin for fdm5kw Tuya irrigation valve controller."""
+"""Entity parser plugin for the sfkzq irrigation valves (QT-08W, QT-08W-T3, water timers)."""
 
 from __future__ import annotations
 from typing import Any
@@ -7,8 +7,10 @@ from homeassistant.const import (
 )
 from ..entity_parser import (
     XTCustomEntityParser,
+    XTPluginService,
 )
 from .sensor import Fdm5kwSensor
+from .services import SERVICES
 
 
 def get_plugin_instance() -> XTCustomEntityParser | None:
@@ -25,3 +27,6 @@ class Fdm5kwEntityParser(XTCustomEntityParser):
             case Platform.SENSOR:
                 return Fdm5kwSensor.get_descriptors_to_merge()
         return None
+
+    def get_services(self) -> list[XTPluginService]:
+        return list(SERVICES)
