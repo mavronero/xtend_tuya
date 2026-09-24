@@ -1,6 +1,11 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { packLanes, pairPlanRuns, Pairable } from "./calendar-lanes";
+import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
+import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
+import { farmTokens } from "./components/theme.ts";
+import "./components/valve-filter-bar.ts";
+import "./components/spinner.ts";
 
 /* Irrigation calendar: three views over the same two calendar entities
  * (Trello 9W8FXA4l).
@@ -9,11 +14,11 @@ import { packLanes, pairPlanRuns, Pairable } from "./calendar-lanes";
  *                 (OpenSprinkler preview / Rain Bird Dryrun layout).
  * Every planned slot is paired with the run that answered it, so each block
  * IS an outcome: planned (ahead), ran, missed, unplanned run, running.
- * Colour only says "water flowed" (amber) or "problem" (red).
- * Visual language follows the valves overview matrix: same header, subtitle
- * with text-button actions, 150px name column, outlined 1fr track, tabular
- * metrics, uppercase group headers in the primary colour, 620px phone
- * breakpoint. Amber = water flowing, exactly as in the matrix. */
+ * Colours follow the farm cards (components/theme.ts): water that ran is
+ * blue and filled, a plan is an outline, missed is a red dashed outline, a
+ * run that measured no water is red. The legend doubles as the counts.
+ * Filter by site (with its sub-sites) and search, as on the Valves tab; the
+ * timeline groups valves by site. */
 
 interface HomeAssistant {
   callApi?: <T = unknown>(method: string, path: string) => Promise<T>;
@@ -89,9 +94,29 @@ function litersFromSummary(summary: string): number | null {
   return m ? Number(m[1].replace(",", ".")) : null;
 }
 
+/** A run that measured no water: 0 L (unmetered valves report no liters). */
+function isDry(e: { kind: string; liters?: number | null }): boolean {
+  return (e.kind === "ran" || e.kind === "unplanned") && e.liters === 0;
+}
+
 function errText(e: unknown): string {
   const o = e as { body?: { message?: string }; message?: string };
   return o?.body?.message ?? o?.message ?? String(e);
+}
+
+const FILTER_KEY = "xt-irrigation-calendar-filter";
+
+function loadFilter(): ValveFilter {
+  try {
+    return { ...NO_FILTER, ...JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}"), status: "all" };
+  } catch {
+    return NO_FILTER;
+  }
+}
+
+/** Default hour height: 8 hours fill the visible grid (Trello Sijuj2Dd). */
+function eightHours(): number {
+  return Math.max(36, Math.round((window.innerHeight * 0.72) / 8));
 }
 
 function pref(key: string, fallback: string): string {
@@ -121,6 +146,9 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _anchor: Date = startOfDay(new Date());
   @state() private _events: GridEvent[] = [];
   @state() private _problemsOnly = false;
+  @state() private _filter: ValveFilter = loadFilter();
+  @state() private _farm: FarmData = EMPTY_FARM_DATA;
+  private _farmLoaded = false;
   @state() private _loading = false;
   @state() private _error: string | null = null;
   private _loadedKey = "";
@@ -147,6 +175,13 @@ export class IrrigationCalendarCard extends LitElement {
   }
 
   updated(): void {
+    if (!this._farmLoaded && this.hass?.callApi) {
+      this._farmLoaded = true;
+      loadFarmData(this.hass as Parameters<typeof loadFarmData>[0]).then(
+        (d) => (this._farm = d),
+        () => undefined
+      );
+    }
     const key = `${this._mode}|${this._range}|${this._anchor.getTime()}`;
     if (key !== this._loadedKey && this.hass?.callApi) {
       this._loadedKey = key;
@@ -234,7 +269,7 @@ export class IrrigationCalendarCard extends LitElement {
   }
 
   private _hourPx(): number {
-    return this._config?.hour_height ?? 56;
+    return this._config?.hour_height ?? eightHours();
   }
 
   // ------------------------------------------------------------- actions
@@ -273,61 +308,111 @@ export class IrrigationCalendarCard extends LitElement {
     ).toLocaleDateString(undefined, long)}`;
   }
 
-  private _countsText(): string {
-    const c = { planned: 0, ran: 0, missed: 0, unplanned: 0, running: 0 };
-    for (const e of this._events) c[e.kind]++;
-    const parts = [`${c.ran} ran`, `${c.missed} missed`, `${c.planned} ahead`];
-    if (c.unplanned) parts.push(`${c.unplanned} unplanned`);
-    if (c.running) parts.push(`${c.running} running`);
-    return parts.join(" · ");
+  /** Site path and metering point of a valve, from the farm data. */
+  private _placeOf(v: Valve): { site: string | null; siteName: string | null; mp: string | null } {
+    const mp = this._farm.locationOf[v.device_id];
+    const site = mp?.site_id ?? null;
+    return { site, siteName: site ? sitePath(this._farm.sites, site) : null, mp: mp?.name ?? null };
+  }
+
+  /** Valves passing the site filter and search. */
+  private _visible(): Valve[] {
+    const f = this._filter;
+    const inSite = f.site ? subtree(this._farm.sites, f.site) : null;
+    const q = f.search.trim().toLowerCase();
+    return (this._config?.valves ?? []).filter((v) => {
+      const p = this._placeOf(v);
+      if (inSite && !(p.site && inSite.has(p.site))) return false;
+      return !q || [v.valve_name, p.mp, p.siteName].some((x) => x?.toLowerCase().includes(q));
+    });
+  }
+
+  private _shownEvents(): GridEvent[] {
+    if (!this._filter.site && !this._filter.search.trim()) return this._events;
+    const keys = new Set(this._visible().map((v) => v.registry_entity));
+    return this._events.filter((e) => keys.has(e.key));
+  }
+
+  private _onFilter(e: CustomEvent<ValveFilter>): void {
+    this._filter = e.detail;
+    try {
+      localStorage.setItem(FILTER_KEY, JSON.stringify(e.detail));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  /** Legend and counts in one: each chip names an outcome and its number. */
+  private _legend(events: GridEvent[]) {
+    const c = { planned: 0, ran: 0, missed: 0, unplanned: 0, running: 0, dry: 0 };
+    for (const e of events) {
+      c[e.kind]++;
+      if (isDry(e)) c.dry++;
+    }
+    const chip = (cls: string, n: number, label: string, title: string) =>
+      html`<span class="lg" title=${title}><i class="sw ${cls}"></i><b>${n}</b> ${label}</span>`;
+    return html`<div class="legend">
+      ${chip("ran", c.ran, "ran", "Planned runs that happened (filled blue)")}
+      ${chip("missed", c.missed, "missed", "Planned runs that did not happen (red outline)")}
+      ${chip("planned", c.planned, "ahead", "Planned runs still to come (outline)")}
+      ${c.unplanned ? chip("unplanned", c.unplanned, "unplanned", "Runs nobody planned (striped)") : nothing}
+      ${c.running ? chip("running", c.running, "running", "Watering now") : nothing}
+      ${c.dry ? chip("dry", c.dry, "no water", "Runs that measured no water (red)") : nothing}
+    </div>`;
   }
 
   render() {
     if (!this._config) return nothing;
     const mode = this._mode;
-    const tab = (m: Mode, label: string) =>
-      html`<button class="txt tab ${mode === m ? "on" : ""}" @click=${() => this._setMode(m)}>${label}</button>`;
+    const events = this._shownEvents();
+    const chip = (on: boolean, label: string, click: () => void) =>
+      html`<button class="chip ${on ? "on" : ""}" aria-pressed=${on} @click=${click}>${label}</button>`;
     return html`
       <ha-card>
-        <h1 class="card-header">${this._config.title ?? "Irrigation calendar"}</h1>
-        <div class="card-subtitle">
-          <span class="counts">${this._loading ? "loading…" : this._countsText()}</span>
-          <span class="actions">
-            ${tab("day", "Day")} ${tab("week", "Week")} ${tab("timeline", "Timeline")}
+        <div class="head">
+          <div class="title-row">
+            <h2>${this._config.title ?? "Irrigation calendar"}</h2>
+            ${this._loading ? html`<xt-spinner></xt-spinner>` : nothing}
+          </div>
+          <div class="bar">
+            <div class="chips" role="group" aria-label="View">
+              ${chip(mode === "day", "Day", () => this._setMode("day"))}
+              ${chip(mode === "week", "Week", () => this._setMode("week"))}
+              ${chip(mode === "timeline", "Timeline", () => this._setMode("timeline"))}
+            </div>
             ${mode === "timeline"
-              ? html`<select class="range" @change=${(e: Event) => this._setRange(Number((e.target as HTMLSelectElement).value) as 1 | 3 | 7)}>
-                  ${[1, 3, 7].map((r) => html`<option value=${r} ?selected=${r === this._range}>${r} d</option>`)}
-                </select>`
+              ? html`<div class="chips" role="group" aria-label="Range">
+                  ${([1, 3, 7] as const).map((r) => chip(this._range === r, `${r} d`, () => this._setRange(r)))}
+                </div>`
               : nothing}
-          </span>
-        </div>
-        <div class="card-subtitle nav">
-          <span class="datenav">
-            <button class="txt" @click=${() => this._shift(-1)} aria-label="Previous">‹</button>
-            <span class="range-label">${this._rangeLabel()}</span>
-            <button class="txt" @click=${() => this._shift(1)} aria-label="Next">›</button>
-            <button class="txt" @click=${() => (this._anchor = startOfDay(new Date()))}>Today</button>
-          </span>
-          <span class="actions">
+            <div class="datenav">
+              <button class="icon" @click=${() => this._shift(-1)} aria-label="Previous"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+              <span class="range-label">${this._rangeLabel()}</span>
+              <button class="icon" @click=${() => this._shift(1)} aria-label="Next"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+              ${chip(false, "Today", () => (this._anchor = startOfDay(new Date())))}
+            </div>
+          </div>
+          <xt-valve-filter-bar
+            .sites=${this._farm.sites}
+            .value=${this._filter}
+            .statuses=${false}
+            @xt-filter-changed=${this._onFilter}
+          ></xt-valve-filter-bar>
+          <div class="bar">
+            ${this._legend(events)}
             ${mode === "timeline"
-              ? html`<button class="txt ${this._problemsOnly ? "on" : ""}" @click=${() => (this._problemsOnly = !this._problemsOnly)}>
-                  ${this._problemsOnly ? "Showing problems" : "Problems only"}
-                </button>`
+              ? chip(this._problemsOnly, this._problemsOnly ? "Showing problems" : "Problems only", () => (this._problemsOnly = !this._problemsOnly))
               : nothing}
-            <span class="legend">
-              <i class="sw planned"></i>planned <i class="sw ran"></i>ran
-              <i class="sw missed"></i>missed <i class="sw unplanned"></i>unplanned
-            </span>
-          </span>
+          </div>
         </div>
         ${this._error ? html`<div class="err">${this._error}</div>` : nothing}
-        ${mode === "timeline" ? this._renderTimeline() : this._renderGrid()}
+        ${mode === "timeline" ? this._renderTimeline(events) : this._renderGrid(events)}
       </ha-card>
     `;
   }
 
   // Day / Week: vertical time grid, lanes for overlaps.
-  private _renderGrid() {
+  private _renderGrid(events: GridEvent[]) {
     const [from] = this._window();
     const days = this._mode === "day" ? 1 : 7;
     const hourPx = this._hourPx();
@@ -344,7 +429,7 @@ export class IrrigationCalendarCard extends LitElement {
             const dayEnd = dayStart + DAY_MS;
             // Blocks are drawn at least 15 min tall, so pack lanes on that
             // visual length too or a 1-min slot's block overlaps its successor.
-            const inDay = this._events
+            const inDay = events
               .filter((e) => e.start < dayEnd && e.end > dayStart)
               .map((e) => ({
                 ...e,
@@ -364,21 +449,19 @@ export class IrrigationCalendarCard extends LitElement {
                 ${days > 1
                   ? html`<div class="colhead"><span>${new Date(dayStart).toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}</span></div>`
                   : nothing}
-                <div class="lines">
-                  ${Array.from({ length: 96 }, (_, q) => html`<div class="q ${q % 4 === 0 ? "h" : ""}"></div>`)}
-                </div>
+                <div class="lines"></div>
                 ${placed.map(({ ev, lane, lanes }) => {
                   const top = ((ev.start - dayStart) / HOUR_MS) * hourPx;
                   const h = Math.max(((ev.end - ev.start) / HOUR_MS) * hourPx, hourPx / 4);
                   const w = 100 / lanes;
                   return html`<div
-                    class="ev ${ev.kind} ${ev.path ? "link" : ""}"
+                    class="ev ${ev.kind} ${isDry(ev) ? "dry" : ""} ${ev.path ? "link" : ""}"
                     style="top:${top}px;height:${h}px;left:${lane * w}%;width:calc(${w}% - 2px)"
                     title=${ev.summary}
                     @click=${() => this._open(ev.path)}
                   >
                     <b>${ev.name}</b>
-                    <span>${hhmm(ev.start)}–${hhmm(ev.end)}</span>
+                    <span>${hhmm(ev.start)}–${hhmm(ev.end)}${ev.liters != null ? ` · ${Math.round(ev.liters)} L` : ""}</span>
                   </div>`;
                 })}
               </div>
@@ -390,7 +473,7 @@ export class IrrigationCalendarCard extends LitElement {
   }
 
   // Timeline: one row per valve, grouped by irrigation location.
-  private _renderTimeline() {
+  private _renderTimeline(events: GridEvent[]) {
     const [from, to] = this._window();
     const t0 = from.getTime();
     const span = to.getTime() - t0;
@@ -398,11 +481,14 @@ export class IrrigationCalendarCard extends LitElement {
     const now = Date.now();
 
     const byKey = new Map<string, GridEvent[]>();
-    for (const e of this._events) (byKey.get(e.key) ?? byKey.set(e.key, []).get(e.key)!).push(e);
+    for (const e of events) (byKey.get(e.key) ?? byKey.set(e.key, []).get(e.key)!).push(e);
 
-    // Same home · room grouping and order as the overview matrix.
-    const valves = this._config?.valves ?? [];
-    const groupOf = (v: Valve) => `${v.home || "Unassigned"} · ${v.room || "—"}`;
+    // Grouped by site, like the Valves tab.
+    const valves = this._visible();
+    const groupOf = (v: Valve) => {
+      const p = this._placeOf(v);
+      return p.siteName ?? (p.mp ? "No site" : "No metering point");
+    };
     const groups = new Map<string, Valve[]>();
     for (const v of [...valves].sort(
       (a, b) => groupOf(a).localeCompare(groupOf(b)) || a.valve_name.localeCompare(b.valve_name)
@@ -464,7 +550,7 @@ export class IrrigationCalendarCard extends LitElement {
                 ${dayLines.map((l) => html`<i class="dayline" style="left:${l}%"></i>`)}
                 ${evs.map(
                   (e) => html`<i
-                    class="bar ${e.kind}"
+                    class="bar ${e.kind} ${isDry(e) ? "dry" : ""}"
                     style="left:${pct(e.start)}%;width:${Math.max(pct(e.end) - pct(e.start), 0.4)}%"
                     title=${e.summary}
                   ></i>`
@@ -501,129 +587,148 @@ export class IrrigationCalendarCard extends LitElement {
     `;
   }
 
-  static styles = css`
+  static styles = [
+    farmTokens,
+    css`
     :host {
       --cc-text: var(--primary-text-color, #212121);
-      --cc-dim: var(--secondary-text-color, #727272);
-      --cc-line: var(--divider-color, #e0e0e0);
+      --cc-dim: var(--xt-dim);
+      --cc-line: var(--xt-track);
       --cc-primary: var(--primary-color, #03a9f4);
-      --cc-planned: rgba(3, 169, 244, 0.3);
-      --cc-water: var(--state-switch-active-color, #f9a825);
-      /* unplanned run: still water, but hatched so it reads as "nobody scheduled this" */
-      --cc-water-stripes: repeating-linear-gradient(
-        135deg,
-        var(--cc-water) 0 3px,
-        color-mix(in srgb, var(--cc-water) 35%, var(--cc-bg)) 3px 6px
-      );
-      --cc-missed: var(--error-color, #db4437);
       --cc-bg: var(--card-background-color, #fff);
       --cc-hover: var(--secondary-background-color, #f5f5f5);
+      /* water that ran: blue; a plan: an outline; missed: red dashed */
+      --cc-water: var(--xt-water);
+      --cc-ran-bg: color-mix(in srgb, var(--xt-water) 28%, var(--cc-bg));
+      --cc-missed: var(--xt-bad);
+      --cc-dry-bg: color-mix(in srgb, var(--xt-bad) 20%, var(--cc-bg));
+      /* unplanned run: still water, but striped so it reads as "nobody scheduled this" */
+      --cc-water-stripes: repeating-linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--cc-water) 45%, var(--cc-bg)) 0 3px,
+        color-mix(in srgb, var(--cc-water) 12%, var(--cc-bg)) 3px 7px
+      );
     }
     ha-card {
       padding-bottom: 8px;
       color: var(--cc-text);
     }
-    .card-header {
-      font-size: 1.4rem;
-      font-weight: 400;
-      padding: 16px 16px 4px;
-      margin: 0;
+    .head {
+      padding: 16px 16px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
-    .card-subtitle {
-      padding: 0 16px 10px;
-      margin: 0;
-      color: var(--cc-dim);
-      font-size: 0.95rem;
-      font-variant-numeric: tabular-nums;
+    .title-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
+    }
+    h2 {
+      margin: 0;
+      font-size: 1.6rem;
+      font-weight: 400;
+    }
+    .bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
+    }
+    .chips {
+      display: flex;
+      gap: 4px;
       flex-wrap: wrap;
     }
-    .card-subtitle.nav {
-      padding-bottom: 6px;
+    .chip {
+      font: inherit;
+      font-size: 0.9rem;
+      color: var(--cc-text);
+      background: var(--cc-bg);
+      border: 1px solid var(--cc-line);
+      border-radius: 18px;
+      padding: 4px 12px;
+      min-height: 32px;
+      cursor: pointer;
     }
-    .actions,
+    .chip.on {
+      background: var(--cc-primary);
+      border-color: var(--cc-primary);
+      color: var(--text-primary-color, #fff);
+    }
+    .chip:focus-visible,
+    .icon:focus-visible {
+      outline: 2px solid var(--cc-primary);
+      outline-offset: 1px;
+    }
     .datenav {
       display: flex;
       align-items: center;
       gap: 4px;
-      flex-wrap: wrap;
     }
-    .range-label {
-      color: var(--cc-text);
-      font-weight: 500;
-      padding: 0 4px;
-    }
-    button.txt {
+    .icon {
       border: none;
       background: none;
-      color: var(--cc-primary);
-      font: inherit;
+      cursor: pointer;
+      border-radius: 50%;
+      padding: 4px;
+      display: flex;
+      color: var(--cc-text);
+    }
+    .icon:hover {
+      background: var(--cc-hover);
+    }
+    .range-label {
       font-weight: 500;
-      cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 6px;
-      white-space: nowrap;
+      padding: 0 4px;
+      min-width: 9em;
+      text-align: center;
     }
-    button.txt:hover {
-      background: var(--cc-hover);
-    }
-    button.txt:focus-visible {
-      outline: 2px solid var(--cc-primary);
-      outline-offset: 1px;
-    }
-    button.tab.on {
-      color: var(--cc-text);
-      box-shadow: inset 0 -2px 0 var(--cc-primary);
-      border-radius: 6px 6px 0 0;
-    }
-    button.txt.on:not(.tab) {
-      background: var(--cc-hover);
-      color: var(--cc-text);
-    }
-    select.range {
-      border: 1px solid var(--cc-line);
-      background: var(--cc-bg);
-      color: var(--cc-text);
-      font: inherit;
-      font-size: 0.85rem;
-      padding: 2px 6px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-left: 6px;
+    xt-valve-filter-bar {
+      margin-bottom: 0;
     }
     .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      font-size: 0.9rem;
+      flex: 1;
+    }
+    .lg {
       display: inline-flex;
       align-items: center;
-      gap: 4px 6px;
-      font-size: 0.8rem;
-      margin-left: 8px;
+      gap: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+    .lg b {
+      font-weight: 500;
     }
     .sw {
       display: inline-block;
-      width: 12px;
-      height: 10px;
-      border-radius: 2px;
+      width: 14px;
+      height: 12px;
+      border-radius: 3px;
       box-sizing: border-box;
-      margin-left: 6px;
-    }
-    .sw:first-child {
-      margin-left: 0;
     }
     .sw.planned {
-      background: var(--cc-planned);
-      box-shadow: inset 0 0 0 1px var(--cc-primary);
+      box-shadow: inset 0 0 0 1.5px var(--cc-dim);
     }
     .sw.ran {
+      background: var(--cc-ran-bg);
+      border-left: 3px solid var(--cc-water);
+    }
+    .sw.running {
       background: var(--cc-water);
     }
     .sw.missed {
-      border: 1px dashed var(--cc-missed);
+      border: 1.5px dashed var(--cc-missed);
     }
     .sw.unplanned {
       background: var(--cc-water-stripes);
+    }
+    .sw.dry {
+      background: var(--cc-dry-bg);
+      border-left: 3px solid var(--cc-missed);
     }
     .err {
       color: var(--cc-missed);
@@ -691,16 +796,17 @@ export class IrrigationCalendarCard extends LitElement {
       color: var(--cc-primary);
       font-weight: 600;
     }
+    /* 5-minute grid (Trello Sijuj2Dd): faint 5-min, stronger 15-min, solid hour lines */
     .lines {
       height: calc(var(--hour) * 24);
-    }
-    .q {
-      height: calc(var(--hour) / 4);
-      box-sizing: border-box;
-      border-top: 1px dotted var(--cc-line);
-    }
-    .q.h {
-      border-top-style: solid;
+      background-image:
+        linear-gradient(to bottom, var(--cc-line) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, var(--cc-line) 70%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in srgb, var(--cc-line) 35%, transparent) 1px, transparent 1px);
+      background-size:
+        100% var(--hour),
+        100% calc(var(--hour) / 4),
+        100% calc(var(--hour) / 12);
     }
     .ev {
       position: absolute;
@@ -723,12 +829,24 @@ export class IrrigationCalendarCard extends LitElement {
     .ev.link {
       cursor: pointer;
     }
+    /* one line: a 15-min block is ~20 px tall (8 h per screen) */
+    .ev {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
     .ev b,
     .ev span {
-      display: block;
-      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .ev span {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+    .ev b {
+      flex: 0 1 auto;
     }
     .ev b {
       font-weight: 500;
@@ -737,21 +855,26 @@ export class IrrigationCalendarCard extends LitElement {
       color: var(--cc-dim);
     }
     .ev.planned {
-      background: var(--cc-planned);
-      box-shadow: inset 0 0 0 1px var(--cc-primary);
+      box-shadow: inset 0 0 0 1.5px var(--cc-dim);
     }
     .ev.ran,
     .ev.running {
-      background: var(--cc-water);
+      background: var(--cc-ran-bg);
+      border-left: 3px solid var(--cc-water);
     }
     .ev.unplanned {
       background: var(--cc-water-stripes);
     }
     .ev.running {
-      box-shadow: inset 0 0 0 2px var(--cc-primary);
+      box-shadow: inset 0 0 0 2px var(--cc-water);
     }
     .ev.missed {
-      border: 1px dashed var(--cc-missed);
+      border: 1.5px dashed var(--cc-missed);
+      background: color-mix(in srgb, var(--cc-missed) 6%, var(--cc-bg));
+    }
+    .ev.dry {
+      background: var(--cc-dry-bg);
+      border-left: 3px solid var(--cc-missed);
     }
 
     /* ---- timeline ---- */
@@ -835,11 +958,11 @@ export class IrrigationCalendarCard extends LitElement {
       box-sizing: border-box;
     }
     .bar.planned {
-      background: var(--cc-planned);
-      box-shadow: inset 0 0 0 1px var(--cc-primary);
+      background: color-mix(in srgb, var(--cc-dim) 12%, var(--cc-bg));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cc-dim) 70%, transparent);
     }
     .bar.missed {
-      border: 1px dashed var(--cc-missed);
+      border: 1.5px dashed var(--cc-missed);
     }
     .bar.ran,
     .bar.running {
@@ -849,7 +972,10 @@ export class IrrigationCalendarCard extends LitElement {
       background: var(--cc-water-stripes);
     }
     .bar.running {
-      box-shadow: inset 0 0 0 2px var(--cc-primary);
+      box-shadow: inset 0 0 0 2px var(--cc-text);
+    }
+    .bar.dry {
+      background: var(--cc-missed);
     }
     .now {
       width: 1px;
@@ -902,11 +1028,7 @@ export class IrrigationCalendarCard extends LitElement {
       .grouphdr {
         padding: 10px 10px 3px;
       }
-      .card-subtitle {
-        padding-left: 10px;
-        padding-right: 10px;
-      }
-      .card-header {
+      .head {
         padding-left: 10px;
         padding-right: 10px;
       }
@@ -921,7 +1043,8 @@ export class IrrigationCalendarCard extends LitElement {
         }
       }
     }
-  `;
+  `,
+  ];
 }
 
 if (!customElements.get("irrigation-calendar-card")) {

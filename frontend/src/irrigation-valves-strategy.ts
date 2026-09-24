@@ -374,9 +374,8 @@ function buildValveView(v: ValveEntities, hours: number): DashboardView {
   // Sijuj2Dd).
   leftCards.push({ type: "custom:irrigation-locations-card", device_id: v.device_id });
 
-  // Last Watering at the top of the history column, per Simon 2026-06-04.
-  const last = buildLastWateringCard(v);
-  if (last) middleCards.push(last);
+  // The header card (irrigation-valve-header-card) shows the last run and
+  // the battery, so the Last Watering card and the battery tile are gone.
   // Every run as a text list, like SmartLife's history (Trello Sijuj2Dd).
   middleCards.push({
     type: "custom:irrigation-run-history-card",
@@ -386,10 +385,7 @@ function buildValveView(v: ValveEntities, hours: number): DashboardView {
   const watering = buildWateringHistoryCard(v, hours);
   if (watering) middleCards.push(watering);
 
-  if (v.battery_level) {
-    rightCards.push(buildBatteryTile(v));
-    rightCards.push(buildBatteryHistoryCard(v, hours));
-  }
+  if (v.battery_level) rightCards.push(buildBatteryHistoryCard(v, hours));
   // Other settings (sleep / rain-snow delay) stays in the right column,
   // below battery, where it lived before — Simon 2026-06-04.
   const other = buildOtherSettingsCard(v);
@@ -492,63 +488,6 @@ function buildWateringHistoryCard(v: ValveEntities, hours: number): unknown | nu
     hours_to_show: hours,
     entities,
     layout_options: { grid_columns: 4, grid_rows: "auto" },
-  };
-}
-
-function buildHourlyVolumeCard(v: ValveEntities): unknown | null {
-  // The `change` stat over hourly buckets gives liters per hour for
-  // every hour we have recorder data — past runs included. This is the
-  // best "historical flow rate" view available without backfilling
-  // synthetic states; the live flow_rate sensor only covers data
-  // recorded after its first appearance.
-  // grid_columns=12 to match the Watering History card and give 168
-  // hourly buckets visible breathing room.
-  if (!v.volume_sensor) return null;
-  return {
-    type: "statistics-graph",
-    title: "Hourly water (past 7 days)",
-    entities: [v.volume_sensor],
-    stat_types: ["change"],
-    period: "hour",
-    days_to_show: 7,
-    chart_type: "bar",
-    layout_options: { grid_columns: 4, grid_rows: "auto" },
-  };
-}
-
-function buildLastWateringCard(v: ValveEntities): unknown | null {
-  const entities: unknown[] = [];
-  if (v.start_time_sensor)
-    entities.push({ entity: v.start_time_sensor, name: "Start" });
-  if (v.end_time_sensor)
-    entities.push({ entity: v.end_time_sensor, name: "End" });
-  if (v.volume_sensor)
-    entities.push({ entity: v.volume_sensor, name: "Volume" });
-  if (v.mode_sensor) entities.push({ entity: v.mode_sensor, name: "Mode" });
-  if (entities.length === 0) return null;
-  return {
-    type: "entities",
-    title: "Last Watering",
-    show_header_toggle: false,
-    entities,
-    layout_options: { grid_columns: 4, grid_rows: "auto" },
-  };
-}
-
-function buildBatteryTile(v: ValveEntities): unknown {
-  // Inside HA sections layout the inner grid is 4 columns wide and only
-  // `layout_options.grid_columns` is honoured — tile-level `grid_options`
-  // gets dropped, which let the tile collapse to its 1-col default and
-  // sit beside the history graph instead of stacking on top.
-  return {
-    type: "tile",
-    layout_options: { grid_columns: 4, grid_rows: 3 },
-    entity: v.battery_level,
-    name: { type: "entity" },
-    state_content: "state",
-    vertical: false,
-    features: [{ type: "bar-gauge" }, { type: "trend-graph" }],
-    features_position: "bottom",
   };
 }
 
@@ -1445,9 +1384,13 @@ class IrrigationValveDetailCard extends HTMLElement {
     const view = buildValveView(valve, this._hours);
     const root = document.createElement("div");
     root.innerHTML =
-      `<h1 style="margin:0 0 12px;font-size:1.5rem;font-weight:400">${escapeHtml(valve.valve_name)}</h1>` +
+      `<div class="head" style="margin-bottom:16px"></div>` +
       `<div class="cols" style="display:grid;gap:16px;align-items:start;` +
       `grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))"></div>`;
+    const header = helpers.createCardElement({ type: "custom:irrigation-valve-header-card", device_id: valve.device_id });
+    header.hass = hass;
+    this._children.push(header);
+    (root.querySelector(".head") as HTMLElement).appendChild(header);
     const cols = root.querySelector(".cols") as HTMLElement;
     for (const section of (view.sections ?? []) as { cards: unknown[] }[]) {
       const col = document.createElement("div");

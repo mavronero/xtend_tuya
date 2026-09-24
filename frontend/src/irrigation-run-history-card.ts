@@ -47,7 +47,9 @@ export class IrrigationRunHistoryCard extends LitElement {
   render() {
     if (!this._config) return nothing;
     const runs = this._data.runs.filter((r) => r.device_id === this._config!.device_id);
-    return html`<ha-card .header=${this._config.title ?? "Watering log"}>
+    // Title in the style of the control and timer cards beside it.
+    return html`<ha-card>
+      <div class="title"><ha-icon icon="mdi:format-list-bulleted"></ha-icon>${this._config.title ?? "Watering log"}</div>
       <div class="content">
         <xt-run-history .runs=${runs} ?metered=${this._config.metered !== false}></xt-run-history>
       </div>
@@ -55,6 +57,17 @@ export class IrrigationRunHistoryCard extends LitElement {
   }
 
   static styles = css`
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 16px 8px;
+      font-size: 1.1em;
+      font-weight: 500;
+    }
+    .title ha-icon {
+      color: var(--secondary-text-color);
+    }
     .content {
       padding: 0 16px 12px;
     }

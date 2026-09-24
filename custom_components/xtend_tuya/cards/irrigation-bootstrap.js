@@ -27,7 +27,7 @@ const PREFIX = "/xtend_tuya_static/cards/";
 // renders "Configuration error" (irrigation-locations-card, 4.4.257).
 const BUNDLES = {
   "irrigation-locations-card": "irrigation-locations-card.js",
-  "irrigation-calendar-card": "irrigation-calendar-card.js",
+  "irrigation-calendar-card": "irrigation-farm-cards.js",
   "irrigation-valves-card": "irrigation-farm-cards.js",
   "xt-valve-card": "irrigation-farm-cards.js",
   "xt-valve-section": "irrigation-farm-cards.js",
@@ -43,6 +43,8 @@ const BUNDLES = {
   "xt-device-picker": "irrigation-farm-cards.js",
   "irrigation-run-history-card": "irrigation-farm-cards.js",
   "xt-run-history": "irrigation-farm-cards.js",
+  "irrigation-valve-header-card": "irrigation-farm-cards.js",
+  "xt-spinner": "irrigation-farm-cards.js",
   "xt-site-tree": "irrigation-farm-cards.js",
   "irrigation-quota-card": "irrigation-quota-card.js",
   "irrigation-room-groups": "irrigation-room-groups.js",

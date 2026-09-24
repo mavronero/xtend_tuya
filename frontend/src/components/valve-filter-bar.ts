@@ -18,6 +18,8 @@ export class XtValveFilterBar extends LitElement {
   @property({ attribute: false }) sites: Site[] = [];
   @property({ attribute: false }) value: ValveFilter = NO_FILTER;
   @property({ attribute: false }) counts: Partial<Record<StatusFilter, number>> = {};
+  /** Show the status chips (the calendar only needs site and search). */
+  @property({ type: Boolean }) statuses = true;
 
   private _set(patch: Partial<ValveFilter>): void {
     this.value = { ...this.value, ...patch };
@@ -37,7 +39,7 @@ export class XtValveFilterBar extends LitElement {
         <option value="">All sites</option>
         ${sites.map((s) => html`<option value=${s.id} ?selected=${s.id === this.value.site}>${s.path}</option>`)}
       </select>
-      <div class="chips" role="group" aria-label="Status">
+      <div class="chips" role="group" aria-label="Status" ?hidden=${!this.statuses}>
         ${STATUSES.map(
           ([key, label]) => html`<button
             class=${this.value.status === key ? "on" : ""}
@@ -50,7 +52,7 @@ export class XtValveFilterBar extends LitElement {
       </div>
       <input
         type="search"
-        placeholder="Search valve, location, site"
+        placeholder="Search valve, metering point, site"
         aria-label="Search"
         .value=${this.value.search}
         @input=${(e: Event) => this._set({ search: (e.target as HTMLInputElement).value })}
@@ -83,6 +85,9 @@ export class XtValveFilterBar extends LitElement {
     input {
       flex: 1;
       min-width: 180px;
+    }
+    .chips[hidden] {
+      display: none;
     }
     .chips {
       display: flex;
