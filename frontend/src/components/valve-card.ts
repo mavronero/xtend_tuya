@@ -14,6 +14,20 @@ const BADGE_TEXT: Record<Badge, string> = {
   no_flow: "No water flow",
 };
 
+const BADGE_TITLE: Record<Badge, string> = {
+  low_battery: "Battery below 20 %",
+  stale: "The valve has not reported for more than 36 hours",
+  missed: "A planned run in the last 24 hours did not happen",
+  no_flow: "The last run measured no water",
+};
+
+/** mdi:battery-10 … mdi:battery, like HA's own battery icon. */
+function batteryIcon(pct: number): string {
+  if (pct >= 95) return "mdi:battery";
+  if (pct < 10) return "mdi:battery-outline";
+  return `mdi:battery-${Math.floor(pct / 10) * 10}`;
+}
+
 const DAY_MS = 86_400_000;
 
 function dayLabel(ms: number, now = Date.now()): string {
@@ -63,24 +77,41 @@ export class XtValveCard extends LitElement {
   private _status(s: ValveSummary) {
     if (s.status === "watering") {
       const flow = s.flow_lpm !== null ? ` · ${s.flow_lpm.toFixed(1)} L/min` : "";
-      return html`<span class="status watering"><i></i>Watering${s.since ? ` since ${time(s.since)}` : ""}${flow}</span>`;
+      return html`<span class="status watering" title="Watering now"><i></i>Watering${s.since ? ` since ${time(s.since)}` : ""}${flow}</span>`;
     }
     if (s.status === "offline") {
-      return html`<span class="status offline"><i></i>Offline${s.since ? ` for ${since(s.since)}` : ""}</span>`;
+      return html`<span class="status offline" title="Not reachable"><i></i>Offline${s.since ? ` for ${since(s.since)}` : ""}</span>`;
     }
-    return html`<span class="status idle"><i></i>Idle</span>`;
+    return html`<span class="status idle" title="Online, not watering"><i></i>Idle</span>`;
   }
 
   private _week(s: ValveSummary) {
     const max = Math.max(...s.week.daily, 0);
-    const total = s.week.unit === "L" ? `${Math.round(s.week.liters)} L` : `${Math.round(s.week.minutes)} min`;
-    return html`<div class="week" title="Last 7 days, ${s.week.unit === "L" ? "liters" : "minutes"} per day">
+    const unit = s.week.unit;
+    const total = unit === "L" ? `${Math.round(s.week.liters)} L` : `${Math.round(s.week.minutes)} min`;
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const day = (i: number) =>
+      new Date(today.getTime() - (6 - i) * DAY_MS).toLocaleDateString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      });
+    return html`<div class="week">
+      <ha-icon icon="mdi:chart-bar" title="Last 7 days"></ha-icon>
       <div class="bars">
         ${s.week.daily.map(
-          (v) => html`<span style="height:${max > 0 ? Math.max(8, (v / max) * 100) : 8}%" class=${v > 0 ? "on" : ""}></span>`
+          (v, i) =>
+            html`<span
+              title="${day(i)}: ${Math.round(v)} ${unit}"
+              style="height:${max > 0 ? Math.max(8, (v / max) * 100) : 8}%"
+              class=${v > 0 ? "on" : ""}
+            ></span>`
         )}
       </div>
-      <span class="dim">7 d · ${s.week.runs} runs · ${total}</span>
+      <span class="dim" title="Last 7 days: number of runs and total ${unit === "L" ? "water" : "watering time"}"
+        >${s.week.runs} runs · ${total}</span
+      >
     </div>`;
   }
 
@@ -93,25 +124,31 @@ export class XtValveCard extends LitElement {
     const place = s.location ? [mp, s.site?.name].filter(Boolean).join(" · ") : "No location";
     return html`<ha-card class=${s.status} @click=${this._open} tabindex="0" role="link" aria-label=${s.name}>
       <div class="head">
-        <span class="name">${baseName(s)}</span>
-        ${s.number ? html`<span class="num">${s.number}</span>` : nothing}
+        <span class="name" title=${s.name}>${baseName(s)}</span>
+        ${s.number ? html`<span class="num" title="Valve number">#${s.number}</span>` : nothing}
         ${s.battery !== null
-          ? html`<span class="battery ${s.badges.includes("low_battery") ? "low" : ""}">${Math.round(s.battery)} %</span>`
+          ? html`<span class="battery ${s.badges.includes("low_battery") ? "low" : ""}" title="Battery ${Math.round(s.battery)} %"
+              ><ha-icon icon=${batteryIcon(s.battery)}></ha-icon>${Math.round(s.battery)} %</span
+            >`
           : nothing}
       </div>
-      ${place ? html`<div class="place dim">${place}</div>` : nothing}
+      ${place
+        ? html`<div class="place dim" title="Metering point · site">
+            <ha-icon icon="mdi:map-marker-outline"></ha-icon><span>${place}</span>
+          </div>`
+        : nothing}
       ${this._status(s)}
       <dl>
-        <dt>Last</dt>
-        <dd>${s.last ? runText(s.last) : "–"}</dd>
-        <dt>Next</dt>
-        <dd>${s.next ? runText(s.next) : "–"}</dd>
+        <dt title="Last run"><ha-icon icon="mdi:history"></ha-icon></dt>
+        <dd title="Last run: start · duration${s.has_flow_meter ? " · water" : ""}">${s.last ? runText(s.last) : "–"}</dd>
+        <dt title="Next planned run"><ha-icon icon="mdi:calendar-clock"></ha-icon></dt>
+        <dd title="Next planned run: start · duration">${s.next ? runText(s.next) : "–"}</dd>
       </dl>
       ${this._week(s)}
       ${s.badges.length
         ? html`<div class="badges">
             ${s.badges.map(
-              (b) => html`<span class="badge ${b}">${BADGE_TEXT[b]}${b === "missed" && s.missed > 1 ? ` ${s.missed}` : ""}</span>`
+              (b) => html`<span class="badge ${b}" title=${BADGE_TITLE[b]}>${BADGE_TEXT[b]}${b === "missed" && s.missed > 1 ? ` ${s.missed}` : ""}</span>`
             )}
           </div>`
         : nothing}
@@ -159,6 +196,19 @@ export class XtValveCard extends LitElement {
       font-variant-numeric: tabular-nums;
       color: var(--xt-dim);
     }
+    .battery {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+    ha-icon {
+      --mdc-icon-size: 16px;
+      color: var(--xt-dim);
+      flex: none;
+    }
+    .battery.low ha-icon {
+      color: var(--error-color, #db4437);
+    }
     .battery.low {
       color: var(--error-color, #db4437);
       font-weight: 600;
@@ -168,6 +218,12 @@ export class XtValveCard extends LitElement {
     }
     .place {
       margin-top: -4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    .place span {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -201,7 +257,8 @@ export class XtValveCard extends LitElement {
       font-variant-numeric: tabular-nums;
     }
     dt {
-      color: var(--xt-dim);
+      display: flex;
+      align-items: center;
     }
     dd {
       margin: 0;
@@ -210,6 +267,10 @@ export class XtValveCard extends LitElement {
       display: flex;
       align-items: flex-end;
       gap: 10px;
+    }
+    .week ha-icon {
+      align-self: center;
+      margin-right: -2px;
     }
     .bars {
       display: flex;
