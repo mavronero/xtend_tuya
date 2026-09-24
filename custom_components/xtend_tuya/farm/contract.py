@@ -42,11 +42,6 @@ def device_identifiers(tuya_device_id: str) -> set[tuple[str, str]]:
     return {(domain, tuya_device_id) for domain in VALVE_DEVICE_DOMAINS}
 
 
-def tuya_id_of(device: dr.DeviceEntry | dr.ChildDeviceEntry) -> str | None:
-    """The Tuya device id a valve's HA device is registered under."""
-    return next((ident for domain, ident in device.identifiers if domain in VALVE_DEVICE_DOMAINS), None)
-
-
 def discover_valves(
     hass: HomeAssistant,
 ) -> list[dict[str, Any]]:
@@ -63,16 +58,11 @@ def discover_valves(
     for state in hass.states.async_all("sensor"):
         if not state.entity_id.endswith(REGISTRY_SUFFIX):
             continue
-        # Resolve the device through the registry, not the state: an offline
-        # valve's sensor is `unavailable` and HA strips its attributes,
-        # device_id included, so an attribute-only lookup lost every offline
-        # valve (and its past runs) from the farm layer.
-        entry = ent_reg.async_get(state.entity_id)
-        ha_device = dev_reg.async_get(entry.device_id) if entry and entry.device_id else None
-        if ha_device is None:
-            continue
-        tuya_device_id = state.attributes.get("device_id") or tuya_id_of(ha_device)
+        tuya_device_id = state.attributes.get("device_id")
         if not tuya_device_id:
+            continue
+        ha_device = dev_reg.async_get_device(identifiers=device_identifiers(tuya_device_id))
+        if ha_device is None:
             continue
 
         roles: dict[str, str] = {}

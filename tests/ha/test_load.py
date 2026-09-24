@@ -123,9 +123,6 @@ async def test_irrigation_locations_seed_once_from_names(hass, hass_client, capl
     assigned = {dev["device_id"] for loc in body["locations"] for dev in loc["devices"] if not dev["end"]}
     assert assigned, "no open assignments after seed"
     assert all(dev["source"] == "auto" for loc in body["locations"] for dev in loc["devices"])
-    # Offline valves are discovered (calendar keeps their runs) but stay out of
-    # "Valves without location": mostly retired hardware the seed never saw.
-    assert all(dev["online"] for dev in body["unassigned"])
 
     # A location renamed in HA must survive: seed never runs again once the store holds data.
     loc = body["locations"][0]

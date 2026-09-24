@@ -189,13 +189,8 @@ class XTIrrigationLocationsView(HomeAssistantView):
             {
                 "generated": datetime.now(timezone.utc).isoformat(),
                 "locations": out,
-                # Online valves only: offline ones are mostly retired hardware
-                # the seed never saw. They get their own group with the
-                # online/offline filter (Trello Sijuj2Dd).
                 "unassigned": [
-                    info
-                    for dev in live
-                    if dev not in open_devices and (info := device_info(dev))["online"]
+                    device_info(dev) for dev in live if dev not in open_devices
                 ],
             }
         )
