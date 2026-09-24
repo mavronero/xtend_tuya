@@ -106,6 +106,7 @@ async def async_setup_entry(
     after setup is picked up automatically.
     """
     from .irrigation_locations import XTIrrigationLocationsView, async_seed_once, async_seed_sites_once
+    from .pump_stats import XTPumpStatsView
     from .runs_store import async_get_store
 
     store = await async_get_store(hass)
@@ -158,6 +159,7 @@ async def async_setup_entry(
         hass.http.register_view(XtendTuyaCalendarICSView())
         hass.http.register_view(XtendTuyaRunsExportView())
         hass.http.register_view(XTIrrigationLocationsView())
+        hass.http.register_view(XTPumpStatsView())
         hass.data[ICS_VIEW_REGISTERED_KEY] = True
 
 

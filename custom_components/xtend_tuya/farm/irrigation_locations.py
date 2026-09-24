@@ -52,7 +52,8 @@ class IrrigationLocations:
         self.data: dict[str, Any] = lm.empty()
 
     async def async_load(self) -> None:
-        self.data = await self._store.async_load() or lm.empty()
+        # Keys added within store version 2 (pump_connections) default in.
+        self.data = {**lm.empty(), **(await self._store.async_load() or {})}
 
     def async_schedule_save(self) -> None:
         self._store.async_delay_save(lambda: self.data, SAVE_DELAY_SEC)
@@ -230,8 +231,9 @@ class XTIrrigationLocationsView(HomeAssistantView):
                 "locations": out,
                 "sites": sorted(data["sites"].values(), key=lambda s: s["name"].casefold()),
                 "pumps": sorted(data["pumps"].values(), key=lambda p: p["name"].casefold()),
-                # Open pump assignments; the cards show which site or MP sets one.
-                "pump_assignments": [a for a in data["pump_assignments"] if a["end"] is None],
+                # Dated (begin/end), so the pump balance can attribute past runs.
+                "pump_assignments": data["pump_assignments"],
+                "pump_connections": data["pump_connections"],
                 # Online valves only: offline ones are mostly retired hardware
                 # the seed never saw. They get their own group with the
                 # online/offline filter (Trello Sijuj2Dd).
@@ -278,7 +280,17 @@ class XTIrrigationLocationsView(HomeAssistantView):
             elif action == "set_location_site":
                 lm.set_location_site(data, body.get("location_id"), body.get("site_id"))
             elif action == "create_pump":
-                result["pump"] = lm.create_pump(data, body.get("name"), body.get("meter_entity"), now)
+                entities = {k: body[k] for k in lm.PUMP_ENTITIES if k in body}
+                result["pump"] = lm.create_pump(data, body.get("name"), now, **entities)
+            elif action == "update_pump":
+                fields = {k: body[k] for k in ("name", *lm.PUMP_ENTITIES) if k in body}
+                lm.update_pump(data, body.get("id"), **fields)
+            elif action == "connect_device":
+                lm.connect_device(
+                    data, body.get("pump_id"), body.get("device_id"), body.get("role"), body.get("meter_entity"), now
+                )
+            elif action == "disconnect_device":
+                lm.disconnect_device(data, body.get("pump_id"), body.get("device_id"), now)
             elif action == "assign_pump":
                 lm.assign_pump(data, body.get("pump_id"), body.get("target_kind"), body.get("target_id"), now)
             elif action == "end_pump_assignment":

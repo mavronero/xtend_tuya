@@ -2,3 +2,4 @@
  * components, and the bootstrap needs every element in exactly one bundle. */
 import "./irrigation-valves-card.ts";
 import "./irrigation-sites-card.ts";
+import "./irrigation-pumps-card.ts";

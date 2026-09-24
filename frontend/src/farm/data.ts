@@ -40,20 +40,36 @@ export interface MeteringPoint {
   expected_lpm: number | null;
   description: string;
   /** Pump feeding it now; `via` names the site it is inherited from. */
-  pump: { name: string; via: string | null } | null;
+  pump: { id: string; name: string; via: string | null } | null;
 }
 
 export interface Pump {
   id: string;
   name: string;
+  /** m³ total of the pump integration; the other entities are optional. */
   meter_entity: string;
+  flow_entity: string | null;
+  pressure_entity: string | null;
+  status_entity: string | null;
 }
 
-/** An open pump assignment: the pump set on a site or metering point. */
+/** The pump set on a site or metering point, dated (ms; end null = now). */
 export interface PumpAssignment {
   pump_id: string;
   target_kind: "site" | "location";
   target_id: string;
+  begin: number | null;
+  end: number | null;
+}
+
+/** An HA device connected to a pump by hand, dated. */
+export interface PumpConnection {
+  pump_id: string;
+  device_id: string;
+  role: "consumer" | "monitor";
+  meter_entity: string | null;
+  begin: number | null;
+  end: number | null;
 }
 
 export interface FarmData {
@@ -66,6 +82,7 @@ export interface FarmData {
   locationOf: Record<string, MeteringPoint>;
   pumps: Pump[];
   pumpAssignments: PumpAssignment[];
+  pumpConnections: PumpConnection[];
 }
 
 export const EMPTY_FARM_DATA: FarmData = {
@@ -76,6 +93,7 @@ export const EMPTY_FARM_DATA: FarmData = {
   locationOf: {},
   pumps: [],
   pumpAssignments: [],
+  pumpConnections: [],
 };
 
 interface CallApi {
@@ -89,12 +107,13 @@ interface LocationsResponse {
     site_id?: string | null;
     expected_lpm?: number | null;
     description?: string;
-    pump?: { name: string; inherited_from: string | null } | null;
+    pump?: { id: string; name: string; inherited_from: string | null } | null;
     devices?: { device_id: string; begin: string | null; end: string | null }[];
   }[];
   sites?: Site[];
-  pumps?: Pump[];
-  pump_assignments?: PumpAssignment[];
+  pumps?: (Partial<Pump> & { id: string; name: string; meter_entity: string })[];
+  pump_assignments?: (Omit<PumpAssignment, "begin" | "end"> & { begin: string | null; end: string | null })[];
+  pump_connections?: (Omit<PumpConnection, "begin" | "end"> & { begin: string | null; end: string | null })[];
 }
 
 interface CalendarEvent {
@@ -143,7 +162,11 @@ async function fetchFarmData(hass: CallApi, now: number): Promise<FarmData> {
   for (const loc of locations?.locations ?? []) {
     const devices = loc.devices ?? [];
     const pump = loc.pump
-      ? { name: loc.pump.name, via: loc.pump.inherited_from ? siteName.get(loc.pump.inherited_from) ?? null : null }
+      ? {
+          id: loc.pump.id,
+          name: loc.pump.name,
+          via: loc.pump.inherited_from ? siteName.get(loc.pump.inherited_from) ?? null : null,
+        }
       : null;
     const mp: MeteringPoint = {
       id: loc.id,
@@ -170,7 +193,13 @@ async function fetchFarmData(hass: CallApi, now: number): Promise<FarmData> {
     sites: locations?.sites ?? [],
     locations: mps,
     locationOf,
-    pumps: locations?.pumps ?? [],
-    pumpAssignments: locations?.pump_assignments ?? [],
+    pumps: (locations?.pumps ?? []).map((p) => ({
+      flow_entity: null,
+      pressure_entity: null,
+      status_entity: null,
+      ...p,
+    })),
+    pumpAssignments: (locations?.pump_assignments ?? []).map((a) => ({ ...a, begin: ms(a.begin), end: ms(a.end) })),
+    pumpConnections: (locations?.pump_connections ?? []).map((c) => ({ ...c, begin: ms(c.begin), end: ms(c.end) })),
   };
 }

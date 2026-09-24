@@ -82,6 +82,7 @@ class IrrigationValvesStrategy extends HTMLElement {
     const views: DashboardView[] = [
       buildOverviewView(overviewTitle, valves, hours),
       locationsView(),
+      pumpsView(),
       calendarView(valves),
       valveDetailView(hours),
     ];
@@ -114,6 +115,31 @@ function locationsView(): DashboardView {
         cards: [
           {
             type: "custom:irrigation-sites-card",
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/** Pumps as master-detail: live figures, water balance with the flow chart,
+ * what each pump feeds and the devices connected to it. Pump data is read
+ * from HA's statistics of the pump integration's entities, never written. */
+function pumpsView(): DashboardView {
+  return {
+    title: "Pumps",
+    path: "pumps",
+    icon: "mdi:pump",
+    type: "sections",
+    max_columns: 3,
+    sections: [
+      {
+        type: "grid",
+        column_span: 3,
+        cards: [
+          {
+            type: "custom:irrigation-pumps-card",
             layout_options: { grid_columns: 12, grid_rows: "auto" },
           },
         ],

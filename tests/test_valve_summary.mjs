@@ -157,7 +157,8 @@ Object.assign(data, {
     mp("mp5", "Loose", null, []),
   ],
   pumps: [{ id: "p1", name: "Big Farm 1", meter_entity: "sensor.big_farm_1" }],
-  pumpAssignments: [{ pump_id: "p1", target_kind: "site", target_id: "farm" }],
+  pumpAssignments: [{ pump_id: "p1", target_kind: "site", target_id: "farm", begin: null, end: null }],
+  pumpConnections: [],
 });
 
 // History follows the place: x's run 3 days ago counts for mp1, a's older

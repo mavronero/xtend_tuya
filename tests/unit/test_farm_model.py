@@ -103,19 +103,62 @@ def test_pump_is_inherited_down_the_tree_and_overridable():
     east = lm.create_site(d, "FF East", farm["id"], T1)
     mp = lm.create_location(d, "FF East 07", T1)
     lm.set_location_site(d, mp["id"], east["id"])
-    p1 = lm.create_pump(d, "Big Farm 1", "sensor.big_farm_1_fct_total_delivered_flow_mc", T1)
-    p2 = lm.create_pump(d, "Big Farm 2", "sensor.big_farm_2_fct_total_delivered_flow_mc", T1)
+    p1 = lm.create_pump(d, "Big Farm 1", T1, meter_entity="sensor.big_farm_1_fct_total_delivered_flow_mc")
+    p2 = lm.create_pump(d, "Big Farm 2", T1, meter_entity="sensor.big_farm_2_fct_total_delivered_flow_mc")
 
     assert lm.pump_for(d, mp["id"], T2) is None
     lm.assign_pump(d, p1["id"], "site", farm["id"], T1)
     assert lm.pump_for(d, mp["id"], T2) == (p1, "site", farm["id"])
     lm.assign_pump(d, p2["id"], "location", mp["id"], T2)  # override on the MP
     assert lm.pump_for(d, mp["id"], T3) == (p2, "location", mp["id"])
-    # dated: before the override the MP still drew from the farm pump
-    assert lm.pump_for(d, mp["id"], "2026-06-15T08:00:00+02:00")[0] is p1
+    # the first pump of a target holds since forever; a change is dated
+    assert lm.pump_for(d, mp["id"], "2026-01-01T08:00:00+01:00")[0] is p2
+    lm.assign_pump(d, p1["id"], "location", mp["id"], T3)
+    assert lm.pump_for(d, mp["id"], "2026-07-15T08:00:00+02:00")[0] is p2
+    assert lm.pump_for(d, mp["id"], "2026-08-15T08:00:00+02:00")[0] is p1
     lm.end_pump_assignment(d, "location", mp["id"], T3)
     assert lm.pump_for(d, mp["id"], "2026-09-01T08:00:00+02:00")[0] is p1
     with pytest.raises(ValueError):
-        lm.create_pump(d, "Bad", "switch.pump", T1)
+        lm.create_pump(d, "Bad", T1, meter_entity="switch.pump")
     with pytest.raises(ValueError):
         lm.assign_pump(d, p1["id"], "valve", mp["id"], T1)
+
+
+def test_pump_entities_are_validated_and_editable():
+    d = lm.empty()
+    p = lm.create_pump(
+        d, "Big Farm 2", T1,
+        meter_entity="sensor.big_farm_2_fct_total_delivered_flow_mc",
+        flow_entity="sensor.big_farm_2_vf_flowliter",
+    )
+    assert p["pressure_entity"] is None and p["flow_entity"] == "sensor.big_farm_2_vf_flowliter"
+    lm.update_pump(d, p["id"], name="Big Farm B", pressure_entity="sensor.big_farm_2_vp_pressurebar", flow_entity=None)
+    assert (p["name"], p["pressure_entity"], p["flow_entity"]) == ("Big Farm B", "sensor.big_farm_2_vp_pressurebar", None)
+    for bad in ({"meter_entity": None}, {"flow_entity": "switch.x"}, {"colour": "red"}):
+        with pytest.raises(ValueError):
+            lm.update_pump(d, p["id"], **bad)
+    with pytest.raises(ValueError, match="required"):
+        lm.create_pump(d, "No meter", T1)
+
+
+def test_consumer_has_one_pump_monitor_many():
+    d = lm.empty()
+    p1 = lm.create_pump(d, "P1", T1, meter_entity="sensor.p1")
+    p2 = lm.create_pump(d, "P2", T1, meter_entity="sensor.p2")
+    lm.connect_device(d, p1["id"], "tank_valve", "consumer", "sensor.tank_fill", T1)
+    lm.connect_device(d, p1["id"], "pressure", "monitor", None, T1)
+    lm.connect_device(d, p2["id"], "pressure", "monitor", None, T1)  # a monitor may watch both
+    lm.connect_device(d, p2["id"], "tank_valve", "consumer", "sensor.tank_fill", T2)  # moves
+    open_ = [(c["pump_id"], c["device_id"]) for c in d["pump_connections"] if c["end"] is None]
+    assert sorted(open_) == sorted(
+        [(p1["id"], "pressure"), (p2["id"], "pressure"), (p2["id"], "tank_valve")]
+    )
+    ended = next(c for c in d["pump_connections"] if c["end"] is not None)
+    assert (ended["pump_id"], ended["device_id"], ended["end"]) == (p1["id"], "tank_valve", T2)
+    with pytest.raises(ValueError, match="already connected"):
+        lm.connect_device(d, p2["id"], "pressure", "monitor", None, T3)
+    with pytest.raises(ValueError):
+        lm.connect_device(d, p1["id"], "x", "tank", None, T3)
+    lm.disconnect_device(d, p2["id"], "pressure", T3)
+    with pytest.raises(ValueError, match="not connected"):
+        lm.disconnect_device(d, p2["id"], "pressure", T3)

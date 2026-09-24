@@ -41,3 +41,8 @@ export function batteryIcon(pct: number): string {
   if (pct < 10) return "mdi:battery-outline";
   return `mdi:battery-${Math.floor(pct / 10) * 10}`;
 }
+
+/** "450 L" below a cubic metre, else "3.2 m³". */
+export function volume(l: number): string {
+  return Math.abs(l) < 1000 ? `${Math.round(l)} L` : `${(l / 1000).toFixed(1)} m³`;
+}

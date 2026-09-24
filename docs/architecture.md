@@ -457,6 +457,43 @@ opens in about 0.3 s after a reload and switches in about 0.1 s. The saved
 prod dashboard keeps its per-valve views until it is re-synced: all old
 card types stay defined, so nothing breaks before that.
 
+### 5.3 Pumps (2026-09-24)
+
+A pump is a farm record, not an HA entity: `{name, meter_entity,
+flow_entity?, pressure_entity?, status_entity?}`, the entity ids of whatever
+integration measures it (on prod DAB Pumps / Esybox Mini 3: `…_fct_total_
+delivered_flow_mc` m³ total, `…_vf_flowliter` L/min, `…_vp_pressurebar`,
+`…_pumpstatus`). The farm layer never talks to that integration: live
+values come from `hass.states`, history from the recorder's long-term
+statistics (`GET /api/xtend_tuya/pump_stats`, hourly, 31 days max, cached
+5 min, only the entities stored on pumps and metered connections).
+
+- **Feeds** are derived, never stored per valve: MP's own pump assignment,
+  else its site's, else up the parent sites (dated assignments; the tree
+  as it is now). The first pump a site or MP gets holds since forever, a
+  change is dated.
+- **Connected devices** (`pump_connections`, dated): any HA device, role
+  `consumer` (uses the water; one pump at a time; optional meter counts in
+  the balance) or `monitor` (pressure, tank level; any number of pumps).
+  Valves are not connectable: they reach a pump only through their MP.
+- **Balance** over a range: pump delivered = valves (runs of the MPs it fed
+  when each run ended) + metered consumers + unaccounted. Pumps also fill
+  tanks and taps, so unaccounted is never zero; its size and trend are the
+  leak signal.
+- Pumps view (`custom:irrigation-pumps-card`): list with live status,
+  figures, balance tiles, chart (24 h / 7 d / 30 d), feeds, connected
+  devices; Edit creates a pump from an HA device (entities prefilled by
+  name), assigns it, connects devices.
+
+### 5.4 Planned: an Irrigation panel
+
+HA's sidebar has no submenus. Instead of Lovelace views (sidebar → header
+tabs → site tree), the integration will register one `panel_custom`
+"Irrigation" with its own navigation rail: Valves, Sites (the tree),
+Pumps, Calendar, Timeline, Flow. The cards are already self-contained, so
+the panel is a router around them. It removes the saved dashboard config
+and "Re-sync valves". Built once the remaining views exist.
+
 ### Contract L2 → L3 (current state, frozen)
 
 - Registry sensor `*_irrigation_timer_registry`, with attributes `device_id`,

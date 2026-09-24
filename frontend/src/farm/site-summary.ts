@@ -39,7 +39,7 @@ export function childSites(sites: Site[], parent: string | null): Site[] {
 export function pumpForSite(data: FarmData, siteId: string): { pump: Pump; via: string | null } | null {
   const byId = new Map(data.sites.map((s) => [s.id, s]));
   for (let s = byId.get(siteId), hops = 0; s && hops < 20; s = s.parent_id ? byId.get(s.parent_id) : undefined, hops++) {
-    const a = data.pumpAssignments.find((p) => p.target_kind === "site" && p.target_id === s!.id);
+    const a = data.pumpAssignments.find((p) => p.target_kind === "site" && p.target_id === s!.id && p.end === null);
     const pump = a && data.pumps.find((p) => p.id === a.pump_id);
     if (pump) return { pump, via: s.id === siteId ? null : s.name };
   }

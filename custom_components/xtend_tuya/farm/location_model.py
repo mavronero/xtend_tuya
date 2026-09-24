@@ -20,8 +20,10 @@ data = {
   "locations": {id: {id, name, site_id, description, expected_lpm, geometry,
                      aliases: [normalized names], created}},
   "assignments": [{location_id, device_id, begin, end, source}],
-  "pumps": {id: {id, name, meter_entity, created}},
+  "pumps": {id: {id, name, meter_entity, flow_entity, pressure_entity,
+                 status_entity, created}},
   "pump_assignments": [{pump_id, target_kind, target_id, begin, end}],
+  "pump_connections": [{pump_id, device_id, role, meter_entity, begin, end}],
   "sites_seeded": bool,
 }
 begin None = since forever, end None = currently assigned. geometry is a
@@ -39,6 +41,13 @@ _NAME_RE = re.compile(r"^(.*?)\s*\((\d+)\)\s*$")
 
 _EDITABLE = ("name", "description", "expected_lpm", "lat", "lon")
 TARGET_KINDS = ("site", "location")
+# A pump's measuring entities (all HA entity ids of the pump integration,
+# read through the recorder only). meter_entity is required.
+PUMP_ENTITIES = ("meter_entity", "flow_entity", "pressure_entity", "status_entity")
+# consumer: uses the pump's water (tank fill, tap), one pump at a time, its
+#           optional meter counts in the balance.
+# monitor:  tells about the system (pressure, tank level), any number of pumps.
+ROLES = ("consumer", "monitor")
 
 
 def empty() -> dict[str, Any]:
@@ -48,6 +57,7 @@ def empty() -> dict[str, Any]:
         "assignments": [],
         "pumps": {},
         "pump_assignments": [],
+        "pump_connections": [],
         "sites_seeded": False,
     }
 
@@ -394,27 +404,110 @@ def subtree(data: dict[str, Any], site_id: str) -> set[str]:
 # --- pumps -------------------------------------------------------------
 
 
-def create_pump(data: dict[str, Any], name: Any, meter_entity: Any, now_iso: str) -> dict[str, Any]:
-    name = _clean_name(name)
-    if not isinstance(meter_entity, str) or not meter_entity.startswith("sensor."):
-        raise ValueError("meter_entity must be a sensor entity id")
-    pump = {"id": uuid.uuid4().hex, "name": name, "meter_entity": meter_entity, "created": now_iso}
+def create_pump(data: dict[str, Any], name: Any, now_iso: str, **entities: Any) -> dict[str, Any]:
+    pump: dict[str, Any] = {"id": uuid.uuid4().hex, "name": _clean_name(name), "created": now_iso}
+    pump.update(_pump_entities(entities, required=True))
     data["pumps"][pump["id"]] = pump
     return pump
 
 
+def update_pump(data: dict[str, Any], pump_id: Any, **fields: Any) -> dict[str, Any]:
+    pump = _get_pump(data, pump_id)
+    unknown = set(fields) - {"name", *PUMP_ENTITIES}
+    if unknown:
+        raise ValueError(f"unknown fields: {sorted(unknown)}")
+    if "name" in fields:
+        pump["name"] = _clean_name(fields["name"])
+    pump.update(_pump_entities({k: v for k, v in fields.items() if k in PUMP_ENTITIES}, required=False))
+    return pump
+
+
+def _pump_entities(fields: dict[str, Any], required: bool) -> dict[str, str | None]:
+    unknown = set(fields) - set(PUMP_ENTITIES)
+    if unknown:
+        raise ValueError(f"unknown fields: {sorted(unknown)}")
+    out: dict[str, str | None] = {}
+    for key in PUMP_ENTITIES:
+        if key not in fields and not required:
+            continue
+        value = fields.get(key) or None
+        if value is not None and (not isinstance(value, str) or not value.startswith("sensor.")):
+            raise ValueError(f"{key} must be a sensor entity id")
+        out[key] = value
+    if required and out.get("meter_entity") is None:
+        raise ValueError("meter_entity is required")
+    if "meter_entity" in out and out["meter_entity"] is None:
+        raise ValueError("meter_entity cannot be removed")
+    return out
+
+
+def connect_device(
+    data: dict[str, Any], pump_id: Any, device_id: Any, role: Any, meter_entity: Any, now_iso: str
+) -> None:
+    """Connect an HA device to a pump from now on. A consumer belongs to one
+    pump at a time: its open connection to another pump ends now."""
+    _get_pump(data, pump_id)
+    if not isinstance(device_id, str) or not device_id:
+        raise ValueError("device_id must be a non-empty string")
+    if role not in ROLES:
+        raise ValueError(f"role must be one of {ROLES}")
+    if meter_entity is not None and (not isinstance(meter_entity, str) or not meter_entity.startswith("sensor.")):
+        raise ValueError("meter_entity must be a sensor entity id")
+    # Like a first pump assignment, a device's first connection holds since
+    # forever; moving it later is dated.
+    first = not any(c["device_id"] == device_id for c in data["pump_connections"])
+    for c in data["pump_connections"]:
+        if c["device_id"] != device_id or c["end"] is not None:
+            continue
+        if c["pump_id"] == pump_id:
+            raise ValueError("device is already connected to this pump")
+        if role == "consumer" and c["role"] == "consumer":
+            c["end"] = now_iso
+    data["pump_connections"].append(
+        {
+            "pump_id": pump_id,
+            "device_id": device_id,
+            "role": role,
+            "meter_entity": meter_entity,
+            "begin": None if first else now_iso,
+            "end": None,
+        }
+    )
+
+
+def disconnect_device(data: dict[str, Any], pump_id: Any, device_id: Any, now_iso: str) -> None:
+    for c in data["pump_connections"]:
+        if c["pump_id"] == pump_id and c["device_id"] == device_id and c["end"] is None:
+            c["end"] = now_iso
+            return
+    raise ValueError("device is not connected to this pump")
+
+
 def assign_pump(data: dict[str, Any], pump_id: Any, target_kind: Any, target_id: Any, now_iso: str) -> None:
-    """Set the pump of a site or MP from now on (ends the target's previous one)."""
-    if not isinstance(pump_id, str) or pump_id not in data["pumps"]:
-        raise ValueError(f"unknown pump {pump_id!r}")
+    """Set the pump of a site or MP from now on (ends the target's previous one).
+
+    The first pump a target ever gets holds since forever (begin None): it
+    records how the farm is plumbed, which was true before anyone entered
+    it, so the balance can attribute the runs already recorded. Only a
+    change of pump is dated."""
+    _get_pump(data, pump_id)
     _get_target(data, target_kind, target_id)
     current = _open_pump(data, target_kind, target_id)
     if current is not None:
         if current["pump_id"] == pump_id:
             return
         current["end"] = now_iso
+    first = not any(
+        a["target_kind"] == target_kind and a["target_id"] == target_id for a in data["pump_assignments"]
+    )
     data["pump_assignments"].append(
-        {"pump_id": pump_id, "target_kind": target_kind, "target_id": target_id, "begin": now_iso, "end": None}
+        {
+            "pump_id": pump_id,
+            "target_kind": target_kind,
+            "target_id": target_id,
+            "begin": None if first else now_iso,
+            "end": None,
+        }
     )
 
 
@@ -458,6 +551,13 @@ def _get_target(data: dict[str, Any], kind: Any, target_id: Any) -> dict[str, An
     if kind == "location":
         return _get(data, target_id)
     raise ValueError(f"target_kind must be one of {TARGET_KINDS}")
+
+
+def _get_pump(data: dict[str, Any], pump_id: Any) -> dict[str, Any]:
+    pump: dict[str, Any] | None = data["pumps"].get(pump_id) if isinstance(pump_id, str) else None
+    if pump is None:
+        raise ValueError(f"unknown pump {pump_id!r}")
+    return pump
 
 
 def _get_site(data: dict[str, Any], site_id: Any) -> dict[str, Any]:
