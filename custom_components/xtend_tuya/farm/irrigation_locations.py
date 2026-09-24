@@ -32,14 +32,23 @@ from .contract import device_identifiers, discover_valves
 _LOGGER = logging.getLogger(__name__)
 
 STORE_KEY = "xtend_tuya.irrigation_locations"
-STORE_VERSION = 1
+STORE_VERSION = 2
 SAVE_DELAY_SEC = 10
 DOMAIN_KEY = "xtend_tuya_irrigation_locations"
 
 
+class _LocationsStore(Store[dict[str, Any]]):
+    async def _async_migrate_func(
+        self, old_major_version: int, old_minor_version: int, old_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        if old_major_version == 1:
+            return lm.migrate_v1(old_data)
+        raise NotImplementedError(old_major_version)
+
+
 class IrrigationLocations:
     def __init__(self, hass: HomeAssistant) -> None:
-        self._store: Store = Store(hass, STORE_VERSION, STORE_KEY)
+        self._store: Store[dict[str, Any]] = _LocationsStore(hass, STORE_VERSION, STORE_KEY)
         self.data: dict[str, Any] = lm.empty()
 
     async def async_load(self) -> None:
@@ -93,6 +102,20 @@ async def async_seed_once(hass: HomeAssistant) -> None:
         _LOGGER.debug("irrigation location seed failed", exc_info=True)
 
 
+async def async_seed_sites_once(hass: HomeAssistant) -> None:
+    """One site per Tuya room, once the rooms are known. Never raises."""
+    try:
+        locations = await async_get_locations(hass)
+        if locations.data["sites_seeded"]:
+            return
+        rooms = {d["tuya_device_id"]: d["room"] for d in discover_valves(hass)}
+        if lm.seed_sites(locations.data, rooms.get, _now_iso()):
+            _LOGGER.info("irrigation sites seeded from Tuya rooms: %d sites", len(locations.data["sites"]))
+            locations.async_schedule_save()
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("irrigation site seed failed", exc_info=True)
+
+
 def _stats(rows: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
     def window(days: int) -> list[dict[str, Any]]:
         cutoff = now - timedelta(days=days)
@@ -129,6 +152,7 @@ class XTIrrigationLocationsView(HomeAssistantView):
         # exist (then the seed saw no devices). No-op once the store holds
         # anything, so this is not the rejected "automation".
         await async_seed_once(hass)
+        await async_seed_sites_once(hass)
         runs = await async_get_store(hass)
         data = (await async_get_locations(hass)).data
         live = {d["tuya_device_id"]: d for d in discover_valves(hass)}
@@ -152,6 +176,16 @@ class XTIrrigationLocationsView(HomeAssistantView):
             }
 
         now = datetime.now().astimezone()
+        now_iso = now.isoformat()
+
+        def pump_info(location_id: str) -> dict[str, Any] | None:
+            found = lm.pump_for(data, location_id, now_iso)
+            if found is None:
+                return None
+            pump, kind, target_id = found
+            inherited = None if kind == "location" else target_id
+            return {**pump, "inherited_from": inherited}
+
         out = []
         for loc in data["locations"].values():
             assigned = [a for a in data["assignments"] if a["location_id"] == loc["id"]]
@@ -175,9 +209,14 @@ class XTIrrigationLocationsView(HomeAssistantView):
                         "source": a["source"],
                     }
                 )
+            lat, lon = lm.lat_lon(loc)
             out.append(
                 {
-                    **{k: loc[k] for k in ("id", "name", "description", "expected_lpm", "lat", "lon")},
+                    **{k: loc[k] for k in ("id", "name", "description", "expected_lpm")},
+                    "lat": lat,
+                    "lon": lon,
+                    "site_id": loc["site_id"],
+                    "pump": pump_info(loc["id"]),
                     "devices": devices,
                     "stats": _stats(lm.location_runs(data, loc["id"], runs.runs), now),
                 }
@@ -189,6 +228,10 @@ class XTIrrigationLocationsView(HomeAssistantView):
             {
                 "generated": datetime.now(timezone.utc).isoformat(),
                 "locations": out,
+                "sites": sorted(data["sites"].values(), key=lambda s: s["name"].casefold()),
+                "pumps": sorted(data["pumps"].values(), key=lambda p: p["name"].casefold()),
+                # Open pump assignments; the cards show which site or MP sets one.
+                "pump_assignments": [a for a in data["pump_assignments"] if a["end"] is None],
                 # Online valves only: offline ones are mostly retired hardware
                 # the seed never saw. They get their own group with the
                 # online/offline filter (Trello Sijuj2Dd).
@@ -226,6 +269,20 @@ class XTIrrigationLocationsView(HomeAssistantView):
                 lm.assign_device(data, _str(body, "device_id"), body.get("location_id"), now)
             elif action == "end_assignment":
                 lm.end_assignment(data, _str(body, "device_id"), body.get("location_id"), now)
+            elif action == "create_site":
+                result["site"] = lm.create_site(data, body.get("name"), body.get("parent_id"), now)
+            elif action == "update_site":
+                lm.update_site(data, body.get("id"), **{k: body[k] for k in ("name", "parent_id") if k in body})
+            elif action == "delete_site":
+                lm.delete_site(data, body.get("id"))
+            elif action == "set_location_site":
+                lm.set_location_site(data, body.get("location_id"), body.get("site_id"))
+            elif action == "create_pump":
+                result["pump"] = lm.create_pump(data, body.get("name"), body.get("meter_entity"), now)
+            elif action == "assign_pump":
+                lm.assign_pump(data, body.get("pump_id"), body.get("target_kind"), body.get("target_id"), now)
+            elif action == "end_pump_assignment":
+                lm.end_pump_assignment(data, body.get("target_kind"), body.get("target_id"), now)
             else:
                 return self.json({"error": f"unknown action {action!r}"}, 400)
         except ValueError as err:

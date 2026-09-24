@@ -105,7 +105,7 @@ async def async_setup_entry(
     recorder on each `async_get_events`, so adding/removing valves
     after setup is picked up automatically.
     """
-    from .irrigation_locations import XTIrrigationLocationsView, async_seed_once
+    from .irrigation_locations import XTIrrigationLocationsView, async_seed_once, async_seed_sites_once
     from .runs_store import async_get_store
 
     store = await async_get_store(hass)
@@ -145,6 +145,7 @@ async def async_setup_entry(
     async def _rearm(_now) -> None:
         store.track_devices(discover_valves(hass))
         await async_seed_once(hass)
+        await async_seed_sites_once(hass)
 
     entry.async_on_unload(
         async_track_time_interval(hass, _rearm, RUNS_STORE_REARM_INTERVAL)

@@ -371,6 +371,78 @@ Also planned: a notification
 store (whose sources include `CommandResult` and the checks), and the leak
 balance (pump meter via long-term statistics vs. the sum of runs).
 
+### 5.1 Farm model: storage, API, migration (groundwork for the UI)
+
+Designed 2026-09-24, before the UI rework (views: Overview/Valves,
+Sites, Calendar, ...). Everything stays in the existing store
+`xtend_tuya.irrigation_locations` (the key is frozen) and in
+`location_model.py` (pure stdlib, tested without HA).
+
+**Storage (store version 1 → 2, migrated in `Store._async_migrate_func`):**
+
+```
+data = {
+  "sites":     {id: {id, name, parent_id | None, geometry | None, created}},
+  "locations": {id: {id, name, site_id | None, description, expected_lpm,
+                     geometry | None, aliases, created}},       # = metering points
+  "assignments":      [{location_id, device_id, begin, end, source}],   # unchanged
+  "pumps":     {id: {id, name, meter_entity, created}},
+  "pump_assignments": [{pump_id, target_kind: "site" | "location",
+                        target_id, begin, end}],
+}
+```
+
+- `geometry` is a GeoJSON geometry object. The migration turns today's
+  `lat` / `lon` into a `Point`; the API keeps returning `lat` / `lon`,
+  derived from that Point.
+- `site_id` stays nullable: an MP without a site shows up under "No site".
+  The migration fills it wherever the seed can (see below).
+- `parent_id` must not create a cycle; that is checked in `update_site`.
+- A pump is a meter entity (m³ total, e.g.
+  `sensor.big_farm_1_fct_total_delivered_flow_mc`), nothing more for now.
+  Pump assignments are dated like valve assignments. Resolving the pump for an
+  MP at time t: the MP's own open assignment at t, else its site's, else up
+  the parent chain.
+
+**Rules enforced in `location_model.py`:**
+
+- `assign_device(device, mp)`: the MP's currently open valve, if it is
+  another one, is closed at `now` (valve exchange). The valve's own previous
+  MP is closed too (as today).
+- Existing double assignments (FG Fig Trees: 968 + 803) are left alone by
+  the migration. The rule only acts on new assignments. Simon decides whether
+  to split the MP.
+- Deleting a site or MP is not offered. Ending assignments is; empty sites
+  can be deleted. Nothing with history is ever deleted.
+
+**API (additive on `/api/xtend_tuya/irrigation_locations`):**
+
+- GET adds `sites` (flat list with `parent_id`; the cards build the tree),
+  `pumps`, plus `site_id` and `pump` (resolved now, with `inherited_from`)
+  per location.
+- POST adds the actions `create_site`, `update_site` (name, parent_id),
+  `delete_site` (empty only: no child sites, no MPs, no pump history),
+  `set_location_site`, `create_pump`, `assign_pump` / `end_pump_assignment`.
+  Geometry is stored but not editable yet (no map view is planned); an MP's
+  `lat` / `lon` edit writes its Point.
+- `/runs` (the `ha_sync` contract) is untouched. Adding `site_id` there waits
+  for the backend.
+
+**Seed (one time):**
+
+- One site per Tuya room of the MP's open valve (from `valve_room`). On prod
+  (2026-09-24) that gives 10 sites for 76 MPs, and no MP spans two rooms:
+  Big Farm (4), FF East (19), FF West (18), Farmhouse Farm (5),
+  Farmhouse Garden (13), Flatland+Citrus (3), Honeymoon (7),
+  Olive Terrace (3), RT+FV (Big Farm) (1), Workshop Trees (3).
+- The tree (e.g. FF East and FF West under Big Farm) and the pumps are not
+  guessed. They are set by hand in the Sites view.
+- `valve_room` is only known once the home walk has run, so the seed runs
+  on the first locations GET or 15-minute re-arm that sees a room, not in
+  the migration. An MP whose valve has no room keeps `site_id` None. Dev has
+  no rooms (fake cloud, no OpenAPI uid), so the seed is covered by the unit
+  test and checked on prod after the release.
+
 ### Contract L2 → L3 (current state, frozen)
 
 - Registry sensor `*_irrigation_timer_registry`, with attributes `device_id`,

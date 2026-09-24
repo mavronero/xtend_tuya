@@ -25,6 +25,8 @@ CLOSE_TIME_TRANSLATION_KEY = "close_time"
 # T3 valves have no start/end-time sensors; their completed runs come from
 # the counter_custom last-run sensor instead (runs_store listens on it).
 LAST_RUN_TRANSLATION_KEY = "last_watering_run"
+# Tuya room of the valve, on the registry sensor (filled by the home walk).
+ROOM_ATTR = "valve_room"
 
 # Entity-id suffix fallbacks for installs whose entities pre-date the
 # translation_key bump in 4.4.150 (registry stores translation_key only
@@ -109,6 +111,7 @@ def discover_valves(
                 "registry_entity_id": state.entity_id,
                 "registry_state": state,
                 "valve_name": str(valve_name),
+                "room": state.attributes.get(ROOM_ATTR) or None,
                 "volume_entity": roles.get("volume_entity"),
                 "start_entity": roles.get("start_entity"),
                 "end_entity": roles.get("end_entity"),
