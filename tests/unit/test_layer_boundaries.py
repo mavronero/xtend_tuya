@@ -1,0 +1,113 @@
+"""Layer boundaries (docs/architecture.md §1, principle 1), as a ratchet.
+
+Imports may only point down: farm (L3) -> contract names; valve drivers (L2)
+-> TuyaPort; transport (L1) knows neither. The code does not follow this yet,
+so KNOWN_VIOLATIONS lists every current violation explicitly. The test fails
+when a NEW violation appears, and also when a listed one disappears (delete it
+from the list), so the list always matches the code and only ever shrinks.
+"""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2] / "custom_components" / "xtend_tuya"
+
+# Layer membership by module path. Will move to package prefixes (farm/,
+# transport/, entity_parser/valves/) as the refactor steps land.
+FARM = {"calendar", "runs_store", "irrigation_locations", "location_model", "water_math", "frontend"}
+L2_PREFIX = "entity_parser.fdm5kw"
+
+FARM_MAY_IMPORT = FARM | {"const"}
+L2_FORBIDDEN_PREFIXES = ("multi_manager", "util", "lib")
+
+KNOWN_VIOLATIONS = {
+    # L1 -> farm / L2 (step 3: farm wires itself up; step 6: services move to the L2 driver)
+    ("__init__", "frontend"),
+    ("__init__", "entity_parser.fdm5kw.location_service"),
+    ("multi_manager.shared.services.services", "entity_parser.fdm5kw.control_service"),
+    ("multi_manager.shared.services.services", "entity_parser.fdm5kw.timer_service"),
+    # L2 -> L1 internals (steps 4-6: everything goes through TuyaPort)
+    ("entity_parser.fdm5kw.control_service", "multi_manager.multi_manager"),
+    ("entity_parser.fdm5kw.control_service", "multi_manager.shared.threading"),
+    ("entity_parser.fdm5kw.control_service", "util"),
+    ("entity_parser.fdm5kw.sensor", "multi_manager.multi_manager"),
+    ("entity_parser.fdm5kw.timer_service", "multi_manager.multi_manager"),
+    ("entity_parser.fdm5kw.timer_service", "multi_manager.shared.threading"),
+    ("entity_parser.fdm5kw.timer_service", "util"),
+    # L2 -> farm (step 5: the L2 codec gets its own counter math)
+    ("entity_parser.fdm5kw.sensor", "water_math"),
+}
+
+
+def _module_name(path: Path) -> str:
+    parts = path.relative_to(ROOT).with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts) or "__init__"
+
+
+def _is_module(dotted: str) -> bool:
+    base = ROOT.joinpath(*dotted.split("."))
+    return base.with_suffix(".py").is_file() or (base / "__init__.py").is_file()
+
+
+def _imports(path: Path) -> set[str]:
+    """Intra-package modules imported by `path`, resolved to real module files."""
+    own = _module_name(path)
+    package = own.split(".") if path.name == "__init__.py" else own.split(".")[:-1]
+    if own == "__init__":
+        package = []
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package[: len(package) - (node.level - 1)] if node.level > 1 else package
+                module = ".".join(base + ([node.module] if node.module else []))
+            elif node.module and node.module.startswith("custom_components.xtend_tuya"):
+                module = node.module.removeprefix("custom_components.xtend_tuya").lstrip(".")
+            else:
+                continue
+            for alias in node.names:
+                sub = f"{module}.{alias.name}" if module else alias.name
+                found.add(sub if _is_module(sub) else module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("custom_components.xtend_tuya."):
+                    found.add(alias.name.removeprefix("custom_components.xtend_tuya."))
+    return {m for m in found if m}
+
+
+def _layer(module: str) -> str:
+    if module in FARM:
+        return "L3"
+    if module.startswith(L2_PREFIX):
+        return "L2"
+    return "L1"
+
+
+def _violates(importer: str, imported: str) -> bool:
+    layer = _layer(importer)
+    if layer == "L3":
+        return imported.split(".")[0] not in FARM_MAY_IMPORT
+    if layer == "L2":
+        return imported in FARM or imported.startswith(L2_FORBIDDEN_PREFIXES)
+    return _layer(imported) != "L1"
+
+
+def current_violations() -> set[tuple[str, str]]:
+    return {
+        (_module_name(path), imported)
+        for path in ROOT.rglob("*.py")
+        for imported in _imports(path)
+        if _violates(_module_name(path), imported)
+    }
+
+
+def test_no_new_layer_violations():
+    new = current_violations() - KNOWN_VIOLATIONS
+    assert not new, f"new layer violations (imports must point down): {sorted(new)}"
+
+
+def test_known_violations_list_is_current():
+    fixed = KNOWN_VIOLATIONS - current_violations()
+    assert not fixed, f"fixed, remove from KNOWN_VIOLATIONS: {sorted(fixed)}"
