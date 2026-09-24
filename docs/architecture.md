@@ -340,6 +340,16 @@ Site                                   Metering point (MP, "location" in the API
   `irrigation_locations` and `location_id` / `location` in `/runs`, which is
   the frozen `ha_sync` contract. Those names only change together with the
   backend.
+- **Spatial data (PO, 2026-09-24):** sites and MPs will carry geometry so
+  they can be drawn on a map. Store it as an optional **GeoJSON geometry**
+  (RFC 7946, WGS84 lon/lat) per object: usually a `Point` for an MP, and a
+  `Polygon` / `MultiPolygon` for a site (a site may also have a `Point`, e.g.
+  as its label position). GeoJSON is the format maps (Leaflet, HA map, QGIS)
+  and PostGIS read directly. MPs already have `lat` / `lon` today; they become
+  a `Point`, and the API keeps `lat` / `lon` as fields derived from the Point
+  for compatibility. Nothing is built until a map view is planned
+  (principle 9). Only the storage shape is decided now, so the site model
+  does not have to be migrated a second time.
 - **Migration:** add `site_id`, and enforce one valve per MP. On prod
   (2026-09-24) one of 76 locations breaks that rule: "FG Fig Trees" has both
   968 and 803 open. Simon decides whether to split it into two MPs.
