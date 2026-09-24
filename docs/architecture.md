@@ -385,8 +385,8 @@ ever shrinks.
 |---|---|---|---|
 | 1 | Test hygiene: remove the duplicate `test_irrigation_locations_seed_once_from_names`; add `tests/unit/` to pytest; boundary ratchet (12 known violations) | none (tests only) | pytest green |
 | 2 | Golden snapshot tool `scripts/golden_snapshot.py` (capture/diff, `--at` pins all windows) | none (tooling) | dev and prod each captured twice: no difference; mutation check catches registry/card/service changes |
-| 3a | Fix: offline valves discovered (6b21fef3), released right after 3 | past runs of offline valves back in the calendar | dev diff: only additions |
 | 3 | Phase 0: `farm/` + `contract.py` (`discover_valves`, `device_identifiers`) + contract test | none | dev: snapshot diff empty (before/after with a restart in between), no errors; pytest 6 passed + 1 strict xfail |
+| 3a | Fix: offline valves discovered (6b21fef3), released right after 3 | past runs of offline valves back in the calendar | dev diff: only additions |
 | 4 | L1: `TuyaPort`, `transport/quota.py`, `transport/breaker.py` | breaker per hub | snapshot diff empty; driver/breaker unit tests |
 | 4b | L1: `HubSettings` + options flow step (plan, limit, mirror) | new options; defaults = today | snapshot diff empty; options flow test; prod without options = unchanged |
 | 5 | L2a: codecs out (pure) + `specs/` + conformance test; entities use the codecs | none | snapshot diff empty; codec tests on captures |
