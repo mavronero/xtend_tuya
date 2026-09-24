@@ -540,6 +540,20 @@ function buildOverviewView(
     type: "sections",
     max_columns: 3,
     sections: [
+      // The valve tiles come first (Uli 2026-09-24).
+      {
+        type: "grid",
+        column_span: 3,
+        cards: [
+          {
+            type: "grid",
+            columns: 4,
+            square: false,
+            cards: tiles,
+            layout_options: { grid_columns: 12, grid_rows: "auto" },
+          },
+        ],
+      },
       // New valves without a location go on top of the valve list so they
       // get assigned (Simon 2026-09-16); the card renders empty when there
       // are none.
@@ -563,8 +577,8 @@ function buildOverviewView(
       // full row. Without this every card on the overview renders
       // squeezed into the left third of the screen.
       //
-      // Order (ticket pkN0lM49, 4.4.209): the valve LIST with the
-      // timeline comes FIRST, the per-valve tile buttons after it.
+      // The valve list with the timeline follows the tiles and the
+      // unassigned valves.
       {
         type: "grid",
         column_span: 3,
@@ -574,19 +588,6 @@ function buildOverviewView(
             title: "Watering history & battery (all valves)",
             hours,
             valves: matrixValves,
-            layout_options: { grid_columns: 12, grid_rows: "auto" },
-          },
-        ],
-      },
-      {
-        type: "grid",
-        column_span: 3,
-        cards: [
-          {
-            type: "grid",
-            columns: 4,
-            square: false,
-            cards: tiles,
             layout_options: { grid_columns: 12, grid_rows: "auto" },
           },
         ],
