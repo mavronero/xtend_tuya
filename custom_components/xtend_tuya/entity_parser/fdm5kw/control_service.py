@@ -25,9 +25,7 @@ from __future__ import annotations
 import base64
 import logging
 
-from ...multi_manager.multi_manager import MultiManager
-from ...multi_manager.shared.threading import XTEventLoopProtector
-from ...util import get_all_multi_managers
+from ...transport.port import TuyaPort, port_for_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,9 +63,9 @@ def build_cyc_control_payload(value: int, flag: int) -> str:
     return base64.b64encode(payload).decode("ascii")
 
 
-def _is_t3(multi_manager: MultiManager, device_id: str) -> bool:
+def _is_t3(port: TuyaPort, device_id: str) -> bool:
     """T3 valve = carries the `cyc_control_0` DP (no `one_control`)."""
-    device = multi_manager.device_map.get(device_id)
+    device = port.device(device_id)
     return device is not None and device.status.get(CYC_CONTROL_CODE) is not None
 
 # one_control is a 6-byte payload: [lead, value(4-byte uint32 BE), flag].
@@ -112,34 +110,15 @@ def build_one_control_payload(lead: int, value: int, flag: int) -> str:
     return base64.b64encode(payload).decode("ascii")
 
 
-def _find_multi_manager(hass, device_id: str) -> MultiManager | None:
-    for mm in get_all_multi_managers(hass):
-        if mm.device_map.get(device_id):
-            return mm
-    return None
-
-
-async def _send_commands(
-    multi_manager: MultiManager, device_id: str, commands: list[dict]
-) -> bool:
-    try:
-        ok = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-            multi_manager.send_commands, device_id, commands
-        )
-    except Exception:
-        _LOGGER.exception("DP write failed for %s: %s", device_id, commands)
-        return False
-    if not ok:
-        _LOGGER.warning("DP write rejected for %s: %s", device_id, commands)
-        return False
-    return True
+async def _send_commands(port: TuyaPort, device_id: str, commands: list[dict]) -> bool:
+    return await port.send_dp(device_id, commands)
 
 
 async def _write_one_control(
-    multi_manager: MultiManager, device_id: str, b64_value: str
+    port: TuyaPort, device_id: str, b64_value: str
 ) -> bool:
     return await _send_commands(
-        multi_manager, device_id, [{"code": ONE_CONTROL_CODE, "value": b64_value}]
+        port, device_id, [{"code": ONE_CONTROL_CODE, "value": b64_value}]
     )
 
 
@@ -164,14 +143,14 @@ async def start_watering(hass, data: dict) -> bool:
     if mode not in ("duration", "volume"):
         raise ValueError(f"mode must be 'duration' or 'volume', got {mode!r}")
 
-    multi_manager = _find_multi_manager(hass, device_id)
-    if multi_manager is None:
-        _LOGGER.error("No multi_manager found for device %s", device_id)
+    port = port_for_device(hass, device_id)
+    if port is None:
+        _LOGGER.error("No hub found for device %s", device_id)
         return False
 
     # T3: cyc_control_0 duration run (no one_control DP). Volume-mode cyclic run
     # not captured — duration only for now.
-    if _is_t3(multi_manager, device_id):
+    if _is_t3(port, device_id):
         if mode == "volume":
             _LOGGER.warning(
                 "start_watering: T3 %s volume mode unverified, running as duration",
@@ -179,12 +158,12 @@ async def start_watering(hass, data: dict) -> bool:
             )
         b64 = build_cyc_control_payload(value, FLAG_START)
         return await _send_commands(
-            multi_manager, device_id, [{"code": CYC_CONTROL_CODE, "value": b64}]
+            port, device_id, [{"code": CYC_CONTROL_CODE, "value": b64}]
         )
 
     lead = LEAD_SINGLE_RUN if mode == "duration" else LEAD_VOLUME
     b64 = build_one_control_payload(lead, value, FLAG_START)
-    return await _write_one_control(multi_manager, device_id, b64)
+    return await _write_one_control(port, device_id, b64)
 
 
 async def stop_watering(hass, data: dict) -> bool:
@@ -196,23 +175,23 @@ async def stop_watering(hass, data: dict) -> bool:
     """
     device_id: str = data["device_id"]
 
-    multi_manager = _find_multi_manager(hass, device_id)
-    if multi_manager is None:
-        _LOGGER.error("No multi_manager found for device %s", device_id)
+    port = port_for_device(hass, device_id)
+    if port is None:
+        _LOGGER.error("No hub found for device %s", device_id)
         return False
 
     # T3: cyc_control_0 with flag byte[9]=0 stops the run.
-    if _is_t3(multi_manager, device_id):
+    if _is_t3(port, device_id):
         return await _send_commands(
-            multi_manager,
+            port,
             device_id,
             [{"code": CYC_CONTROL_CODE, "value": build_cyc_control_payload(0, FLAG_IDLE)}],
         )
 
     ok = await _write_one_control(
-        multi_manager,
+        port,
         device_id,
         build_one_control_payload(LEAD_SINGLE_RUN, 0, FLAG_IDLE),
     )
-    await _send_commands(multi_manager, device_id, [{"code": SWITCH_CODE, "value": False}])
+    await _send_commands(port, device_id, [{"code": SWITCH_CODE, "value": False}])
     return ok

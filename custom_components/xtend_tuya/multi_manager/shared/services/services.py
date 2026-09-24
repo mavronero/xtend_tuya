@@ -457,9 +457,11 @@ class ServiceManager:
     async def _handle_fdm5kw_clear_quota_lockout(
         self, event: XTEventData
     ) -> dict[str, Any] | None:
-        from ....entity_parser.fdm5kw.timer_service import clear_quota_lockout
+        from ....transport.port import all_ports
 
-        clear_quota_lockout()
+        for port in all_ports(self.hass):
+            port.clear_breaker()
+        LOGGER.warning("fdm5kw cloud-timer lockout cleared on all hubs")
         return {"success": True}
 
     async def _handle_fdm5kw_resync_timers(

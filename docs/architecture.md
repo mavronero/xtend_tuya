@@ -81,7 +81,7 @@ class TuyaPort(Protocol):                    # one instance per hub
     def owner_of(self, device_id: str) -> str | None
     async def send_dp(self, device_id: str, commands: list[DpCommand]) -> WriteResult
     async def cloud(self, method: str, path: str, body: object = None) -> CloudResult
-    def quota(self) -> QuotaState
+    def quota(self) -> QuotaState          # deferred until L3 needs it (principle 9)
 
 @dataclass(frozen=True)
 class DeviceSnapshot:
@@ -370,9 +370,9 @@ that touches its code, and not before, to avoid doing the work twice:
 | Step | Mirror tests → real imports into `tests/unit/` |
 |---|---|
 | 3 (farm) | none: `test_runs_store`, `test_location_model`, `test_water_math` already import |
-| 4 (L1) | `test_quota_accounting`, `test_device_ownership`, `test_multimap_mirror_guard`, `test_master_map_registry`, `test_device_map_swap`, `test_device_object_identity`, `test_detached_device_build`, `test_device_deepcopy`, `test_dp_collapse_trace`, `test_runtime_data_lookup`, `test_background_load`, `test_entry_hygiene` |
+| 4 (L1) | `test_quota_accounting`: the C6 part (note_cloud_write) is done in `tests/unit/`; the C10 part (alias fallback in send_commands) moves to step 8 |
 | 5–7 (L2) | `test_resync_guard`, `test_last_report_ts`, `entity_parser/fdm5kw/test_t3_decode.py` (→ codec tests) |
-| 8 | the rest (upstream transport fixes): `test_mq_supervisor`, `test_openapi_timeouts`, `test_sharing_api_retry`, `test_sharing_mq_overrides`, `test_smart_home_device_list_fallback`, `test_stall_sampler` |
+| 8 | the rest (multi_manager internals that the refactor does not touch): `test_device_ownership`, `test_multimap_mirror_guard`, `test_master_map_registry`, `test_device_map_swap`, `test_device_object_identity`, `test_detached_device_build`, `test_device_deepcopy`, `test_dp_collapse_trace`, `test_runtime_data_lookup`, `test_background_load`, `test_entry_hygiene`, `test_quota_accounting` (C10), `test_mq_supervisor`, `test_openapi_timeouts`, `test_sharing_api_retry`, `test_sharing_mq_overrides`, `test_smart_home_device_list_fallback`, `test_stall_sampler` |
 
 The boundary test (`tests/unit/test_layer_boundaries.py`) is a ratchet. Its
 `KNOWN_VIOLATIONS` lists every current violation (12 at step 1). It fails on a
@@ -387,7 +387,7 @@ ever shrinks.
 | 2 | Golden snapshot tool `scripts/golden_snapshot.py` (capture/diff, `--at` pins all windows) | none (tooling) | dev and prod each captured twice: no difference; mutation check catches registry/card/service changes |
 | 3 | Phase 0: `farm/` + `contract.py` (`discover_valves`, `device_identifiers`) + contract test | none | dev: snapshot diff empty (before/after with a restart in between), no errors; pytest 6 passed + 1 strict xfail |
 | 3a | Fix: offline valves discovered (6b21fef3), released right after 3 | past runs of offline valves back in the calendar | dev diff: only additions |
-| 4 | L1: `TuyaPort`, `transport/quota.py`, `transport/breaker.py` | breaker per hub | snapshot diff empty; driver/breaker unit tests |
+| 4 | L1: `TuyaPort` (`transport/port.py`), `transport/quota.py` (moved), `transport/breaker.py`; timer/control services use only the port | breaker per hub; after a trip, remaining cloud writes in the same call are skipped (were still sent); a 60001001 on a GET also trips | dev: snapshot diff empty; all 6 services on a QT-08W + T3 give identical results and DP effects; unit tests on the real port; ratchet 12 → 6 |
 | 4b | L1: `HubSettings` + options flow step (plan, limit, mirror) | new options; defaults = today | snapshot diff empty; options flow test; prod without options = unchanged |
 | 5 | L2a: codecs out (pure) + `specs/` + conformance test; entities use the codecs | none | snapshot diff empty; codec tests on captures |
 | 6 | L2b: profiles + `ValveDriver` on the port; services return `CommandResult` | optional response | snapshot diff empty; driver tests. **Prerequisite:** soak test of DP-only timers (below) |

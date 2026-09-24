@@ -17,12 +17,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import time
-from typing import Any
 
-from ...multi_manager.multi_manager import MultiManager
-from ...multi_manager.shared.threading import XTEventLoopProtector
-from ...util import get_all_multi_managers
+from ...transport.port import CloudResult, TuyaPort, port_for_device
 from .const import (
     DAYS_OF_WEEK,
     TUYA_ERR_DEVICE_POOL_QUOTA,
@@ -41,41 +37,6 @@ MODE_DURATION = 0
 MODE_VOLUME = 1
 
 _QUOTA_NOTIFICATION_ID = "xtend_tuya_fdm5kw_cloud_quota"
-
-# Circuit breaker — once the Tuya OpenAPI returns 60001001 ("controllable
-# device pool quota insufficient") we stop hitting the cloud for N hours
-# instead of burning calls that will all fail. The DP write path keeps
-# running so timers still fire locally. Cleared on HA process restart or
-# via `xtend_tuya.fdm5kw_clear_quota_lockout`. The quota is account-wide,
-# so the lockout is module-global (one quota hit on any device blocks all
-# cloud writes for every fdm5kw on the account).
-QUOTA_LOCKOUT_SECONDS = 6 * 3600
-_quota_lockout_until: float = 0.0
-
-
-def _is_quota_locked_out() -> bool:
-    return _quota_lockout_until > time.monotonic()
-
-
-def _engage_quota_lockout() -> None:
-    global _quota_lockout_until
-    _quota_lockout_until = time.monotonic() + QUOTA_LOCKOUT_SECONDS
-    _LOGGER.warning(
-        "fdm5kw cloud-timer lockout engaged for %d s after Tuya quota error",
-        QUOTA_LOCKOUT_SECONDS,
-    )
-
-
-def clear_quota_lockout() -> None:
-    """Manual reset hook for the cloud-timer circuit breaker.
-
-    Wired to `xtend_tuya.fdm5kw_clear_quota_lockout` service. Use after
-    bumping the Tuya IoT-Core plan or freeing devices so the next user
-    action retries the cloud write."""
-    global _quota_lockout_until
-    _quota_lockout_until = 0.0
-    _LOGGER.warning("fdm5kw cloud-timer lockout cleared")
-
 
 def _notify_quota_exceeded(hass) -> None:
     """Surface the controllable-device quota error as a persistent
@@ -96,22 +57,18 @@ def _notify_quota_exceeded(hass) -> None:
         _LOGGER.warning("Failed to emit persistent quota notification", exc_info=True)
 
 
-def _handle_cloud_response(hass, op: str, device_id: str, resp: Any) -> None:
-    """Inspect a Tuya OpenAPI response and surface known soft failures.
-    Returns nothing; logging is the contract. Callers continue regardless
-    so the DP write path stays best-effort."""
-    if not isinstance(resp, dict):
-        return
-    code = resp.get("code")
-    if code == TUYA_ERR_DEVICE_POOL_QUOTA:
+def _handle_cloud_result(hass, op: str, device_id: str, result: CloudResult) -> None:
+    """Surface known soft failures. The port has already paused this hub's
+    cloud writes; logging and the notification are the contract. Callers
+    continue regardless so the DP write path stays best-effort."""
+    if result.reason == "quota_exceeded":
         _LOGGER.warning(
             "Cloud %s for %s hit Tuya quota error %s — %s",
             op,
             device_id,
-            code,
+            TUYA_ERR_DEVICE_POOL_QUOTA,
             TUYA_ERR_DEVICE_POOL_QUOTA_MSG,
         )
-        _engage_quota_lockout()
         _notify_quota_exceeded(hass)
 
 
@@ -232,30 +189,10 @@ def build_delete_payload_t3(index: int) -> str:
     return base64.b64encode(bytes([0, index] + [0] * 10)).decode("ascii")
 
 
-def _is_t3(hass, device_id: str) -> bool:
+def _is_t3(port: TuyaPort, device_id: str) -> bool:
     """T3 valve = carries the `time_task_0` DP. Detected from live status."""
-    mm = _find_multi_manager(hass, device_id)
-    if mm is None:
-        return False
-    device = mm.device_map.get(device_id)
-    if device is None:
-        return False
-    return device.status.get(TIME_TASK_CODE_T3) is not None
-
-
-def _find_multi_manager(hass, device_id: str) -> MultiManager | None:
-    for mm in get_all_multi_managers(hass):
-        if mm.device_map.get(device_id):
-            return mm
-    return None
-
-
-def _find_iot_account(hass, device_id: str) -> Any:
-    """Return the OpenAPI (tuya_iot) account for the device, or None."""
-    for mm in get_all_multi_managers(hass):
-        if mm.device_map.get(device_id):
-            return mm.get_account_by_name("tuya_iot")
-    return None
+    device = port.device(device_id)
+    return device is not None and device.status.get(TIME_TASK_CODE_T3) is not None
 
 
 def _get_prior_slot(hass, device_id: str, slot: int) -> dict | None:
@@ -275,23 +212,12 @@ def _get_prior_slot(hass, device_id: str, slot: int) -> dict | None:
 
 
 async def _write_time_task(
-    multi_manager: MultiManager,
+    port: TuyaPort,
     device_id: str,
     b64_value: str,
     code: str = TIME_TASK_CODE,
 ) -> bool:
-    commands = [{"code": code, "value": b64_value}]
-    try:
-        ok = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-            multi_manager.send_commands, device_id, commands
-        )
-    except Exception:
-        _LOGGER.exception("time_task DP write failed for %s", device_id)
-        return False
-    if not ok:
-        _LOGGER.warning("time_task DP write rejected for %s", device_id)
-        return False
-    return True
+    return await port.send_dp(device_id, [{"code": code, "value": b64_value}])
 
 
 def _ha_timezone(hass) -> tuple[str, str]:
@@ -318,7 +244,7 @@ def _ha_timezone(hass) -> tuple[str, str]:
 
 async def _post_cloud_timer(
     hass,
-    account,
+    port: TuyaPort,
     device_id: str,
     hour: int,
     minute: int,
@@ -335,7 +261,7 @@ async def _post_cloud_timer(
     The GET response renders the same data with a different layout
     (timer rows nested under groups). Do NOT mirror the GET shape on POST.
     """
-    if _is_quota_locked_out():
+    if port.cloud_writes_blocked:
         _LOGGER.warning(
             "Cloud timer POST skipped for %s — quota lockout active (DP-only)",
             device_id,
@@ -374,34 +300,21 @@ async def _post_cloud_timer(
         }
     )
     url = f"/v1.0/devices/{device_id}/timers"
-    _LOGGER.warning(
-        "Cloud timer POST -> %s body=%s account_type=%s",
-        url,
-        body,
-        type(account).__name__,
-    )
-    try:
-        resp = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-            account.call_api, "POST", url, body
-        )
-    except Exception:
+    _LOGGER.warning("Cloud timer POST -> %s body=%s", url, body)
+    result = await port.cloud("POST", url, body)
+    _LOGGER.warning("Cloud timer POST response for %s: %s", device_id, result.payload)
+    _handle_cloud_result(hass, "POST", device_id, result)
+    if not result.ok:
         _LOGGER.warning(
-            "Cloud timer POST raised for %s (non-fatal)", device_id, exc_info=True
-        )
-        return
-    _LOGGER.warning("Cloud timer POST response for %s: %s", device_id, resp)
-    _handle_cloud_response(hass, "POST", device_id, resp)
-    if not resp or not resp.get("success"):
-        _LOGGER.warning(
-            "Cloud timer POST returned no success for %s: %s", device_id, resp
+            "Cloud timer POST returned no success for %s: %s", device_id, result.reason
         )
 
 
 async def _delete_cloud_timer_by_match(
-    hass, account, device_id: str, hour: int, minute: int, days_mask: int
+    hass, port: TuyaPort, device_id: str, hour: int, minute: int, days_mask: int
 ) -> None:
     """List cloud timers, delete the one matching time+days. Best-effort."""
-    if _is_quota_locked_out():
+    if port.cloud_writes_blocked:
         _LOGGER.warning(
             "Cloud timer GET/DELETE skipped for %s — quota lockout active",
             device_id,
@@ -415,22 +328,15 @@ async def _delete_cloud_timer_by_match(
         minute,
         days_mask,
     )
-    try:
-        resp = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-            account.call_api, "GET", list_url, None
-        )
-    except Exception:
-        _LOGGER.warning(
-            "Cloud timer list raised for %s (non-fatal)", device_id, exc_info=True
-        )
-        return
-    _LOGGER.warning("Cloud timer GET response for %s: %s", device_id, resp)
-    _handle_cloud_response(hass, "GET", device_id, resp)
-    if not resp or not resp.get("success"):
+    listing = await port.cloud("GET", list_url)
+    _LOGGER.warning("Cloud timer GET response for %s: %s", device_id, listing.payload)
+    _handle_cloud_result(hass, "GET", device_id, listing)
+    if not listing.ok:
         _LOGGER.warning(
             "Cloud timer GET non-success for %s, skipping delete", device_id
         )
         return
+    resp = listing.payload
     time_str = f"{hour:02d}:{minute:02d}"
     loops = _mask_to_loops(days_mask)
     matched = False
@@ -457,22 +363,13 @@ async def _delete_cloud_timer_by_match(
                     matched = True
                     del_url = f"/v1.0/devices/{device_id}/timers?group_id={group_id}"
                     _LOGGER.warning("Cloud timer DELETE -> %s", del_url)
-                    try:
-                        del_resp = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-                            account.call_api, "DELETE", del_url, None
-                        )
-                        _LOGGER.warning(
-                            "Cloud timer DELETE response for %s: %s",
-                            device_id,
-                            del_resp,
-                        )
-                        _handle_cloud_response(hass, "DELETE", device_id, del_resp)
-                    except Exception:
-                        _LOGGER.warning(
-                            "Cloud timer DELETE raised for %s (non-fatal)",
-                            device_id,
-                            exc_info=True,
-                        )
+                    deleted = await port.cloud("DELETE", del_url)
+                    _LOGGER.warning(
+                        "Cloud timer DELETE response for %s: %s",
+                        device_id,
+                        deleted.payload if deleted.payload is not None else deleted.reason,
+                    )
+                    _handle_cloud_result(hass, "DELETE", device_id, deleted)
     if not matched:
         _LOGGER.warning(
             "Cloud timer no entries matched %s for %s", time_str, device_id
@@ -489,9 +386,9 @@ async def set_timer(hass, data: dict) -> bool:
     days_mask: int = _days_to_mask(data.get("days"))
     enabled: bool = bool(data.get("enabled", True))
 
-    multi_manager = _find_multi_manager(hass, device_id)
-    if multi_manager is None:
-        _LOGGER.error("No multi_manager found for device %s", device_id)
+    port = port_for_device(hass, device_id)
+    if port is None:
+        _LOGGER.error("No hub found for device %s", device_id)
         return False
 
     # When this is an edit (not a create), look up the prior slot state so
@@ -504,7 +401,7 @@ async def set_timer(hass, data: dict) -> bool:
     # POST just uses the `time_task_0` function code. Verified 2026-07-15:
     # POST /timers with code time_task_0 renders back on GET; DP write applies
     # and the cloud doesn't roll it back.
-    is_t3 = _is_t3(hass, device_id)
+    is_t3 = _is_t3(port, device_id)
     task_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
     if is_t3:
         b64 = build_time_task_payload_t3(
@@ -514,20 +411,18 @@ async def set_timer(hass, data: dict) -> bool:
         b64 = build_time_task_payload(
             slot, mode, value, hour, minute, days_mask, enabled
         )
-    if not await _write_time_task(multi_manager, device_id, b64, code=task_code):
+    if not await _write_time_task(port, device_id, b64, code=task_code):
         return False
 
-    account = _find_iot_account(hass, device_id)
-    if account is None:
+    if not port.has_cloud_account:
         _LOGGER.warning(
             "set_timer: no tuya_iot account for %s (DP write only, cloud may roll back)",
             device_id,
         )
         return True
     _LOGGER.warning(
-        "set_timer: tuya_iot account found for %s (type=%s), proceeding to cloud write",
+        "set_timer: tuya_iot account found for %s, proceeding to cloud write",
         device_id,
-        type(account).__name__,
     )
 
     if prior is not None:
@@ -539,7 +434,7 @@ async def set_timer(hass, data: dict) -> bool:
         )
         await _delete_cloud_timer_by_match(
             hass,
-            account,
+            port,
             device_id,
             int(prior.get("hour", hour)),
             int(prior.get("minute", minute)),
@@ -565,31 +460,24 @@ async def set_timer(hass, data: dict) -> bool:
         return True
 
     await _post_cloud_timer(
-        hass, account, device_id, hour, minute, days_mask, mode, value, enabled,
+        hass, port, device_id, hour, minute, days_mask, mode, value, enabled,
         code=task_code,
     )
     return True
 
 
-async def _get_cloud_timer_keys(account, device_id: str) -> set[tuple[str, str]] | None:
+async def _get_cloud_timer_keys(port: TuyaPort, device_id: str) -> set[tuple[str, str]] | None:
     """GET the cloud timer registry and return the set of (time_str, loops)
     keys it holds. Read-only — draws the 26k/mo API-call pool, NOT the
     10-controllable-device cap. Returns None if the GET failed (so callers
     don't mistake an API failure for an empty cloud registry and wipe every
     HA slot as a ghost)."""
     list_url = f"/v1.0/devices/{device_id}/timers"
-    try:
-        resp = await XTEventLoopProtector.execute_out_of_event_loop_and_return(
-            account.call_api, "GET", list_url, None
-        )
-    except Exception:
-        _LOGGER.warning(
-            "resync: cloud timer GET raised for %s (non-fatal)", device_id, exc_info=True
-        )
+    listing = await port.cloud("GET", list_url)
+    if not listing.ok:
+        _LOGGER.warning("resync: cloud timer GET non-success for %s: %s", device_id, listing.reason)
         return None
-    if not resp or not resp.get("success"):
-        _LOGGER.warning("resync: cloud timer GET non-success for %s: %s", device_id, resp)
-        return None
+    resp = listing.payload
     keys: set[tuple[str, str]] = set()
     for category in resp.get("result", []):
         for group in category.get("groups", []):
@@ -627,12 +515,11 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     cap; a write happens only per live orphan found. User-triggered per valve,
     so it can't runaway the quota the way a periodic sweep would."""
     device_id: str = data["device_id"]
-    is_t3 = _is_t3(hass, device_id)
-
-    account = _find_iot_account(hass, device_id)
-    if account is None:
+    port = port_for_device(hass, device_id)
+    if port is None or not port.has_cloud_account:
         _LOGGER.warning("resync: no tuya_iot account for %s — cannot reconcile", device_id)
         return {"success": False, "error": "no_cloud_account"}
+    is_t3 = _is_t3(port, device_id)
 
     from .sensor import Fdm5kwTimerRegistryEntity
 
@@ -645,7 +532,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
     if slots is None:
         return {"success": False, "error": "no_registry_slots"}
 
-    cloud_keys = await _get_cloud_timer_keys(account, device_id)
+    cloud_keys = await _get_cloud_timer_keys(port, device_id)
     if cloud_keys is None:
         return {"success": False, "error": "cloud_get_failed"}
 
@@ -667,8 +554,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
         )
         return {"success": False, "error": "cloud_registry_empty"}
 
-    multi_manager = _find_multi_manager(hass, device_id)
-    locked_out = _is_quota_locked_out()
+    locked_out = port.cloud_writes_blocked
 
     checked = orphans_cleared = orphans_deferred = 0
     for slot_idx, s in list(slots.items()):
@@ -688,7 +574,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
         # Live orphan — fires offline with no cloud entry. Needs a device slot
         # clear (control write). Skip if quota-locked; the write would just
         # fail, so report it deferred rather than burn a call.
-        if locked_out or multi_manager is None:
+        if locked_out:
             orphans_deferred += 1
             _LOGGER.warning(
                 "resync: live orphan slot %d on %s left in place (quota lockout / no manager)",
@@ -701,7 +587,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
         )
         clear_code = TIME_TASK_CODE_T3 if is_t3 else TIME_TASK_CODE
         if await _write_time_task(
-            multi_manager, device_id, clear_payload, code=clear_code
+            port, device_id, clear_payload, code=clear_code
         ):
             slots[slot_idx] = None
             orphans_cleared += 1
@@ -729,9 +615,9 @@ async def delete_timer(hass, data: dict) -> bool:
     device_id: str = data["device_id"]
     slot: int = int(data["slot"])
 
-    multi_manager = _find_multi_manager(hass, device_id)
-    if multi_manager is None:
-        _LOGGER.error("No multi_manager found for device %s", device_id)
+    port = port_for_device(hass, device_id)
+    if port is None:
+        _LOGGER.error("No hub found for device %s", device_id)
         return False
 
     # Capture the slot's current time/days BEFORE we wipe the DP so we can
@@ -743,18 +629,17 @@ async def delete_timer(hass, data: dict) -> bool:
 
     # T3 uses the indexed 12-byte clear + time_task_0 code; the cloud
     # delete-by-match below is code-agnostic (matches on time/loops).
-    is_t3 = _is_t3(hass, device_id)
+    is_t3 = _is_t3(port, device_id)
     if is_t3:
         b64 = build_delete_payload_t3(slot)
         task_code = TIME_TASK_CODE_T3
     else:
         b64 = build_delete_payload(slot)
         task_code = TIME_TASK_CODE
-    if not await _write_time_task(multi_manager, device_id, b64, code=task_code):
+    if not await _write_time_task(port, device_id, b64, code=task_code):
         return False
 
-    account = _find_iot_account(hass, device_id)
-    if account is None:
+    if not port.has_cloud_account:
         _LOGGER.warning(
             "delete_timer: no tuya_iot account for %s (DP-only delete)", device_id
         )
@@ -769,7 +654,7 @@ async def delete_timer(hass, data: dict) -> bool:
 
     await _delete_cloud_timer_by_match(
         hass,
-        account,
+        port,
         device_id,
         int(prior.get("hour", 0)),
         int(prior.get("minute", 0)),

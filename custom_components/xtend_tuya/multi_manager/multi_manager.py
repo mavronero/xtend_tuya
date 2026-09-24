@@ -84,7 +84,7 @@ from .shared.storage.storage_manager import (
     XTStorageManager,
 )
 import custom_components.xtend_tuya.multi_manager.shared.data_entry.shared_data_entry as shared_data_entry
-from .shared.quota import ControllableQuotaTracker
+from ..transport.quota import ControllableQuotaTracker
 
 
 # Any write under /v1.0/devices/<id>/ costs one unit of the Tuya project's
@@ -126,6 +126,11 @@ class MultiManager(TuyaManager):
         # Per-hub OpenAPI controllable-device quota tracker (created in
         # setup_entry only for hubs that have a tuya_iot account).
         self.controllable_quota: ControllableQuotaTracker | None = None
+        # Device drivers (L2) reach this hub only through its TuyaPort. Local
+        # import: transport.port -> util -> multi_manager would cycle.
+        from ..transport.port import CloudTuyaPort
+
+        self.port = CloudTuyaPort(self)
         self.master_device_map: XTDeviceMap = XTDeviceMap({})
         self.is_ready_for_messages = False
         self.pending_messages: list[tuple[str, dict]] = []

@@ -1,7 +1,8 @@
-"""Self-check for controllable-quota accounting (audit C6/C10/C11).
+"""Self-check for the alias fallback in MultiManager.send_commands (audit C10).
 
-Standalone (no Home Assistant import) — mirrors MultiManager.note_cloud_write
-and the alias fallback in MultiManager.send_commands.
+Standalone mirror (no Home Assistant import). Converted to a real-import test
+in step 8 (docs/architecture.md §7); the note_cloud_write part (C6) already
+runs against the real code in tests/unit/test_quota_accounting.py.
 
 A Tuya Trial project can control 10 distinct devices per calendar month. The
 tracker only counted devices that went through send_commands, so every cloud
@@ -11,31 +12,6 @@ in HA's books and the pool ran out unannounced — and a command counted as
 
 Run: `python tests/test_quota_accounting.py`
 """
-
-import re
-
-DEVICE_WRITE_URL = re.compile(r"^/v[0-9.]+/devices/([^/?]+)/")
-
-OK = {"success": True}
-REFUSED = {"success": False, "code": 60001001, "msg": "exceed control limit"}
-
-
-class Quota:
-    def __init__(self):
-        self.devices = set()
-
-    def record(self, device_id):
-        self.devices.add(device_id)
-
-
-def note_cloud_write(quota, method, url, response):
-    """Mirror of MultiManager.note_cloud_write."""
-    if method == "GET" or quota is None:
-        return
-    if not isinstance(response, dict) or response.get("success") is not True:
-        return
-    if match := DEVICE_WRITE_URL.match(url):
-        quota.record(match.group(1))
 
 
 def alias_fallback(send, accounts, commands):
@@ -58,22 +34,6 @@ def alias_fallback(send, accounts, commands):
 
 
 def demo():
-    q = Quota()
-    # A cloud timer write counts the valve, once, whichever verb it used.
-    note_cloud_write(q, "POST", "/v1.0/devices/bf01/timers", OK)
-    note_cloud_write(q, "DELETE", "/v1.0/devices/bf01/timers?group_id=7", OK)
-    assert q.devices == {"bf01"}
-    note_cloud_write(q, "POST", "/v1.0/devices/bf02/commands", OK)
-    assert q.devices == {"bf01", "bf02"}
-
-    # Reads are free, and a refused write must not burn a unit.
-    note_cloud_write(q, "GET", "/v1.0/devices/bf03/timers", OK)
-    note_cloud_write(q, "POST", "/v1.0/devices/bf03/timers", REFUSED)
-    note_cloud_write(q, "POST", "/v1.0/devices/bf03/timers", None)
-    # Neither does a write that is not addressed to a device.
-    note_cloud_write(q, "POST", "/v1.0/homes/42/rooms", OK)
-    assert "bf03" not in q.devices and len(q.devices) == 2
-
     # C10: the first alias attempt succeeding must not trigger a second send
     # to the same valve, nor have its success overwritten.
     def send(acc, cmd, reverse, calls):
