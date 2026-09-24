@@ -14,17 +14,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2] / "custom_components" / "xtend_tuya"
 
-# Layer membership by module path. Will move to package prefixes (farm/,
-# transport/, entity_parser/valves/) as the refactor steps land.
-FARM = {"calendar", "runs_store", "irrigation_locations", "location_model", "water_math", "frontend"}
+# Layer membership by module path. transport/ and entity_parser/valves/ take
+# over as the refactor steps land. `calendar` is the farm's platform shim.
+FARM_PREFIX = "farm"
+FARM_SHIMS = {"calendar"}
 L2_PREFIX = "entity_parser.fdm5kw"
 
-FARM_MAY_IMPORT = FARM | {"const"}
+FARM_MAY_IMPORT = {FARM_PREFIX, "const"}
 L2_FORBIDDEN_PREFIXES = ("multi_manager", "util", "lib")
 
 KNOWN_VIOLATIONS = {
-    # L1 -> farm / L2 (step 3: farm wires itself up; step 6: services move to the L2 driver)
-    ("__init__", "frontend"),
+    # L1 -> farm / L2 (farm wires itself up once it is its own integration; step 6: services move to the L2 driver)
+    ("__init__", "farm.frontend"),
     ("__init__", "entity_parser.fdm5kw.location_service"),
     ("multi_manager.shared.services.services", "entity_parser.fdm5kw.control_service"),
     ("multi_manager.shared.services.services", "entity_parser.fdm5kw.timer_service"),
@@ -37,7 +38,7 @@ KNOWN_VIOLATIONS = {
     ("entity_parser.fdm5kw.timer_service", "multi_manager.shared.threading"),
     ("entity_parser.fdm5kw.timer_service", "util"),
     # L2 -> farm (step 5: the L2 codec gets its own counter math)
-    ("entity_parser.fdm5kw.sensor", "water_math"),
+    ("entity_parser.fdm5kw.sensor", "farm.water_math"),
 }
 
 
@@ -77,8 +78,12 @@ def _imports(path: Path) -> set[str]:
     return {m for m in found if m}
 
 
+def _in_farm(module: str) -> bool:
+    return module in FARM_SHIMS or module == FARM_PREFIX or module.startswith(FARM_PREFIX + ".")
+
+
 def _layer(module: str) -> str:
-    if module in FARM:
+    if _in_farm(module):
         return "L3"
     if module.startswith(L2_PREFIX):
         return "L2"
@@ -90,7 +95,7 @@ def _violates(importer: str, imported: str) -> bool:
     if layer == "L3":
         return imported.split(".")[0] not in FARM_MAY_IMPORT
     if layer == "L2":
-        return imported in FARM or imported.startswith(L2_FORBIDDEN_PREFIXES)
+        return _in_farm(imported) or imported.startswith(L2_FORBIDDEN_PREFIXES)
     return _layer(imported) != "L1"
 
 

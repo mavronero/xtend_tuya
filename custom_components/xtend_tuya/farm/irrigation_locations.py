@@ -26,7 +26,8 @@ from homeassistant.helpers.http import HomeAssistantView
 from homeassistant.helpers.storage import Store
 
 from . import location_model as lm
-from .const import DOMAIN, DOMAIN_ORIG
+from ..const import DOMAIN
+from .contract import device_identifiers, discover_valves
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,7 +69,6 @@ async def async_seed_once(hass: HomeAssistant) -> None:
     its re-arm (the retry covers a setup that ran before the valves were
     known). Never raises: those callers must not break."""
     try:
-        from .calendar import _iter_fdm5kw_devices
         from .runs_store import async_get_store
 
         locations = await async_get_locations(hass)
@@ -81,7 +81,7 @@ async def async_seed_once(hass: HomeAssistant) -> None:
             return rows[0]["start"] if rows else None
 
         devices = [
-            (d["tuya_device_id"], d["valve_name"]) for d in _iter_fdm5kw_devices(hass)
+            (d["tuya_device_id"], d["valve_name"]) for d in discover_valves(hass)
         ]
         if lm.seed_from_names(locations.data, devices, _now_iso(), first_run_start):
             _LOGGER.info(
@@ -123,7 +123,6 @@ class XTIrrigationLocationsView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
-        from .calendar import _iter_fdm5kw_devices
         from .runs_store import async_get_store
 
         # Seed-once retry: calendar setup can run before the valve entities
@@ -132,13 +131,11 @@ class XTIrrigationLocationsView(HomeAssistantView):
         await async_seed_once(hass)
         runs = await async_get_store(hass)
         data = (await async_get_locations(hass)).data
-        live = {d["tuya_device_id"]: d for d in _iter_fdm5kw_devices(hass)}
+        live = {d["tuya_device_id"]: d for d in discover_valves(hass)}
         dev_reg = dr.async_get(hass)
 
         def device_info(device_id: str) -> dict[str, Any]:
-            ha_dev = dev_reg.async_get_device(
-                identifiers={(DOMAIN, device_id), (DOMAIN_ORIG, device_id)}
-            )
+            ha_dev = dev_reg.async_get_device(identifiers=device_identifiers(device_id))
             d = live.get(device_id)
             name = d["valve_name"] if d else (
                 (ha_dev.name_by_user or ha_dev.name) if ha_dev else None

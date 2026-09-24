@@ -42,7 +42,7 @@ def _enumerate_card_files() -> list[tuple[str, int]]:
     dir. Called via `async_add_executor_job` so the directory scan
     doesn't block the event loop on slow disks (e.g. SD-card HA OS
     installs); HA's loop-detector flagged the previous in-loop scandir."""
-    cards_dir = Path(__file__).parent / "cards"
+    cards_dir = Path(__file__).parent.parent / "cards"
     if not cards_dir.is_dir():
         return []
     entries: list[tuple[str, int]] = []
@@ -57,7 +57,7 @@ def _enumerate_card_files() -> list[tuple[str, int]]:
 
 async def async_register_cards(hass: HomeAssistant) -> None:
     """Register bundled card JS as static paths + frontend module URLs."""
-    cards_dir = Path(__file__).parent / "cards"
+    cards_dir = Path(__file__).parent.parent / "cards"
     entries = await hass.async_add_executor_job(_enumerate_card_files)
     if not entries:
         return

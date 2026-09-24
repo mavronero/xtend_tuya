@@ -385,7 +385,7 @@ ever shrinks.
 |---|---|---|---|
 | 1 | Test hygiene: remove the duplicate `test_irrigation_locations_seed_once_from_names`; add `tests/unit/` to pytest; boundary ratchet (12 known violations) | none (tests only) | pytest green |
 | 2 | Golden snapshot tool `scripts/golden_snapshot.py` (capture/diff, `--at` pins all windows) | none (tooling) | dev and prod each captured twice: no difference; mutation check catches registry/card/service changes |
-| 3 | Phase 0: `farm/` + `contract.py` | none | snapshot diff empty |
+| 3 | Phase 0: `farm/` + `contract.py` (`discover_valves`, `device_identifiers`) + contract test | none | dev: snapshot diff empty (before/after with a restart in between), no errors; pytest 6 passed + 1 strict xfail |
 | 4 | L1: `TuyaPort`, `transport/quota.py`, `transport/breaker.py` | breaker per hub | snapshot diff empty; driver/breaker unit tests |
 | 4b | L1: `HubSettings` + options flow step (plan, limit, mirror) | new options; defaults = today | snapshot diff empty; options flow test; prod without options = unchanged |
 | 5 | L2a: codecs out (pure) + `specs/` + conformance test; entities use the codecs | none | snapshot diff empty; codec tests on captures |
@@ -409,6 +409,19 @@ which is simpler.
    gets 401, including on prod. The golden snapshot records the status (401).
    Decide separately: remove the feed (recommended, since nobody noticed it
    was missing), or fix it in its own release. Not inside a refactor step.
+
+6. **Offline valves are invisible to the farm layer** (found by the contract
+   test in step 3). An offline valve's registry sensor is `unavailable`, HA
+   strips its attributes including `device_id`, and `discover_valves` skips
+   it. On prod (2026-09-24) that was 32 of 111 valves, including 973 and 964
+   from the "stopped watering" alert. Their past runs disappear from the
+   calendar. Fix: resolve the Tuya id through entity registry → device
+   registry instead of the state attribute. It is a behaviour change, so it
+   ships as its own release. `tests/ha/test_contract.py::test_offline_valves_are_discovered`
+   is `xfail(strict)` until then.
+7. `dev_reg.async_get_device(identifiers=…)` is deprecated and stops working
+   in **HA 2027.8** (contract.py, calendar, irrigation_locations). Switch to
+   `async_get_device_by_identifier` along with the fix in item 6.
 
 ## 10. Soak test: DP-only timers (before step 6, prod action, needs approval)
 

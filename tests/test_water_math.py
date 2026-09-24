@@ -1,7 +1,7 @@
 """Liters counters must read the same whether they reset or run as odometers.
 
 Standalone: python3 tests/test_water_math.py
-Loads custom_components/xtend_tuya/water_math.py by path — no HA needed.
+Loads custom_components/xtend_tuya/farm/water_math.py by path — no HA needed.
 
 Regression guard for audit D3/R16: the old absolute 9000 L ceiling latched on
 the 14 QT-08W whose cur_cap is a lifetime odometer (up to 171 904 L), leaving
@@ -19,6 +19,7 @@ _PATH = os.path.join(
     "..",
     "custom_components",
     "xtend_tuya",
+    "farm",
     "water_math.py",
 )
 _spec = importlib.util.spec_from_file_location("water_math", _PATH)

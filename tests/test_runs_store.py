@@ -66,7 +66,7 @@ for _name, _mod in (
 
 # --- load water_math + runs_store as a package, bypassing __init__.py -----
 _DIR = os.path.join(
-    os.path.dirname(__file__), "..", "custom_components", "xtend_tuya"
+    os.path.dirname(__file__), "..", "custom_components", "xtend_tuya", "farm"
 )
 _pkg = types.ModuleType("xt")
 _pkg.__path__ = [_DIR]

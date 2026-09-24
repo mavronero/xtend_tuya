@@ -128,7 +128,7 @@ async def test_irrigation_locations_seed_once_from_names(hass, hass_client, capl
     loc = body["locations"][0]
     resp = await client.post("/api/xtend_tuya/irrigation_locations", json={"action": "update_location", "id": loc["id"], "name": "Renamed Plot"})
     assert resp.status == 200, await resp.text()
-    from custom_components.xtend_tuya.irrigation_locations import async_seed_once
+    from custom_components.xtend_tuya.farm.irrigation_locations import async_seed_once
 
     await async_seed_once(hass)
     body2 = await (await client.get("/api/xtend_tuya/irrigation_locations")).json()

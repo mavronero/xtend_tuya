@@ -232,7 +232,7 @@ class RunsStore:
 
     def track_devices(self, devices: list[dict[str, Any]]) -> None:
         """(Re)arm the state listeners for the given device records
-        (as produced by calendar._iter_fdm5kw_devices)."""
+        (as produced by contract.discover_valves)."""
         end_map: dict[str, dict[str, Any]] = {}
         counter_map: dict[str, dict[str, Any]] = {}
         vol_map: dict[str, dict[str, Any]] = {}

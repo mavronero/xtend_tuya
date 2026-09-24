@@ -33,7 +33,7 @@ from ...ha_tuya_integration.tuya_integration_imports import (
     TuyaDPCodeRawWrapper,
     TuyaRawTypeInformation,
 )
-from ...water_math import plausible_delta
+from ...farm.water_math import plausible_delta
 from ...const import XTDPCode
 from . import location_service
 

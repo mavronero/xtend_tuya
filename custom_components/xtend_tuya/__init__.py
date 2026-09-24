@@ -46,7 +46,7 @@ from .entity import (
 from .multi_manager.shared.tuya_patches.tuya_patches import (
     XTTuyaPatcher,
 )
-from .frontend import async_register_cards
+from .farm.frontend import async_register_cards
 from .multi_manager.shared.debug import stall_sampler
 import socket
 

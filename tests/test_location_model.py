@@ -1,7 +1,7 @@
 """Irrigation location history must follow the place, not the valve.
 
 Standalone: python3 tests/test_location_model.py
-Loads custom_components/xtend_tuya/location_model.py by path — no HA needed.
+Loads custom_components/xtend_tuya/farm/location_model.py by path — no HA needed.
 """
 
 import importlib.util
@@ -12,6 +12,7 @@ _PATH = os.path.join(
     "..",
     "custom_components",
     "xtend_tuya",
+    "farm",
     "location_model.py",
 )
 _spec = importlib.util.spec_from_file_location("location_model", _PATH)
