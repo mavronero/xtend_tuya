@@ -595,7 +595,10 @@ export class IrrigationCalendarCard extends LitElement {
           const evs = byKey.get(v.registry_entity) ?? [];
           const problem = evs.some(
             (e) =>
-              e.kind === "missed" || e.kind === "unplanned" || e.end - e.start > 4 * HOUR_MS
+              e.kind === "missed" ||
+              e.kind === "unplanned" ||
+              isDry(e) || // opened, but no water went through (977, 25.09.)
+              e.end - e.start > 4 * HOUR_MS
           );
           return { v, evs, problem };
         })
