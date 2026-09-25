@@ -93,6 +93,8 @@ class RunsStore:
         self._store: Store = Store(hass, STORE_VERSION, STORE_KEY)
         self.runs: dict[str, list[dict[str, Any]]] = {}
         self.backfilled = False
+        # Recorder backfill generation already applied (see BACKFILL_VERSION).
+        self.backfill_version = 0
         self._backfill_started = False
         self._unsub: list[Callable[[], None]] = []
         # entity_id -> device record (end sensor routing table)
@@ -112,6 +114,7 @@ class RunsStore:
         data = await self._store.async_load() or {}
         self.runs = data.get("runs", {})
         self.backfilled = bool(data.get("backfilled"))
+        self.backfill_version = int(data.get("backfill_version") or (1 if self.backfilled else 0))
         # One-time repair of rows recorded before add_run deduped by start
         # (2026-09-25 data check: 189 copies, 170 of them one valve's).
         removed = 0
@@ -123,7 +126,7 @@ class RunsStore:
             self.async_schedule_save()
 
     def _data(self) -> dict[str, Any]:
-        return {"runs": self.runs, "backfilled": self.backfilled}
+        return {"runs": self.runs, "backfilled": self.backfilled, "backfill_version": self.backfill_version}
 
     def async_schedule_save(self) -> None:
         self._store.async_delay_save(self._data, SAVE_DELAY_SEC)
@@ -274,6 +277,7 @@ class RunsStore:
             if d.get("volume_entity"):
                 vol_map[d["volume_entity"]] = d
         c_added = set(counter_map) - set(self._counter_entity_to_device)
+        e_added = set(end_map) - set(self._end_entity_to_device)
         self._end_entity_to_device = end_map
         self._counter_entity_to_device = counter_map
         self._vol_entity_to_device = vol_map
@@ -298,6 +302,24 @@ class RunsStore:
         for entity_id in c_added:
             if state := self.hass.states.get(entity_id):
                 self._record_counter_csv(counter_map[entity_id], state.state)
+        # Same for start/end valves: the sensors hold the last run (restored
+        # or re-read at startup), which a run ending while HA was down or
+        # before the listener was armed would otherwise lose. add_run makes
+        # the replay idempotent.
+        now = datetime.now().astimezone()
+        for entity_id in e_added:
+            dev = end_map[entity_id]
+            end_state = self.hass.states.get(entity_id)
+            start_state = self.hass.states.get(dev["start_entity"])
+            end = _parse_iso(end_state.state) if end_state else None
+            start = _parse_iso(start_state.state) if start_state else None
+            if (
+                start is not None
+                and end is not None
+                and start < end <= now
+                and (end - start).total_seconds() <= MAX_RUN_SECONDS
+            ):
+                self._record_end(dev, start, end)
 
     @callback
     def _on_end_change(self, event: Event) -> None:
@@ -310,9 +332,22 @@ class RunsStore:
         if end is None:
             return
         now = datetime.now().astimezone()
-        # Pre-reported SCHEDULED close (arrives at run start, lies in the
-        # future) — ignore; the real close report follows at actual close.
-        if (end - now).total_seconds() > MAX_FUTURE_SLACK_SEC:
+        if end > now:
+            # Pre-reported SCHEDULED close: the firmware writes it the moment
+            # a run starts. A valve that then closes exactly on schedule
+            # reports the SAME value again, which fires no state change, so
+            # waiting for "the real close report" lost the run: about 149
+            # runs fleet-wide in 7 days (2026-09-25, FF East 01 & co.).
+            # Record at the scheduled close instead; a different real close
+            # arriving first wins (_record_end drops the stand-in, add_run
+            # keeps one run per start with the earliest end).
+            delay = (end - now).total_seconds()
+            if delay <= MAX_RUN_SECONDS:
+                async_call_later(
+                    self.hass,
+                    delay + PREREPORT_SETTLE_SEC,
+                    partial(self._record_scheduled, d, end),
+                )
             return
         start_state = self.hass.states.get(d["start_entity"])
         start = _parse_iso(start_state.state) if start_state else None
@@ -327,20 +362,19 @@ class RunsStore:
                 d["tuya_device_id"], start, end, MAX_RUN_SECONDS,
             )
             return
-        if end > now:
-            # Pre-reported close that happens to fall INSIDE the slack: the
-            # firmware writes the scheduled close the moment a run starts,
-            # so on a timer of 2 minutes or less — and the T3 fleet already
-            # runs 180 s timers — the run was recorded at its start, with
-            # liters read from a counter that had not moved yet, and stored
-            # as ~0 L forever (audit R6). Wait for the water instead.
-            async_call_later(
-                self.hass,
-                (end - now).total_seconds() + PREREPORT_SETTLE_SEC,
-                partial(self._record_end, d, start, end, deferred=True),
-            )
-            return
         self._record_end(d, start, end, None)
+
+    @callback
+    def _record_scheduled(self, d: dict[str, Any], end: datetime, _now: Any = None) -> None:
+        """A pre-reported close has passed: pair it with the start sensor as
+        it reads now (at run start the start and end DPs arrive in one
+        batch, in no fixed order) and record it unless the real close
+        already did."""
+        start_state = self.hass.states.get(d["start_entity"])
+        start = _parse_iso(start_state.state) if start_state else None
+        if start is None or end <= start or (end - start).total_seconds() > MAX_RUN_SECONDS:
+            return
+        self._record_end(d, start, end, deferred=True)
 
     @callback
     def _record_end(
@@ -559,14 +593,54 @@ class RunsStore:
         self, device_id: str, runs: list[dict[str, Any]]
     ) -> int:
         added = 0
+        have = [
+            (datetime.fromisoformat(x["start"]), datetime.fromisoformat(x["end"]))
+            for x in self.runs.get(device_id, [])
+        ]
         for r in runs:
             if r.get("open") or not r.get("end"):
+                continue
+            # Already recorded under a slightly different start (a live
+            # manual run logs its own clock, the sensor the device's).
+            if any(s < r["end"] and r["start"] < e and s != r["start"] for s, e in have):
                 continue
             if self.add_run(
                 device_id, r["start"], r["end"], r.get("total_l")
             ):
                 added += 1
         return added
+
+
+BACKFILL_VERSION = 2  # 2: pair by value, catches pre-reported closes
+
+
+def pair_by_value(
+    starts: list[datetime],
+    ends: list[datetime],
+    volumes: list[tuple[datetime, float]],
+) -> list[dict[str, Any]]:
+    """Runs from the start/end sensors' recorded VALUES (not when the rows
+    were written): each start pairs with the earliest end value after it,
+    before the next start and within MAX_RUN_SECONDS. A pre-reported close
+    arrives in the same batch as its start and, when the valve closes on
+    schedule, is never reported again; pairing by recorder time dropped
+    exactly those runs. Liters: the volume counter's peak while the run
+    was open, only if plausible (a lifetime odometer is not)."""
+    starts = sorted(set(starts))
+    ends = sorted(set(ends))
+    runs: list[dict[str, Any]] = []
+    for i, start in enumerate(starts):
+        limit = start + timedelta(seconds=MAX_RUN_SECONDS)
+        if i + 1 < len(starts):
+            limit = min(limit, starts[i + 1])
+        end = next((e for e in ends if start < e <= limit), None)
+        if end is None:
+            continue
+        duration = (end - start).total_seconds()
+        seen = [v for t, v in volumes if start <= t <= end + timedelta(seconds=PREREPORT_SETTLE_SEC * 4)]
+        total_l = _sane_liters(max(seen), duration) if seen else None
+        runs.append({"start": start, "end": end, "total_l": total_l})
+    return runs
 
 
 def dedupe_by_start(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:

@@ -44,6 +44,7 @@ from homeassistant.helpers.http import HomeAssistantView
 
 from ..const import DOMAIN
 from .contract import VALVE_DEVICE_DOMAINS, discover_valves
+from .runs_store import BACKFILL_VERSION, pair_by_value
 from .water_math import sum_plausible_deltas
 
 if TYPE_CHECKING:
@@ -169,7 +170,7 @@ def _maybe_start_backfill(hass: HomeAssistant, store) -> None:
     Calendar platform setup can run before the valve entities exist, so
     this is also called from each render — first call that sees devices
     starts the job; the in-flight guard keeps it single."""
-    if store.backfilled or getattr(store, "_backfill_started", False):
+    if store.backfill_version >= BACKFILL_VERSION or getattr(store, "_backfill_started", False):
         return
     if not any(
         d["start_entity"] and d["end_entity"] and d["volume_entity"]
@@ -211,15 +212,15 @@ async def _async_backfill_runs(hass: HomeAssistant, store) -> None:
                 w_end,
             )
             for d in chunk:
-                runs = _pair_runs(
-                    states.get(d["start_entity"], []),
-                    states.get(d["end_entity"], []),
-                    states.get(d["volume_entity"], []),
-                    window_start=w_start,
-                    window_end=w_end,
+                runs = pair_by_value(
+                    _values(states.get(d["start_entity"], [])),
+                    _values(states.get(d["end_entity"], [])),
+                    _volumes(states.get(d["volume_entity"], [])),
                 )
+                runs = [r for r in runs if w_start <= r["end"] <= w_end]
                 added += store.merge_backfill(d["tuya_device_id"], runs)
         store.backfilled = True
+        store.backfill_version = BACKFILL_VERSION
         store.async_schedule_save()
         _LOGGER.info(
             "irrigation runs backfill complete: %d runs from %d valves",
@@ -228,6 +229,20 @@ async def _async_backfill_runs(hass: HomeAssistant, store) -> None:
         )
     except Exception:  # noqa: BLE001 — backfill must never break setup
         _LOGGER.warning("irrigation runs backfill failed", exc_info=True)
+
+
+def _values(states: list[Any]) -> list[datetime]:
+    return [v for s in states if (v := _parse_dt(s.state)) is not None]
+
+
+def _volumes(states: list[Any]) -> list[tuple[datetime, float]]:
+    out: list[tuple[datetime, float]] = []
+    for s in states:
+        try:
+            out.append((s.last_updated, float(s.state)))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 # ----------------------------------------------------------------------

@@ -273,6 +273,48 @@ def demo():
     assert removed == 72 and len(rows) == 2
     assert rows[0]["end"] == iso(S + timedelta(minutes=1)) and rows[1] is other
 
+    # --- cause 1 (2026-09-25): a valve closing ON schedule never re-reports
+    # its pre-reported close, so the run is recorded at the scheduled close.
+    DEFERRED.clear()
+    now = datetime.now().astimezone()
+    close = now + timedelta(minutes=30)
+    s = store({D["end_entity"]: close.isoformat(), D["volume_entity"]: "0"})
+    s._end_entity_to_device = {D["end_entity"]: D}
+    s._on_end_change(end_event(close.isoformat()))  # end lands before start
+    assert s.runs.get(DEV, []) == [] and len(DEFERRED) == 1
+    assert 1800 < DEFERRED[0][0] <= 1800 + rs.PREREPORT_SETTLE_SEC + 1
+    s.hass.states.values[D["start_entity"]] = now.isoformat()  # same batch
+    s.hass.states.values[D["volume_entity"]] = "140"
+    DEFERRED[0][1](None)
+    assert len(s.runs[DEV]) == 1 and s.runs[DEV][0]["end"] == close.isoformat()
+    assert s.runs[DEV][0]["total_l"] == 140.0
+    # a close beyond MAX_RUN_SECONDS is not a run: nothing scheduled
+    DEFERRED.clear()
+    s._on_end_change(end_event((now + timedelta(hours=7)).isoformat()))
+    assert DEFERRED == []
+
+    # startup replay: the last run sitting in the sensors is recorded once
+    s = store({D["start_entity"]: (now - timedelta(minutes=20)).isoformat(), D["end_entity"]: (now - timedelta(minutes=5)).isoformat(), D["volume_entity"]: "50"})
+    s._record_end(D, now - timedelta(minutes=20), now - timedelta(minutes=5))
+    s._record_end(D, now - timedelta(minutes=20), now - timedelta(minutes=5))
+    assert len(s.runs[DEV]) == 1
+
+    # --- backfill pairs by VALUE: the pre-reported close is the run's end
+    t = lambda h, m=0: T0 + timedelta(hours=h, minutes=m)
+    runs = rs.pair_by_value(
+        [t(2, 30), t(2, 30), t(6), t(9), t(20)],  # redelivered start, lost-end start
+        [t(2, 45), t(2, 45), t(6, 12), t(6, 15), t(20, 10)],  # 06:00 closed early
+        [(t(2, 31), 3.0), (t(2, 45), 120.0), (t(6, 12), 60.0)],
+    )
+    assert [(r["start"], r["end"]) for r in runs] == [(t(2, 30), t(2, 45)), (t(6), t(6, 12)), (t(20), t(20, 10))], runs
+    assert [r["total_l"] for r in runs] == [120.0, 60.0, None]
+
+    # merge skips a run already recorded with a few seconds' different start
+    s = store()
+    s.add_run(DEV, t(14, 0) + timedelta(seconds=6), t(14, 8), None)
+    assert s.merge_backfill(DEV, [{"start": t(14), "end": t(14, 15), "total_l": None}]) == 0
+    assert s.merge_backfill(DEV, [{"start": t(15), "end": t(15, 15), "total_l": None}]) == 1
+
     print("ok: runs are recorded once, with liters that survive an odometer")
 
 
