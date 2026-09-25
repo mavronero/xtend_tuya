@@ -112,6 +112,15 @@ class RunsStore:
         data = await self._store.async_load() or {}
         self.runs = data.get("runs", {})
         self.backfilled = bool(data.get("backfilled"))
+        # One-time repair of rows recorded before add_run deduped by start
+        # (2026-09-25 data check: 189 copies, 170 of them one valve's).
+        removed = 0
+        for device_id, rows in self.runs.items():
+            self.runs[device_id], n = dedupe_by_start(rows)
+            removed += n
+        if removed:
+            _LOGGER.info("runs_store: merged %d duplicate run rows (same valve and start)", removed)
+            self.async_schedule_save()
 
     def _data(self) -> dict[str, Any]:
         return {"runs": self.runs, "backfilled": self.backfilled}
@@ -156,8 +165,28 @@ class RunsStore:
                 existing["total_l"] = total_l
                 return True
             return False
+        # One run per start. The end sensor can report again after the valve
+        # closed (a later or pre-reported close time), and each new end used
+        # to become another row: FG Nursery (811) had 73 copies of one run on
+        # 2026-09-19, some stretched to 24-48 h. The earliest end is the
+        # close; a copy only contributes liters the kept row lacks.
+        start_iso = start.isoformat()
+        same = next((r for r in rows if r["start"] == start_iso), None)
+        if same is not None:
+            changed = False
+            if end < datetime.fromisoformat(same["end"]):
+                index.pop(same["end"], None)
+                same["end"] = end_iso
+                same["duration_seconds"] = (end - start).total_seconds()
+                index[end_iso] = same
+                rows.sort(key=lambda r: r["end"])
+                changed = True
+            if total_l and not same.get("total_l"):
+                same["total_l"] = total_l
+                changed = True
+            return changed
         row = {
-            "start": start.isoformat(),
+            "start": start_iso,
             "end": end_iso,
             "duration_seconds": (end - start).total_seconds(),
             "total_l": total_l,
@@ -538,6 +567,28 @@ class RunsStore:
             ):
                 added += 1
         return added
+
+
+def dedupe_by_start(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Collapse rows sharing a start into one (the add_run rule): the
+    earliest end is the close, liters come from the kept row or, if it has
+    none, from a copy. Returns (rows sorted by end, number removed)."""
+    kept: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        other = kept.get(row["start"])
+        if other is None:
+            kept[row["start"]] = row
+            continue
+        first, second = (
+            (row, other)
+            if datetime.fromisoformat(row["end"]) < datetime.fromisoformat(other["end"])
+            else (other, row)
+        )
+        if not first.get("total_l") and second.get("total_l"):
+            first["total_l"] = second["total_l"]
+        kept[row["start"]] = first
+    out = sorted(kept.values(), key=lambda r: r["end"])
+    return out, len(rows) - len(out)
 
 
 def _new_accumulator(now: datetime) -> dict[str, Any]:

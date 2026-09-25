@@ -248,6 +248,31 @@ def demo():
     assert len(s.runs[DEV]) == 1, s.runs[DEV]
     assert s.runs[DEV][0]["end"] == real_close.isoformat()
 
+    # --- one run per start (2026-09-25 data check) ------------------------
+    s = store()
+    S = T0 + timedelta(days=2)
+    assert s.add_run(DEV, S, S + timedelta(minutes=10), None)
+    # the end sensor reports again later: no second row
+    assert s.add_run(DEV, S, S + timedelta(hours=24), 207.0) is True  # only fills liters
+    rows = [r for r in s.runs[DEV] if r["start"] == S.isoformat()]
+    assert len(rows) == 1 and rows[0]["duration_seconds"] == 600 and rows[0]["total_l"] == 207.0
+    assert s.add_run(DEV, S, S + timedelta(hours=48), 5.0) is False  # nothing new
+    # an earlier end for the same start wins (it is the close)
+    assert s.add_run(DEV, S, S + timedelta(minutes=9), None) is True
+    rows = [r for r in s.runs[DEV] if r["start"] == S.isoformat()]
+    assert len(rows) == 1 and rows[0]["duration_seconds"] == 540
+
+    # load-time repair: 73 growing copies of one run collapse to the first
+    iso = lambda t: t.isoformat()
+    copies = [
+        {"start": iso(S), "end": iso(S + timedelta(minutes=5 * k + 1)), "duration_seconds": 300.0 * k + 60, "total_l": None if k == 0 else 0.0}
+        for k in range(73)
+    ]
+    other = {"start": iso(S + timedelta(days=1)), "end": iso(S + timedelta(days=1, minutes=10)), "duration_seconds": 600.0, "total_l": 50.0}
+    rows, removed = rs.dedupe_by_start(copies[::-1] + [other])
+    assert removed == 72 and len(rows) == 2
+    assert rows[0]["end"] == iso(S + timedelta(minutes=1)) and rows[1] is other
+
     print("ok: runs are recorded once, with liters that survive an odometer")
 
 
