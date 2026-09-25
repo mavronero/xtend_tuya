@@ -18,12 +18,25 @@ MAX_RATE_L_PER_MIN = 50.0
 MIN_PLAUSIBLE_DELTA_L = 50.0
 
 
+# A counter reset falls to (near) 0; a drop to more than this share of the
+# previous reading is a late, out-of-order sample instead.
+RESET_FRACTION = 0.5
+# ...when it lands this soon after the previous reading. Across a longer gap a
+# drop is a reset whose 0 reading was missed (the previous run ended hours ago).
+LATE_SAMPLE_WINDOW_S = 60.0
+
+
 def plausible_delta(prev: float, cur: float, elapsed_s: float) -> float | None:
     """Liters delivered between two samples, or None for a physically impossible jump.
 
     On None the caller discards the sample and keeps `prev` as its baseline. A drop
     means the counter reset at a cycle start, so `cur` is this cycle's water.
     """
+    if cur < prev and cur > prev * RESET_FRACTION and elapsed_s < LATE_SAMPLE_WINDOW_S:
+        # A small drop is an old sample delivered late (the valve's readings
+        # arrive twice, out of order: …9, 10, 9, 10…), not a reset. Crediting
+        # it as one added ~its whole value each time (951: 200 L for 168).
+        return None
     delta = cur - prev if cur >= prev else cur
     ceiling = max(MIN_PLAUSIBLE_DELTA_L, MAX_RATE_L_PER_MIN * max(elapsed_s, 0.0) / 60.0)
     if delta > ceiling:

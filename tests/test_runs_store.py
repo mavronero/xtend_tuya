@@ -304,10 +304,53 @@ def demo():
     runs = rs.pair_by_value(
         [t(2, 30), t(2, 30), t(6), t(9), t(20)],  # redelivered start, lost-end start
         [t(2, 45), t(2, 45), t(6, 12), t(6, 15), t(20, 10)],  # 06:00 closed early
-        [(t(2, 31), 3.0), (t(2, 45), 120.0), (t(6, 12), 60.0)],
+        [
+            (t(2, 30), 0.0), (t(2, 31), 3.0), (t(2, 45), 120.0),
+            (t(6), 0.0), (t(6, 12), 60.0),
+            # 978, 2026-09-22: the previous run's 110 L still showing at the
+            # start, then the reset — the run is 9 L, not 110 or 119
+            (t(20) + timedelta(seconds=1), 110.0), (t(20, 1), 0.0), (t(20, 5), 9.0),
+        ],
     )
     assert [(r["start"], r["end"]) for r in runs] == [(t(2, 30), t(2, 45)), (t(6), t(6, 12)), (t(20), t(20, 10))], runs
-    assert [r["total_l"] for r in runs] == [120.0, 60.0, None]
+    assert [r["total_l"] for r in runs] == [120.0, 60.0, 9.0], runs
+
+    # a run whose counter never moved is 0 L (no water), not unknown
+    dry = rs.pair_by_value([t(22)], [t(22, 5)], [(t(22), 0.0), (t(22, 5), 0.0)])
+    assert dry[0]["total_l"] == 0.0
+    # ...and so is one resting at 0 that sent nothing during the run
+    quiet = rs.pair_by_value([t(22)], [t(22, 5)], [(t(21), 0.0)])
+    assert quiet[0]["total_l"] == 0.0
+    unknown = rs.pair_by_value([t(22)], [t(22, 5)], [(t(21), 110.0)])
+    assert unknown[0]["total_l"] is None
+
+    # backfill repair: a stored carry-over (119 L) is replaced by the recorder's 9 L
+    s = store()
+    s.add_run(DEV, t(20), t(20, 10), 119.0)
+    assert s.merge_backfill(DEV, [runs[2]], repair=True) == 1
+    assert [r["total_l"] for r in s.runs[DEV]] == [9.0]
+    assert s.merge_backfill(DEV, [runs[2]], repair=True) == 0
+
+    # live: a counter reset drops liters left from a lost run, and marks the
+    # valve per-run so its close reading is used even after a restart
+    s = store({D["volume_entity"]: "0"})
+    s._vol_entity_to_device = {D["volume_entity"]: D}
+    vol = lambda v: types.SimpleNamespace(data={"entity_id": D["volume_entity"], "new_state": types.SimpleNamespace(state=str(v))})
+    for v in (0, 40, 110):  # a run that was never recorded
+        s._on_volume_change(vol(v))
+    for v in (0, 5, 9):  # the next run
+        s._on_volume_change(vol(v))
+    assert DEV in s.per_cycle and s._vol[DEV]["delivered"] == 9.0
+    s.hass.states.values[D["volume_entity"]] = "9"
+    assert s._run_liters(D, 360) == 9.0
+
+    # the last reading lands just after the close report: the run takes it
+    now = datetime.now().astimezone()
+    s.add_run(DEV, now - timedelta(minutes=5), now - timedelta(seconds=2), 93.0)
+    s._late_close_reading(DEV, 94.0, now)
+    assert s.runs[DEV][-1]["total_l"] == 94.0
+    s._late_close_reading(DEV, 95.0, now + timedelta(minutes=5))  # too late: next run's
+    assert s.runs[DEV][-1]["total_l"] == 94.0
 
     # merge skips a run already recorded with a few seconds' different start
     s = store()

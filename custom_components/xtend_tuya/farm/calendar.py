@@ -218,17 +218,26 @@ async def _async_backfill_runs(hass: HomeAssistant, store) -> None:
                     _volumes(states.get(d["volume_entity"], [])),
                 )
                 runs = [r for r in runs if w_start <= r["end"] <= w_end]
-                added += store.merge_backfill(d["tuya_device_id"], runs)
+                added += store.merge_backfill(d["tuya_device_id"], runs, repair=True)
+                if _restarts_per_run(_volumes(states.get(d["volume_entity"], []))):
+                    store.per_cycle.add(d["tuya_device_id"])
         store.backfilled = True
         store.backfill_version = BACKFILL_VERSION
         store.async_schedule_save()
         _LOGGER.info(
-            "irrigation runs backfill complete: %d runs from %d valves",
+            "irrigation runs backfill v%d complete: %d runs added or corrected from %d valves",
+            BACKFILL_VERSION,
             added,
             len(devices),
         )
     except Exception:  # noqa: BLE001 — backfill must never break setup
         _LOGGER.warning("irrigation runs backfill failed", exc_info=True)
+
+
+def _restarts_per_run(series: list[tuple[datetime, float]]) -> bool:
+    """The counter falls back to ~0 between runs (per-run counter)."""
+    vals = [v for _, v in sorted(series)]
+    return any(prev > 5 and cur <= 2 for prev, cur in zip(vals, vals[1:]))
 
 
 def _values(states: list[Any]) -> list[datetime]:

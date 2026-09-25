@@ -38,7 +38,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.helpers.storage import Store
 
-from .water_math import plausible_delta
+from .water_math import plausible_delta, sum_plausible_deltas
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +76,15 @@ RUN_DEDUPE_SLACK_SEC = 180
 # is enough for the final value to have landed.
 PREREPORT_SETTLE_SEC = 15
 
+# A real close report arrives in the same batch as the counter's last
+# reading, in no fixed order: a per-run counter reading this soon after a
+# stored close still belongs to that run (908: 93 L stored, 94 L real).
+CLOSE_SETTLE_SEC = 30
+
+# A counter falling to this or less is a per-run counter restarting, not a
+# garbage sample on an odometer.
+MIN_RESET_READING_L = 2.0
+
 DOMAIN_KEY = "xtend_tuya_runs_store"
 
 
@@ -105,6 +114,9 @@ class RunsStore:
         self._vol_entity_to_device: dict[str, dict[str, Any]] = {}
         # tuya device id -> live volume-counter accumulator, see _on_volume_change
         self._vol: dict[str, dict[str, Any]] = {}
+        # Valves whose counter restarts at 0 every run: their reading at the
+        # close IS the run total, which survives an HA restart mid-run.
+        self.per_cycle: set[str] = set()
         # tuya device id -> {end iso: row}, the dedupe index (see _index)
         self._end_index: dict[str, dict[str, dict[str, Any]]] = {}
 
@@ -115,6 +127,7 @@ class RunsStore:
         self.runs = data.get("runs", {})
         self.backfilled = bool(data.get("backfilled"))
         self.backfill_version = int(data.get("backfill_version") or (1 if self.backfilled else 0))
+        self.per_cycle = set(data.get("per_cycle") or [])
         # One-time repair of rows recorded before add_run deduped by start
         # (2026-09-25 data check: 189 copies, 170 of them one valve's).
         removed = 0
@@ -126,7 +139,12 @@ class RunsStore:
             self.async_schedule_save()
 
     def _data(self) -> dict[str, Any]:
-        return {"runs": self.runs, "backfilled": self.backfilled, "backfill_version": self.backfill_version}
+        return {
+            "runs": self.runs,
+            "backfilled": self.backfilled,
+            "backfill_version": self.backfill_version,
+            "per_cycle": sorted(self.per_cycle),
+        }
 
     def async_schedule_save(self) -> None:
         self._store.async_delay_save(self._data, SAVE_DELAY_SEC)
@@ -341,6 +359,10 @@ class RunsStore:
             # Record at the scheduled close instead; a different real close
             # arriving first wins (_record_end drops the stand-in, add_run
             # keeps one run per start with the earliest end).
+            # This report marks a run START: liters counted since the last
+            # recorded run belong to no run (one that was lost), and used to
+            # be added to this one (978: 119 L stored, 9 L real).
+            self._reset_accumulator(d["tuya_device_id"])
             delay = (end - now).total_seconds()
             if delay <= MAX_RUN_SECONDS:
                 async_call_later(
@@ -363,6 +385,24 @@ class RunsStore:
             )
             return
         self._record_end(d, start, end, None)
+
+    def _late_close_reading(self, device_id: str, value: float, now: datetime) -> None:
+        """Raise the last run's liters to a per-run counter reading that
+        landed just after its close report."""
+        rows = self.runs.get(device_id)
+        last = rows[-1] if rows else None
+        if last is None or last.get("total_l") is None or value <= last["total_l"]:
+            return
+        if (now - datetime.fromisoformat(last["end"])).total_seconds() > CLOSE_SETTLE_SEC:
+            return
+        if _sane_liters(value, last["duration_seconds"]) is not None:
+            last["total_l"] = value
+            self.async_schedule_save()
+
+    def _reset_accumulator(self, device_id: str) -> None:
+        if acc := self._vol.get(device_id):
+            acc["delivered"] = 0.0
+            acc["first_rise"] = acc["last_rise"] = None
 
     @callback
     def _record_scheduled(self, d: dict[str, Any], end: datetime, _now: Any = None) -> None:
@@ -432,6 +472,15 @@ class RunsStore:
         acc["last"], acc["last_ts"] = value, now
         if prev is None:
             return
+        if value < prev and value <= MIN_RESET_READING_L:
+            # The counter restarted: a new run began. Nothing counted before
+            # belongs to it, and this valve's close reading is its run total.
+            acc["delivered"] = 0.0
+            if d["tuya_device_id"] not in self.per_cycle:
+                self.per_cycle.add(d["tuya_device_id"])
+                self.async_schedule_save()
+        if d["tuya_device_id"] in self.per_cycle:
+            self._late_close_reading(d["tuya_device_id"], value, now)
         delta = plausible_delta(prev, value, (now - prev_ts).total_seconds())
         if delta is None:
             # Impossible jump — discard the sample and keep the old baseline.
@@ -498,13 +547,22 @@ class RunsStore:
         and on the odometer valves that value was rejected outright, so
         every one of their runs was stored with liters=null (D3/R16).
         """
-        acc = self._vol.get(d["tuya_device_id"])
+        device_id = d["tuya_device_id"]
+        vol_entity = d.get("volume_entity")
+        if device_id in self.per_cycle and vol_entity and (vs := self.hass.states.get(vol_entity)):
+            try:
+                reading = _sane_liters(float(vs.state), duration_s)
+            except (TypeError, ValueError):
+                reading = None
+            if reading is not None:
+                self._reset_accumulator(device_id)
+                return reading
+        acc = self._vol.get(device_id)
         if acc is not None and acc["delivered"] > 0:
             liters = float(acc["delivered"])
             acc["delivered"] = 0.0
             acc["first_rise"] = acc["last_rise"] = None
             return _sane_liters(liters, duration_s)
-        vol_entity = d.get("volume_entity")
         if vol_entity and (vs := self.hass.states.get(vol_entity)):
             try:
                 return _sane_liters(float(vs.state), duration_s)
@@ -590,8 +648,12 @@ class RunsStore:
     # ------------------------------------------------------------- backfill
 
     def merge_backfill(
-        self, device_id: str, runs: list[dict[str, Any]]
+        self, device_id: str, runs: list[dict[str, Any]], repair: bool = False
     ) -> int:
+        """Add recorder runs; with `repair`, also replace a stored run's liters
+        by the recorder's (the live accumulator mis-counted some runs: carried
+        liters over from a lost run, or lost them on a restart mid-run).
+        Returns how many runs were added or corrected."""
         added = 0
         have = [
             (datetime.fromisoformat(x["start"]), datetime.fromisoformat(x["end"]))
@@ -608,10 +670,20 @@ class RunsStore:
                 device_id, r["start"], r["end"], r.get("total_l")
             ):
                 added += 1
+            elif repair and r.get("total_l") is not None:
+                start_iso = r["start"].isoformat()
+                row = next((x for x in self.runs.get(device_id, []) if x["start"] == start_iso), None)
+                if row is not None and (
+                    row.get("total_l") is None or abs(row["total_l"] - r["total_l"]) > 1
+                ):
+                    row["total_l"] = r["total_l"]
+                    added += 1
         return added
 
 
-BACKFILL_VERSION = 2  # 2: pair by value, catches pre-reported closes
+# 2: pair by value, catches pre-reported closes
+# 3: liters = summed counter climb, repairs stored liters (2026-09-25 check)
+BACKFILL_VERSION = 3
 
 
 def pair_by_value(
@@ -624,10 +696,13 @@ def pair_by_value(
     before the next start and within MAX_RUN_SECONDS. A pre-reported close
     arrives in the same batch as its start and, when the valve closes on
     schedule, is never reported again; pairing by recorder time dropped
-    exactly those runs. Liters: the volume counter's peak while the run
-    was open, only if plausible (a lifetime odometer is not)."""
+    exactly those runs. Liters: the counter's summed climb while the run
+    was open (sum_plausible_deltas) — its peak picked up the previous
+    run's total still showing before the reset (978: 119 L for a 9 L run).
+    None when the counter sent nothing in the run, 0 when it never moved."""
     starts = sorted(set(starts))
     ends = sorted(set(ends))
+    volumes = sorted(volumes)
     runs: list[dict[str, Any]] = []
     for i, start in enumerate(starts):
         limit = start + timedelta(seconds=MAX_RUN_SECONDS)
@@ -637,8 +712,27 @@ def pair_by_value(
         if end is None:
             continue
         duration = (end - start).total_seconds()
-        seen = [v for t, v in volumes if start <= t <= end + timedelta(seconds=PREREPORT_SETTLE_SEC * 4)]
-        total_l = _sane_liters(max(seen), duration) if seen else None
+        until = end + timedelta(seconds=PREREPORT_SETTLE_SEC * 4)
+        if i + 1 < len(starts):
+            until = min(until, starts[i + 1])
+        # Count from the counter's restart when it shows one (per-run
+        # counters): anything before it is the previous run's total.
+        reset = next(
+            (
+                t
+                for t, v in volumes
+                if start - timedelta(seconds=5) <= t <= start + timedelta(minutes=2)
+                and v <= MIN_RESET_READING_L
+            ),
+            start,
+        )
+        climbed = sum_plausible_deltas(volumes, reset, until)
+        if climbed is None:
+            # No reading during the run: HA records no row for a counter
+            # that stays put, so one resting at 0 means no water flowed.
+            before = [v for t, v in volumes if t <= start]
+            climbed = 0.0 if before and before[-1] == 0 else None
+        total_l = _sane_liters(climbed, duration)
         runs.append({"start": start, "end": end, "total_l": total_l})
     return runs
 

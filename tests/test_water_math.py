@@ -46,6 +46,11 @@ def demo():
     assert wm.plausible_delta(130367.0, 130375.0, 10) == 8.0
     # A reset to a lower value credits the new value as this cycle's water.
     assert wm.plausible_delta(91.0, 3.0, 10) == 3.0
+    # A small drop is a late duplicate, not a reset: discard it (2026-09-25,
+    # 951 summed 200 L for a 168 L run from …9, 10, 9, 10…).
+    assert wm.plausible_delta(10.0, 9.0, 1) is None
+    s = series([0, 9, 10, 9, 10, 12])
+    assert wm.sum_plausible_deltas(s, T0, T0 + timedelta(minutes=5)) == 12.0
     # Rate garbage: 2000 L in 10 s = 12000 L/min, far past the 50 L/min cap.
     # None = "discard the sample", not "0 L delivered".
     assert wm.plausible_delta(100.0, 2100.0, 10) is None
