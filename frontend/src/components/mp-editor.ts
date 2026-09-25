@@ -14,6 +14,7 @@ import type { MeteringPoint } from "../farm/data.ts";
 import type { ValveStatus } from "../farm/valve-summary.ts";
 import { batteryIcon } from "./format.ts";
 import { farmTokens } from "./theme.ts";
+import { farmDate } from "./farm-time.ts";
 
 /** A valve the metering point can take, with where it is now. */
 export interface ValveOption {
@@ -40,7 +41,7 @@ export interface MpSaveDetail {
 const STATUS_TEXT: Record<ValveStatus, string> = { watering: "Watering", idle: "Idle", offline: "Offline" };
 
 function date(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return farmDate(ms, { day: "numeric", month: "short", year: "numeric" });
 }
 
 export class XtMpEditor extends LitElement {

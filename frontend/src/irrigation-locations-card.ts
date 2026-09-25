@@ -1,5 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
+import { farmDate } from "./components/farm-time.ts";
 
 interface HomeAssistant {
   callApi?: <T = unknown>(
@@ -72,10 +73,10 @@ function relDate(iso: string | null): string {
   if (days <= 0) return "today";
   if (days === 1) return "yesterday";
   if (days < 60) return `${days} days ago`;
-  return new Date(iso).toLocaleDateString();
+  return farmDate(new Date(iso).getTime());
 }
 
-const day = (iso: string) => new Date(iso).toLocaleDateString();
+const day = (iso: string) => farmDate(new Date(iso).getTime());
 const liters = (n: number | null | undefined) => (n == null ? "–" : `${Math.round(n)} L`);
 const numOrNull = (s: string) => (s.trim() === "" || isNaN(Number(s)) ? null : Number(s));
 

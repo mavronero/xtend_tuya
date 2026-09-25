@@ -7,6 +7,7 @@ import { property } from "lit/decorators.js";
 import type { Bucket } from "../farm/pump-summary.ts";
 import { volume } from "./format.ts";
 import { farmTokens } from "./theme.ts";
+import { farmDate, farmTime } from "./farm-time.ts";
 
 const H = 160;
 const PAD = 18;
@@ -16,10 +17,7 @@ export class XtPumpChart extends LitElement {
   @property() period: "hour" | "day" = "hour";
 
   private _label(ms: number): string {
-    const d = new Date(ms);
-    return this.period === "hour"
-      ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+    return this.period === "hour" ? farmTime(ms) : farmDate(ms, { weekday: "short", day: "numeric" });
   }
 
   render() {

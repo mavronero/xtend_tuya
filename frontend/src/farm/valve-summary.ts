@@ -8,6 +8,7 @@
 import type { HassState, ValveEntities } from "./discovery.ts";
 import { pairPlanRuns, type Pairable } from "../calendar-lanes.ts";
 import { plannedOf, runsOf, type FarmData, type Run } from "./data.ts";
+import { farmDayStart } from "../components/farm-time.ts";
 
 export type ValveStatus = "watering" | "idle" | "offline";
 export type Badge = "low_battery" | "stale" | "missed" | "no_flow";
@@ -56,11 +57,7 @@ function dead(state: HassState | undefined): boolean {
   return !state || state.state === "unavailable" || state.state === "unknown";
 }
 
-function startOfLocalDay(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
+const startOfLocalDay = farmDayStart;
 
 export interface Week {
   runs: number;

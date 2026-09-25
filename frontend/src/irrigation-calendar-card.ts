@@ -7,6 +7,7 @@ import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-fil
 import { farmTokens } from "./components/theme.ts";
 import "./components/valve-filter-bar.ts";
 import "./components/spinner.ts";
+import { farmAddDays, farmDate, farmDayStart, farmHourOfDay, farmWeekStart, syncFarmTimeZone, wallClock } from "./components/farm-time.ts";
 
 /* Irrigation calendar: three views over the same two calendar entities
  * (Trello 9W8FXA4l).
@@ -74,23 +75,14 @@ const COMPLETED = "calendar.irrigation_completed";
 const MODE_KEY = "xt-irrigation-calendar-mode";
 const RANGE_KEY = "xt-irrigation-calendar-range";
 
-function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-function startOfWeek(d: Date): Date {
-  const s = startOfDay(d);
-  s.setDate(s.getDate() - ((s.getDay() + 6) % 7)); // Monday
-  return s;
-}
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
-}
+// Farm time throughout: the grid's days and hours are the valves' own.
+const startOfDay = (d: Date): Date => new Date(farmDayStart(d.getTime()));
+const startOfWeek = (d: Date): Date => new Date(farmWeekStart(d.getTime()));
+const addDays = (d: Date, n: number): Date => new Date(farmAddDays(d.getTime(), n));
 const pad = (n: number) => String(n).padStart(2, "0");
 const hhmm = (ms: number) => {
-  const d = new Date(ms);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const w = wallClock(ms);
+  return `${pad(w.hour)}:${pad(w.minute)}`;
 };
 const fmtMin = (ms: number) => (ms > 0 ? String(Math.round(ms / 60_000)) : "–");
 const fmtL = (l: number | null) => (l == null ? "–" : String(Math.round(l)));
@@ -195,6 +187,7 @@ export class IrrigationCalendarCard extends LitElement {
   }
 
   updated(): void {
+    syncFarmTimeZone(this.hass as { config?: { time_zone?: string } } | undefined);
     if (!this._farmLoaded && this.hass?.callApi) {
       this._farmLoaded = true;
       loadFarmData(this.hass as Parameters<typeof loadFarmData>[0]).then(
@@ -326,8 +319,7 @@ export class IrrigationCalendarCard extends LitElement {
     let firstHour: number | null = null;
     for (const e of this._events) {
       if (e.end <= from.getTime() || e.start >= to.getTime()) continue;
-      const d = new Date(Math.max(e.start, from.getTime()));
-      const h = d.getHours() + d.getMinutes() / 60;
+      const h = farmHourOfDay(Math.max(e.start, from.getTime()));
       if (firstHour === null || h < firstHour) firstHour = h;
     }
     const scroller = this.renderRoot.querySelector<HTMLElement>(".scroll");
@@ -368,11 +360,11 @@ export class IrrigationCalendarCard extends LitElement {
   private _rangeLabel(): string {
     const [from, to] = this._window();
     const long: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
-    if (to.getTime() - from.getTime() <= DAY_MS) return from.toLocaleDateString(undefined, long);
-    return `${from.toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${addDays(
-      to,
-      -1
-    ).toLocaleDateString(undefined, long)}`;
+    if (to.getTime() - from.getTime() <= DAY_MS + HOUR_MS) return farmDate(from.getTime(), long);
+    return `${farmDate(from.getTime(), { day: "numeric", month: "short" })} – ${farmDate(
+      addDays(to, -1).getTime(),
+      long
+    )}`;
   }
 
   /** Site path and metering point of a valve, from the farm data. */
@@ -517,7 +509,7 @@ export class IrrigationCalendarCard extends LitElement {
                 style="min-width:${Math.max(110, maxLanes * laneW)}px"
               >
                 ${days > 1
-                  ? html`<div class="colhead"><span>${new Date(dayStart).toLocaleDateString(undefined, { weekday: "short", day: "numeric" })}</span></div>`
+                  ? html`<div class="colhead"><span>${farmDate(dayStart, { weekday: "short", day: "numeric" })}</span></div>`
                   : nothing}
                 <div class="lines"></div>
                 ${placed.map(({ ev, lane, lanes }) => {
@@ -581,15 +573,15 @@ export class IrrigationCalendarCard extends LitElement {
     const stepH = this._range === 1 ? 3 : this._range === 3 ? 12 : 24;
     const ticks: { left: number; label: string }[] = [];
     for (let ms = t0; ms < to.getTime(); ms += stepH * HOUR_MS) {
-      const d = new Date(ms);
+      const hour = wallClock(ms).hour;
       ticks.push({
         left: pct(ms),
         label:
           stepH >= 24
-            ? d.toLocaleDateString(undefined, { weekday: "short" })
-            : d.getHours() === 0 && this._range > 1
-              ? d.toLocaleDateString(undefined, { weekday: "short" })
-              : `${pad(d.getHours())}`,
+            ? farmDate(ms, { weekday: "short" })
+            : hour === 0 && this._range > 1
+              ? farmDate(ms, { weekday: "short" })
+              : `${pad(hour)}`,
       });
     }
     const dayLines = Array.from({ length: this._range - 1 }, (_, i) => pct(t0 + (i + 1) * DAY_MS));

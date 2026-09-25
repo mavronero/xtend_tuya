@@ -13,6 +13,7 @@
  */
 
 import { mpAt, type FarmData, type MeteringPoint, type Pump, type PumpAssignment, type PumpConnection } from "./data.ts";
+import { farmDayStart, farmHourOfDay } from "../components/farm-time.ts";
 
 /** One statistics row from /api/xtend_tuya/pump_stats. */
 export interface StatRow {
@@ -99,12 +100,10 @@ export function connectionsIn(data: FarmData, pumpId: string, from: number, to: 
   );
 }
 
-/** Start of the period (hour or local day) containing ms. */
+/** Start of the period (hour or farm day) containing ms. */
 export function periodStart(ms: number, period: "hour" | "day"): number {
-  const d = new Date(ms);
-  d.setMinutes(0, 0, 0);
-  if (period === "day") d.setHours(0);
-  return d.getTime();
+  const day = farmDayStart(ms);
+  return period === "day" ? day : day + Math.floor(farmHourOfDay(ms)) * 3_600_000;
 }
 
 export function balance(

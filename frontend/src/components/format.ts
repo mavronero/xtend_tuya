@@ -1,21 +1,21 @@
 /** Date and duration wording shared by the farm cards. */
 
+import { farmDate, farmDayStart, farmTime } from "./farm-time.ts";
+
 export const DAY_MS = 86_400_000;
 
 /** "Today", "Yesterday", "Tomorrow", else "Mon 22 Sept". */
 export function dayLabel(ms: number, now = Date.now()): string {
-  const d = new Date(ms);
-  const day0 = new Date(now);
-  day0.setHours(0, 0, 0, 0);
-  const diff = Math.floor((d.getTime() - day0.getTime()) / DAY_MS);
+  const day0 = farmDayStart(now);
+  const diff = Math.round((farmDayStart(ms) - day0) / DAY_MS);
   if (diff === 0) return "Today";
   if (diff === -1) return "Yesterday";
   if (diff === 1) return "Tomorrow";
-  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return farmDate(ms, { weekday: "short", day: "numeric", month: "short" });
 }
 
 export function time(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return farmTime(ms);
 }
 
 export function when(ms: number): string {

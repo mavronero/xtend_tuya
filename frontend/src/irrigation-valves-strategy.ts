@@ -30,6 +30,7 @@
  * pattern used for newer valves).
  */
 
+import { farmDate, farmTime } from "./components/farm-time.ts";
 import {
   HomeAssistantLike,
   ValveEntities,
@@ -588,15 +589,9 @@ function escapeHtml(s: string): string {
 // no tooltip lib, works on desktop where Simon reads the dashboard.
 function segmentTooltip(s: MatrixSegment): string {
   const day = (ms: number) =>
-    new Date(ms).toLocaleDateString(undefined, {
-      day: "2-digit",
-      month: "2-digit",
-    });
+    farmDate(ms, { day: "2-digit", month: "2-digit" });
   const time = (ms: number) =>
-    new Date(ms).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    farmTime(ms);
   const sameDay = day(s.startMs) === day(s.endMs);
   const range = sameDay
     ? `${day(s.startMs)} ${time(s.startMs)} – ${time(s.endMs)}`

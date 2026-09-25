@@ -3,8 +3,8 @@
 
 import { LitElement, html, css } from "lit";
 import { property } from "lit/decorators.js";
-import { DAY_MS } from "./format.ts";
 import { farmTokens } from "./theme.ts";
+import { farmAddDays, farmDate, farmDayStart } from "./farm-time.ts";
 
 export class XtWeekBars extends LitElement {
   @property({ attribute: false }) daily: number[] = [];
@@ -12,11 +12,10 @@ export class XtWeekBars extends LitElement {
 
   render() {
     const max = Math.max(...this.daily, 0);
-    const noon = new Date();
-    noon.setHours(12, 0, 0, 0);
     const n = this.daily.length;
+    const today = farmDayStart(Date.now());
     const day = (i: number) =>
-      new Date(noon.getTime() - (n - 1 - i) * DAY_MS).toLocaleDateString(undefined, {
+      farmDate(farmAddDays(today, i - (n - 1)), {
         weekday: "short",
         day: "numeric",
         month: "short",

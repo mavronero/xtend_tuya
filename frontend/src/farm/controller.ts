@@ -6,6 +6,7 @@ import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { discoverValves, fetchLocations, type HomeAssistantLike, type ValveEntities } from "./discovery.ts";
 import { EMPTY_FARM_DATA, invalidateFarmData, loadFarmData, type FarmData } from "./data.ts";
 import { summarize, type ValveSummary } from "./valve-summary.ts";
+import { syncFarmTimeZone } from "../components/farm-time.ts";
 
 const REFRESH_MS = 60_000;
 // HA pushes state changes many times a second and every card re-renders on
@@ -38,6 +39,7 @@ export class FarmController implements ReactiveController {
   }
 
   hostUpdated(): void {
+    syncFarmTimeZone(this.host.hass as { config?: { time_zone?: string } } | undefined);
     // First load as soon as hass arrives.
     if (!this.loaded && !this.busy && this.host.hass) void this.refresh();
   }
