@@ -22,6 +22,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-25 | 4.4.268 | 4.4.267 | ok (SMOKE OK over Tailscale; served strategy bundle md5 == tag; runs 30 d = 206,256 L, the matrix WATER total now; snapshot vs 4.4.267: only live changes — 962 and 923 offline after the restart lost their planned slots; nabu.casa came back by itself) |
 | 2026-09-25 | 4.4.269 | 4.4.268 | ok (UI rework. SMOKE OK over Tailscale; store xtend_tuya.irrigation_locations migrated v1->v2, 76 locations, 10 sites seeded; new dashboard-valves config (1.8 KB) saved. ROLLBACK needs three things: HACS 4.4.268, `sudo cp .storage/xtend_tuya.irrigation_locations.pre-4.4.269 .storage/xtend_tuya.irrigation_locations` via `ssh farm-ha` before the restart, and the old dashboard config (scratchpad prod_backup_pre_4.4.269/dashboard-valves.json, 425 KB) via lovelace/config/save) |
 | 2026-09-25 | 4.4.270 | 4.4.269 | ok (SMOKE OK over Tailscale; runs_store merged 197 duplicate rows at load, 3907 -> 3710; duplicate starts 0; runs 30 d = 205,505 L. Rollback leaves the merged store as is: the removed rows were copies) |
+| 2026-09-25 | 4.4.271 | 4.4.270 | ok (SMOKE OK over Tailscale; backfill v2 "620 runs from 101 valves", store 3710 -> 4292 rows = dry run; 30 d runs 2144, liters 210,047; dup starts 0. Rollback: HACS 4.4.270; the added rows are real runs, keep them) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
