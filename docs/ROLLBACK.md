@@ -17,6 +17,9 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-17 | 4.4.263 | 4.4.261 | ok (SMOKE OK via chrome-devtools; 4.4.262 was released but never deployed) |
 | 2026-09-17 | 4.4.264 | 4.4.263 | ok (SMOKE OK; first smoke run died on a dropped diagnostics fetch over nabu.casa, re-run with retries passed) |
 | 2026-09-17 | 4.4.265 | 4.4.264 | ok (device maps full; the smoke's entity check fired before valves were back, live recheck 81/112 available) |
+| 2026-09-24 | 4.4.266 | 4.4.265 | ok (SMOKE OK; layered architecture, no behaviour change. Snapshot diff vs baseline: only live changes — FG Nursery 811 back after the restart, 3 dead Tuya devices cleaned by the existing registry cleanup, offline/online flips; valve_home 77/112 = all available. Box rebooted and the nabu.casa link needed a remote-connection toggle) |
+| 2026-09-24 | 4.4.267 | 4.4.266 | ok (SMOKE OK 16:2x; snapshot vs 4.4.266: 0 events lost, +13 completed runs and +7 planned slots of offline valves. Afterwards prod unreachable from 16:31: the new automation 'Refresh Nabu Casa remote after restart' (cloud.remote_disconnect + remote_connect 10 min after start) left the tunnel down; Simon toggles Remote tonight and disables it; delete it) |
+| 2026-09-25 | 4.4.268 | 4.4.267 | ok (SMOKE OK over Tailscale; served strategy bundle md5 == tag; runs 30 d = 206,256 L, the matrix WATER total now; snapshot vs 4.4.267: only live changes — 962 and 923 offline after the restart lost their planned slots; nabu.casa came back by itself) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
