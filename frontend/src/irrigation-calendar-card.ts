@@ -4,6 +4,7 @@ import { offlineSpans, packLanes, pairPlanRuns, Pairable, type HistoryPoint } fr
 import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
 import { discoverValves, type HomeAssistantLike } from "./farm/discovery.ts";
 import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
+import { timelineRows, type TlRow } from "./farm/timeline-rows.ts";
 import { farmTokens } from "./components/theme.ts";
 import "./components/valve-filter-bar.ts";
 import "./components/spinner.ts";
@@ -426,7 +427,8 @@ export class IrrigationCalendarCard extends LitElement {
   render() {
     if (!this._config) return nothing;
     const mode = this._mode;
-    const events = this._shownEvents();
+    const rows = mode === "timeline" ? this._timelineRows() : null;
+    const events = rows ? rows.flatMap((r) => r.evs) : this._shownEvents();
     const chip = (on: boolean, label: string, click: () => void) =>
       html`<button class="chip ${on ? "on" : ""}" aria-pressed=${on} @click=${click}>${label}</button>`;
     return html`
@@ -468,7 +470,7 @@ export class IrrigationCalendarCard extends LitElement {
           </div>
         </div>
         ${this._error ? html`<div class="err">${this._error}</div>` : nothing}
-        ${mode === "timeline" ? this._renderTimeline(events) : this._renderGrid(events)}
+        ${rows ? this._renderTimeline(rows) : this._renderGrid(events)}
       </ha-card>
     `;
   }
@@ -545,28 +547,44 @@ export class IrrigationCalendarCard extends LitElement {
     return s && s !== "" && Number.isFinite(n) ? Math.round(n) : null;
   }
 
-  // Timeline: one row per valve, grouped by site.
-  private _renderTimeline(events: GridEvent[]) {
+  /** One row per metering point; a run sits on the point its valve was at
+   * then (farm/timeline-rows.ts). */
+  private _timelineRows(): TlRow<Valve, GridEvent>[] {
+    const [from, to] = this._window();
+    return timelineRows(
+      this._valves(),
+      this._events,
+      this._farm,
+      (run, mp) => {
+        const start = Date.parse(run.start);
+        const liters = run.liters ?? null;
+        const min = Math.round(run.duration_seconds / 60);
+        return {
+          start,
+          end: Math.max(Date.parse(run.end), start + 60_000),
+          kind: "ran",
+          key: `retired:${run.device_id}`,
+          name: mp.name,
+          summary: `${mp.name} · removed valve · ${min} min${liters != null ? ` · ${liters} L` : ""}`,
+          liters,
+        };
+      },
+      [from.getTime(), to.getTime()],
+      this._filter
+    );
+  }
+
+  // Timeline: one row per metering point (valves without one: their own row), grouped by site.
+  private _renderTimeline(tlRows: TlRow<Valve, GridEvent>[]) {
     const [from, to] = this._window();
     const t0 = from.getTime();
     const span = to.getTime() - t0;
     const pct = (ms: number) => ((ms - t0) / span) * 100;
     const now = Date.now();
 
-    const byKey = new Map<string, GridEvent[]>();
-    for (const e of events) (byKey.get(e.key) ?? byKey.set(e.key, []).get(e.key)!).push(e);
-
-    // Grouped by site, like the Valves tab.
-    const valves = this._visible();
-    const groupOf = (v: Valve) => {
-      const p = this._placeOf(v);
-      return p.siteName ?? (p.mp ? "No site" : "No metering point");
-    };
-    const groups = new Map<string, Valve[]>();
-    for (const v of [...valves].sort(
-      (a, b) => groupOf(a).localeCompare(groupOf(b)) || a.valve_name.localeCompare(b.valve_name)
-    ))
-      (groups.get(groupOf(v)) ?? groups.set(groupOf(v), []).get(groupOf(v))!).push(v);
+    // Grouped by site, like the Valves tab; timelineRows sorts them.
+    const groups = new Map<string, TlRow<Valve, GridEvent>[]>();
+    for (const r of tlRows) (groups.get(r.group) ?? groups.set(r.group, []).get(r.group)!).push(r);
     const groupNames = [...groups.keys()];
 
     // axis ticks: every 3 h for one day, 12 h for three, a day for seven
@@ -591,8 +609,8 @@ export class IrrigationCalendarCard extends LitElement {
     const rows = groupNames.map((g) => {
       const items = groups
         .get(g)!
-        .map((v) => {
-          const evs = byKey.get(v.registry_entity) ?? [];
+        .map((row) => {
+          const { evs, valve: v } = row;
           const problem = evs.some(
             (e) =>
               e.kind === "missed" ||
@@ -600,14 +618,14 @@ export class IrrigationCalendarCard extends LitElement {
               isDry(e) || // opened, but no water went through (977, 25.09.)
               e.end - e.start > 4 * HOUR_MS
           );
-          return { v, evs, problem };
+          return { row, v, evs, problem };
         })
         .filter((r) => !this._problemsOnly || r.problem);
       if (!items.length) return nothing;
       shown += items.length;
       return html`
         <div class="grouphdr">${g}</div>
-        ${items.map(({ v, evs, problem }) => {
+        ${items.map(({ row, v, evs, problem }) => {
           const planMs = evs.reduce((s, e) => {
             if (e.kind === "planned" || e.kind === "missed") return s + (e.end - e.start);
             if (e.planStart != null && e.planEnd != null) return s + (e.planEnd - e.planStart);
@@ -620,12 +638,15 @@ export class IrrigationCalendarCard extends LitElement {
             null
           );
           return html`
-            <div class="row clickable ${problem ? "problem" : ""}" @click=${() => this._open(v.view_path)}>
-              <div class="name" title=${v.valve_name}>
-                <i class="dot ${this._online(v) ? "" : "off"}" title=${this._online(v) ? "Online now" : "Offline now"}></i>${v.valve_name}
+            <div class="row ${v ? "clickable" : ""} ${problem ? "problem" : ""}" @click=${() => v && this._open(v.view_path)}>
+              <div class="name" title=${row.mp ? `${row.name}${v ? ` · valve now: ${v.valve_name}` : " · no valve now"}` : row.name}>
+                <i
+                  class="dot ${v && this._online(v) ? "" : "off"}"
+                  title=${!v ? "No valve now" : this._online(v) ? "Online now" : "Offline now"}
+                ></i>${row.name}${row.mp && v ? html` <span class="num">${valveNumber(v.valve_name)}</span>` : nothing}
               </div>
               <div class="track">
-                ${(this._offline.get(v.registry_entity) ?? []).map(
+                ${(v ? this._offline.get(v.registry_entity) ?? [] : []).map(
                   ([s, e]) => html`<i
                     class="offline"
                     style="left:${pct(s)}%;width:${Math.max(pct(e) - pct(s), 0.3)}%"
@@ -645,8 +666,8 @@ export class IrrigationCalendarCard extends LitElement {
               <div class="metric ${planMs ? "" : "muted"}">${fmtMin(planMs)}</div>
               <div class="metric ${runMs ? "" : "muted"}">${fmtMin(runMs)}</div>
               <div class="metric ${liters == null ? "muted" : ""}">${fmtL(liters)}</div>
-              <div class="metric ${this._battery(v) == null ? "muted" : ""}" title="Battery now">
-                ${this._battery(v) == null ? "–" : `${this._battery(v)} %`}
+              <div class="metric ${!v || this._battery(v) == null ? "muted" : ""}" title="Battery now">
+                ${!v || this._battery(v) == null ? "–" : `${this._battery(v)} %`}
               </div>
             </div>
           `;
@@ -667,8 +688,8 @@ export class IrrigationCalendarCard extends LitElement {
           <div class="metric" title="Battery now"><span class="lbl-long">battery</span><span class="lbl-short">bat</span></div>
         </div>
         ${rows}
-        ${!valves.length
-          ? html`<div class="empty">No valves on this dashboard yet. Use "Re-sync valves" on the overview.</div>`
+        ${!tlRows.length
+          ? html`<div class="empty">No metering points or valves match.</div>`
           : this._problemsOnly && shown === 0
             ? html`<div class="empty">No missed or unplanned runs in this range.</div>`
             : nothing}
@@ -1024,6 +1045,10 @@ export class IrrigationCalendarCard extends LitElement {
     .row.problem .name {
       color: var(--cc-missed);
     }
+    .name .num {
+      color: var(--cc-dim);
+      font-size: 0.8rem;
+    }
     .axis {
       position: relative;
       height: 100%;
@@ -1170,4 +1195,10 @@ if (!customElements.get("irrigation-calendar-card")) {
       description: "Planned, ran, missed and unplanned irrigation runs as a day grid, week grid or per-valve timeline.",
     });
   }
+}
+
+/** "#810" from "FG Verbs North Fence (810)" or "810"; "" when the name has none. */
+function valveNumber(name: string): string {
+  const m = /\(?(\d{3,4})\)?\s*$/.exec(name);
+  return m ? `#${m[1]}` : "";
 }
