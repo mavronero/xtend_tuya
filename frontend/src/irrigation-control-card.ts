@@ -103,6 +103,11 @@ export class IrrigationControlCard extends LitElement {
     return v?.state === "on";
   }
 
+  // Set by the backend on QT-08W-T3 valve switches (XTT3ValveSwitchEntity).
+  private _isT3(): boolean {
+    return this.hass.states[this._config.valve]?.attributes?.timed_runs_only === true;
+  }
+
   private _activeMode(): Mode | null {
     if (!this._config.mode_sensor) return null;
     const e = this.hass.states[this._config.mode_sensor];
@@ -296,6 +301,8 @@ export class IrrigationControlCard extends LitElement {
 
   private _renderStatus(running: boolean, inProgress: boolean) {
     if (inProgress) return html`<span class="status watering" title="A watering cycle is running"><i></i>Watering</span>`;
+    // QT-08W-T3 has no manual open, so "on" is always a timed run.
+    if (running && this._isT3()) return html`<span class="status watering" title="A watering cycle is running"><i></i>Watering</span>`;
     if (running)
       return html`<span class="status manual" title="Opened by hand: it will not stop by itself"><i></i>Open, no auto-stop</span>`;
     return html`<span class="status" title="Closed"><i></i>Idle</span>`;
@@ -387,14 +394,14 @@ export class IrrigationControlCard extends LitElement {
       <button class="btn primary wide" @click=${this._startSingleWatering}>
         <ha-icon icon="mdi:play"></ha-icon>Start watering · ${duration ? `${shown} min` : `${shown} L`}
       </button>
-      <button
+      ${this._isT3() && !this._isOn() ? nothing : html`<button
         class="btn wide ${this._isOn() ? "warn" : ""}"
         @click=${this._toggleManual}
         title=${this._isOn() ? "Close the valve" : "Open the valve by hand: it will not stop by itself"}
       >
         <ha-icon icon=${this._isOn() ? "mdi:valve-closed" : "mdi:valve-open"}></ha-icon>
-        ${this._isOn() ? "Close valve" : "Open valve (no auto-stop)"}
-      </button>
+        ${this._isOn() ? (this._isT3() ? "Stop watering" : "Close valve") : "Open valve (no auto-stop)"}
+      </button>`}
     `;
   }
 

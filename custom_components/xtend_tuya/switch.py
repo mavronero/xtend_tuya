@@ -1,6 +1,8 @@
 """Support for XT switches."""
 
 from __future__ import annotations
+import base64
+import binascii
 from typing import cast, Any
 from dataclasses import dataclass
 from tuya_device_handlers.definition.switch import (
@@ -9,6 +11,7 @@ from tuya_device_handlers.definition.switch import (
 )
 from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .util import (
@@ -20,6 +23,7 @@ from .multi_manager.multi_manager import (
     XTDevice,
 )
 from .const import (
+    DOMAIN,
     TUYA_DISCOVERY_NEW,
     XTDPCode,
     CROSS_CATEGORY_DEVICE_DESCRIPTOR,
@@ -50,7 +54,14 @@ class XTSwitchEntityDescription(TuyaSwitchEntityDescription, frozen_or_thawed=Tr
         description: XTSwitchEntityDescription,
         definition: SwitchDefinition,
     ) -> XTSwitchEntity:
-        return XTSwitchEntity(
+        entity_class = (
+            XTT3ValveSwitchEntity
+            if description.key == XTDPCode.SWITCH_1
+            and device.category == "sfkzq"
+            and T3_SAT_CODE in device.status
+            else XTSwitchEntity
+        )
+        return entity_class(
             device=device,
             device_manager=device_manager,
             description=XTSwitchEntityDescription(**description.__dict__),
@@ -660,3 +671,58 @@ class XTSwitchEntity(XTEntity, TuyaSwitchEntity):
             description=XTSwitchEntityDescription(**description.__dict__),
             definition=definition,
         )
+
+
+# QT-08W-T3 status DP; layout in entity_parser/valves/codecs/t3_status.py. Read
+# inline here because the platform layer may not import the valve drivers.
+T3_SAT_CODE = "sat_0"
+T3_SAT_OPEN_BYTE = 4
+
+
+class XTT3ValveSwitchEntity(XTSwitchEntity):
+    """QT-08W-T3 valve switch.
+
+    The firmware never reports switch_1 during a run (0 "on" states in 14 days
+    across the fleet), so the switch read "off" while water flowed and every
+    consumer (Water-now card, Valves page, timeline, Simon's watchdog) missed
+    T3 runs. The open state lives in sat_0 byte[4] instead. Writes go through
+    the single-run codec: cyc_control_0 is the only run DP the T3 acts on.
+    """
+
+    # Tells the Water-now card there is no manual open on this valve.
+    _attr_extra_state_attributes = {"timed_runs_only": True}
+
+    @property
+    def is_on(self) -> bool | None:
+        raw = self.device.status.get(T3_SAT_CODE)
+        try:
+            sat = base64.b64decode(raw) if isinstance(raw, str) and raw else b""
+        except (binascii.Error, ValueError):
+            sat = b""
+        return sat[T3_SAT_OPEN_BYTE] == 1 if len(sat) > T3_SAT_OPEN_BYTE else None
+
+    async def _process_device_update(
+        self,
+        updated_status_properties: list[str],
+        dp_timestamps: dict[str, int] | None,
+    ) -> bool:
+        if T3_SAT_CODE in updated_status_properties:
+            return True
+        return await super()._process_device_update(updated_status_properties, dp_timestamps)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        raise HomeAssistantError(
+            "QT-08W-T3 valves cannot be opened without a duration: use Start watering"
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        # The valve plugin's stop service writes the profile's idle frame.
+        result = await self.hass.services.async_call(
+            DOMAIN,
+            "fdm5kw_stop_watering",
+            {"device_id": self.device.id},
+            blocking=True,
+            return_response=True,
+        )
+        if not (result or {}).get("success"):
+            raise HomeAssistantError(f"Stop failed on {self.device.name}: {result}")

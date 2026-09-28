@@ -1,8 +1,11 @@
 """QT-08W-T3 status DPs `sat_0` and `flow_sta_0` (decoded live 2026-07-15).
 
 sat_0, 13 bytes: 00 01 00 [BB] 00 01 00 [Y M D H M] 00
-  byte[3] & 0x7F = battery % (high bit = charge/sun flag); bytes[7..11] =
-  next irrigation [Y-2000, M, D, H, M], 0xFF year / month 0 = no schedule.
+  byte[3] & 0x7F = battery % (high bit = charge/sun flag); byte[4] = 1 while
+  the valve is open, manual or timer run (switch_1 never reports a run; read
+  by switch.XTT3ValveSwitchEntity; Tuya logs 2026-09-26/28, 711 + 708);
+  bytes[7..11] = next irrigation [Y-2000, M, D, H, M], 0xFF year / month 0 =
+  no schedule.
 flow_sta_0: bytes[1:5] BE = liters, live during a run, then the run total.
 """
 
