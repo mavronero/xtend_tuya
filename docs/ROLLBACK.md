@@ -33,6 +33,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-28 | 4.4.280 | 4.4.279 | ok (SMOKE OK; irrigation_locations 4.6-5.0 s -> 0.57 s, valve_locations 5.3-5.5 s -> 0.40 s, payloads byte-identical) |
 | 2026-09-28 | 4.4.281 | 4.4.280 | ok (SMOKE OK on the second run; the first hit a 500 while devices were still loading) |
 | 2026-09-28 | 4.4.284 (incl. 282, 283) | 4.4.281 | ok (SMOKE OK; tested first on dev in the browser: metering-point Timeline rows incl. a removed valve, delete refused with history / allowed for FG North Fence. Rollback: HACS 4.4.283/4.4.282/4.4.281; a deleted metering point stays deleted) |
+| 2026-09-28 | 4.4.285 | 4.4.284 | ok (SMOKE OK; per-run cap 50 -> 250 L/min, backfill v4 filled 811's 4 blanked runs but also shifted 10 correct runs; all 18 changed runs then set to the valves' own counter_custom liters with core stopped (patch18). Backups: .storage/xtend_tuya.irrigation_runs.pre-4.4.285 and .pre-patch18. Rollback: HACS 4.4.284; the store keeps backfill_version 4, so the repair does not re-run) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
