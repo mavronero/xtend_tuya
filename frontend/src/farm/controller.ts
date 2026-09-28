@@ -94,7 +94,10 @@ export class FarmController implements ReactiveController {
       this.data = data;
       this.error = null;
     } catch (e) {
-      this.error = `Home Assistant is starting, retrying… (${errText(e)})`;
+      // 404 (views not registered yet) / 502-504 (proxy) / no status: restarting.
+      const code = (e as { status_code?: number } | null)?.status_code;
+      this.error =
+        !code || code === 404 || code >= 502 ? `Home Assistant is starting, retrying… (${errText(e)})` : errText(e);
       if (this.connected) this.retry = window.setTimeout(() => void this.refresh(), RETRY_MS);
     } finally {
       this.busy = false;
