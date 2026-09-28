@@ -380,6 +380,26 @@ def delete_site(data: dict[str, Any], site_id: Any) -> None:
     del data["sites"][site["id"]]
 
 
+def delete_location(
+    data: dict[str, Any],
+    location_id: Any,
+    runs_by_device: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Only a metering point without a valve, runs or pump: a mistake, not history.
+
+    Its ended assignments go with it; they hold no runs, so nothing is lost.
+    """
+    loc = _get(data, location_id)
+    if any(a["location_id"] == loc["id"] and a["end"] is None for a in data["assignments"]):
+        raise ValueError("metering point still has a valve")
+    if location_runs(data, loc["id"], runs_by_device):
+        raise ValueError("metering point has watering history")
+    if any(p["target_kind"] == "location" and p["target_id"] == loc["id"] for p in data["pump_assignments"]):
+        raise ValueError("metering point has a pump")
+    data["assignments"] = [a for a in data["assignments"] if a["location_id"] != loc["id"]]
+    del data["locations"][loc["id"]]
+
+
 def set_location_site(data: dict[str, Any], location_id: Any, site_id: Any) -> None:
     loc = _get(data, location_id)
     if site_id is not None:

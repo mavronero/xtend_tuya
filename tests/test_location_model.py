@@ -157,6 +157,28 @@ def demo():
     assert f(d, "q", T4)["id"] == L2["id"]
     assert f(d, "other", T4) is None
 
+    # --- delete a metering point: only a mistake, never history -------
+    d = lm.empty()
+    typo = lm.create_location(d, "FG North Fence", T1)
+    real = lm.create_location(d, "FG Verbs North Fence", T1)
+    lm.assign_device(d, "v810", typo["id"], T2)
+    for bad in (typo["id"], "nope"):
+        try:
+            lm.delete_location(d, bad, {})
+            raise AssertionError(f"deleted {bad}")
+        except ValueError:
+            pass  # still holds 810 / unknown id
+    lm.assign_device(d, "v810", real["id"], T3)  # 810 moved on, typo holds only an ended stint
+    runs = {"v810": [run(T2.replace("08:00", "09:00"))]}
+    try:
+        lm.delete_location(d, typo["id"], runs)
+        raise AssertionError("deleted a metering point with a run")
+    except ValueError:
+        pass
+    lm.delete_location(d, typo["id"], {"v810": [run(T4)]})  # the run belongs to the real one
+    assert typo["id"] not in d["locations"]
+    assert [a["location_id"] for a in d["assignments"]] == [real["id"]]
+
     print("ok")
 
 

@@ -264,6 +264,9 @@ export class IrrigationSitesCard extends LitElement {
       @xt-mp-save=${(e: CustomEvent<MpSaveDetail>) => this._saveMp(mp, e.detail)}
       @xt-mp-assign=${(e: CustomEvent<string>) => this._post({ action: "assign_device", device_id: e.detail, location_id: mp.id })}
       @xt-mp-unassign=${(e: CustomEvent<string>) => this._post({ action: "end_assignment", device_id: e.detail, location_id: mp.id })}
+      @xt-mp-delete=${async () => {
+        if (await this._post({ action: "delete_location", id: mp.id })) this._editing = null;
+      }}
     ></xt-mp-editor>`;
   }
 

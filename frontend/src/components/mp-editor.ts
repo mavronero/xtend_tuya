@@ -5,6 +5,7 @@
  *   xt-mp-save     {name, description, expected_lpm, site_id}
  *   xt-mp-assign   device_id   put this valve here (exchanges the current one)
  *   xt-mp-unassign device_id   end this valve's assignment here
+ *   xt-mp-delete               remove this metering point (server refuses one with history)
  *   xt-close
  */
 
@@ -164,6 +165,14 @@ export class XtMpEditor extends LitElement {
               </ul>
             </section>`
           : nothing}
+        ${mp.valves.length
+          ? nothing
+          : html`<section>
+              <button type="button" class="link danger" ?disabled=${this.busy} @click=${() => this._fire("xt-mp-delete")}>
+                Delete metering point
+              </button>
+              <p class="hint dim">Only for one created by mistake: one with watering history stays.</p>
+            </section>`}
         ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
       </aside>
     `;

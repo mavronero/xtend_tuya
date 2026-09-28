@@ -271,6 +271,10 @@ class XTIrrigationLocationsView(HomeAssistantView):
                 lm.assign_device(data, _str(body, "device_id"), body.get("location_id"), now)
             elif action == "end_assignment":
                 lm.end_assignment(data, _str(body, "device_id"), body.get("location_id"), now)
+            elif action == "delete_location":
+                from .runs_store import async_get_store
+
+                lm.delete_location(data, body.get("id"), (await async_get_store(hass)).runs)
             elif action == "create_site":
                 result["site"] = lm.create_site(data, body.get("name"), body.get("parent_id"), now)
             elif action == "update_site":

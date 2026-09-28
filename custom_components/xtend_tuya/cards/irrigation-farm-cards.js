@@ -829,6 +829,12 @@ const pt={attribute:!0,type:String,converter:b,reflect:!1,hasChanged:x},ht=(t=pt
                   </li>`)}
               </ul>
             </section>`:G}
+        ${t.valves.length?G:B`<section>
+              <button type="button" class="link danger" ?disabled=${this.busy} @click=${()=>this._fire("xt-mp-delete")}>
+                Delete metering point
+              </button>
+              <p class="hint dim">Only for one created by mistake: one with watering history stays.</p>
+            </section>`}
         ${this.error?B`<div class="error">${this.error}</div>`:G}
       </aside>
     `}}He.styles=[pe,r`
@@ -1188,6 +1194,7 @@ const pt={attribute:!0,type:String,converter:b,reflect:!1,hasChanged:x},ht=(t=pt
       @xt-mp-save=${e=>this._saveMp(t,e.detail)}
       @xt-mp-assign=${e=>this._post({action:"assign_device",device_id:e.detail,location_id:t.id})}
       @xt-mp-unassign=${e=>this._post({action:"end_assignment",device_id:e.detail,location_id:t.id})}
+      @xt-mp-delete=${async()=>{await this._post({action:"delete_location",id:t.id})&&(this._editing=null)}}
     ></xt-mp-editor>`}_addMp(t){return B`<form class="editor" @submit=${e=>(e.preventDefault(),this._createMp(e.target,t))}>
       <label>New metering point <input placeholder="Name" /></label>
       <button type="submit" ?disabled=${this._busy}>Add</button>
