@@ -25,6 +25,8 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-25 | 4.4.271 | 4.4.270 | ok (SMOKE OK over Tailscale; backfill v2 "620 runs from 101 valves", store 3710 -> 4292 rows = dry run; 30 d runs 2144, liters 210,047; dup starts 0. Rollback: HACS 4.4.270; the added rows are real runs, keep them) |
 | 2026-09-25 | 4.4.272 | 4.4.271 | ok (SMOKE OK; backfill v3 "1032 runs added or corrected"; vs Tuya cloud 3 d: 178 exact, 18 within 5 %, 1 off (was 98/22/37); 30 d unknown liters 632 -> 5, 207,227 L; 63 valves per_cycle. Rollback: HACS 4.4.271; the repaired liters stay and are the correct ones) |
 | 2026-09-25 | 4.4.273 | 4.4.272 | ok (SMOKE OK; farm cards in farm time — 908 log shows 05:00/17:00 from a Berlin browser after a reload (HA service worker serves the old bundle until then). Frontend only; rollback: HACS 4.4.272) |
+| 2026-09-28 | 4.4.275 | 4.4.273 (4.4.274 released, not deployed alone: timeline 0 L flag, frontend only) | ok (SMOKE OK over Tailscale; 755 timer run 09:00 switch on, 15 L, off at its counter_custom close. But 719 read "on" from a stale startup frame: hotfix 4.4.276) |
+| 2026-09-28 | 4.4.276 | 4.4.275 (or 4.4.273 to drop the T3 switch entirely) | pending |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.

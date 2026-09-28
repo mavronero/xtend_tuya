@@ -31,6 +31,11 @@ async def test_t3_switch_follows_sat_0_and_stops_via_cyc_control(hass):
     assert entity_id, "T3 switch_1 entity missing"
     entity = hass.data["entity_components"]["switch"].get_entity(entity_id)
 
+    # An "open" frame from before startup is stale (719, 2026-09-28): off.
+    t3.status["sat_0"] = SAT_RUNNING
+    entity.async_write_ha_state()
+    assert hass.states.get(entity_id).state == STATE_OFF
+
     async def report_sat(value: str) -> None:
         t3.status["sat_0"] = value
         await entity._handle_state_update(["sat_0"], None)
@@ -39,6 +44,10 @@ async def test_t3_switch_follows_sat_0_and_stops_via_cyc_control(hass):
     await report_sat(SAT_RUNNING)
     assert hass.states.get(entity_id).state == STATE_ON
     assert hass.states.get(entity_id).attributes["timed_runs_only"] is True
+    entity._open_frame_at -= 3 * 3600  # no frame for 3 h: a lost close, not a run
+    entity.async_write_ha_state()
+    assert hass.states.get(entity_id).state == STATE_OFF
+    await report_sat(SAT_RUNNING)
     await report_sat(SAT_IDLE)
     assert hass.states.get(entity_id).state == STATE_OFF
 

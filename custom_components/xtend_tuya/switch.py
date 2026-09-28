@@ -3,6 +3,7 @@
 from __future__ import annotations
 import base64
 import binascii
+import time
 from typing import cast, Any
 from dataclasses import dataclass
 from tuya_device_handlers.definition.switch import (
@@ -677,6 +678,9 @@ class XTSwitchEntity(XTEntity, TuyaSwitchEntity):
 # inline here because the platform layer may not import the valve drivers.
 T3_SAT_CODE = "sat_0"
 T3_SAT_OPEN_BYTE = 4
+# ponytail: a run longer than this reads "off" until its next sat_0 frame;
+# raise it if the farm ever schedules longer runs.
+T3_OPEN_FRAME_MAX_AGE_S = 2 * 3600
 
 
 class XTT3ValveSwitchEntity(XTSwitchEntity):
@@ -692,8 +696,12 @@ class XTT3ValveSwitchEntity(XTSwitchEntity):
     # Tells the Water-now card there is no manual open on this valve.
     _attr_extra_state_attributes = {"timed_runs_only": True}
 
-    @property
-    def is_on(self) -> bool | None:
+    # Monotonic time of the last live sat_0 frame with the open byte set. The
+    # snapshot loaded at startup does not count: 719 sent one "open" frame on
+    # 2026-09-27 and nothing after, and read as watering for good.
+    _open_frame_at: float | None = None
+
+    def _sat_open(self) -> bool | None:
         raw = self.device.status.get(T3_SAT_CODE)
         try:
             sat = base64.b64decode(raw) if isinstance(raw, str) and raw else b""
@@ -701,12 +709,23 @@ class XTT3ValveSwitchEntity(XTSwitchEntity):
             sat = b""
         return sat[T3_SAT_OPEN_BYTE] == 1 if len(sat) > T3_SAT_OPEN_BYTE else None
 
+    @property
+    def is_on(self) -> bool | None:
+        is_open = self._sat_open()
+        if not is_open:
+            return is_open
+        return (
+            self._open_frame_at is not None
+            and time.monotonic() - self._open_frame_at < T3_OPEN_FRAME_MAX_AGE_S
+        )
+
     async def _process_device_update(
         self,
         updated_status_properties: list[str],
         dp_timestamps: dict[str, int] | None,
     ) -> bool:
         if T3_SAT_CODE in updated_status_properties:
+            self._open_frame_at = time.monotonic() if self._sat_open() else None
             return True
         return await super()._process_device_update(updated_status_properties, dp_timestamps)
 
