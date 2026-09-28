@@ -148,6 +148,16 @@ export const pageStyles = css`
       padding: 12px 0;
       color: var(--xt-dim);
     }
+    ha-card > .msg {
+      padding: 12px 16px;
+    }
+    /* A bordered block within a page (Trello Jv64HWJz, V8SogBc8). */
+    .panel {
+      border: 1px solid var(--divider-color);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+    }
     .err {
       color: var(--xt-bad);
     }
