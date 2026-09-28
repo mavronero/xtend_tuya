@@ -1,7 +1,7 @@
 // Pump feeds (inheritance, overrides, dated) and the water balance.
 // Run: node --experimental-strip-types tests/test_pump_summary.mjs
 import assert from "node:assert/strict";
-import { balance, pumpFeeds, pumpOfMpAt, periodStart } from "../frontend/src/farm/pump-summary.ts";
+import { balance, niceTicks, pumpFeeds, pumpOfMpAt, periodStart } from "../frontend/src/farm/pump-summary.ts";
 
 const H = 3_600_000;
 const now = new Date(2026, 8, 24, 12, 0).getTime();
@@ -96,5 +96,11 @@ const empty = balance(data, data.pumps[1], {}, now - 24 * H, now, "day");
 assert.equal(empty.pump, null);
 assert.equal(empty.unaccounted, null);
 assert.equal(empty.valves, 90); // v2 50 + v3 40
+
+// Chart y-axis ticks (m³).
+assert.deepEqual(niceTicks(1.1), [0, 0.5, 1, 1.5]);
+assert.deepEqual(niceTicks(1), [0, 0.5, 1]);
+assert.deepEqual(niceTicks(9.6), [0, 5, 10]);
+assert.deepEqual(niceTicks(0.1), [0, 0.05, 0.1]);
 
 console.log("ok");
