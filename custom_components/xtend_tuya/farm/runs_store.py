@@ -55,9 +55,13 @@ RETENTION_DAYS = 730
 # is at most this far in the future. Clock skew margin.
 MAX_FUTURE_SLACK_SEC = 120
 
-# Physical plausibility cap for liters at close: 50 L/min (2× meter spec)
-# times the run duration, floored at 50 L for sub-minute runs.
-MAX_LPM_CAP = 50.0
+# Liters at close count as the valve reports them, like SmartLife shows them
+# (811 on 2026-09-28: 522 L in 5 min, a smooth 104 L/min climb, was blanked
+# by the former 50 L/min cap). Only a total above this rate is dropped: that
+# is a misread lifetime odometer or a counter reset, not a run.
+# Floored at 50 L for sub-minute runs.
+# ponytail: lower it if a misread total below 250 L/min ever gets through.
+MAX_LPM_CAP = 250.0
 
 # Runs longer than this are stuck-open/garbage records, not real watering
 # cycles (mirrors calendar.MAX_SANE_RUN_SECONDS). Applies to every path.
@@ -690,7 +694,8 @@ class RunsStore:
 
 # 2: pair by value, catches pre-reported closes
 # 3: liters = summed counter climb, repairs stored liters (2026-09-25 check)
-BACKFILL_VERSION = 3
+# 4: refill liters the former 50 L/min cap blanked (MAX_LPM_CAP now 250)
+BACKFILL_VERSION = 4
 
 
 def pair_by_value(
@@ -778,7 +783,7 @@ def _new_accumulator(now: datetime) -> dict[str, Any]:
 
 
 def _sane_liters(value: float | None, duration_s: float) -> float | None:
-    """Reject a per-run total no impeller could have delivered."""
+    """Drop a per-run total that is an odometer or reset, not a run."""
     if value is None or value < 0:
         return None
     return value if value <= max(50.0, MAX_LPM_CAP * duration_s / 60.0) else None

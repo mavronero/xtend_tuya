@@ -156,6 +156,10 @@ def demo():
     assert rs._sane_liters(600.0, 900) == 600.0     # 40 L/min over 15 min is real
     assert rs._sane_liters(None, 900) is None
     assert rs._sane_liters(-1.0, 900) is None
+    # 811, 2026-09-28: counts as the valve reports it (SmartLife shows the same)
+    assert rs._sane_liters(522.0, 300) == 522.0
+    assert rs._sane_liters(114.0, 60) == 114.0
+    assert rs._sane_liters(4000.0, 300) is None  # 800 L/min: a misread odometer
 
     # --- R4: the counter_custom row overrides a flow-derived one -------
     s = store()
