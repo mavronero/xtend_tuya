@@ -30,6 +30,8 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-28 | 4.4.277 | 4.4.276 | ok (SMOKE OK; Uli tested 711: Watering shown, Stop works, 5 L logged; countdown froze -> 4.4.278) |
 | 2026-09-28 | 4.4.278 | 4.4.277 | ok (SMOKE OK; Uli tested 711 after a browser reload: countdown ticks, stop works. Browsers keep the old card until the HA service worker lets go) |
 | 2026-09-28 | 4.4.279 | 4.4.278 | ok (SMOKE OK; Uli: log row appears after stop without reload) |
+| 2026-09-28 | 4.4.280 | 4.4.279 | ok (SMOKE OK; irrigation_locations 4.6-5.0 s -> 0.57 s, valve_locations 5.3-5.5 s -> 0.40 s, payloads byte-identical) |
+| 2026-09-28 | 4.4.281 | 4.4.280 | ok (SMOKE OK on the second run; the first hit a 500 while devices were still loading) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
