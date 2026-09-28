@@ -5,12 +5,14 @@
  * show must be in it too — not the viewer's. A browser in Germany showed a
  * 05:00 timer's runs at 04:00 (Simon, 2026-09-25).
  *
- * The zone is Home Assistant's configured one (hass.config.time_zone).
- * Cards call setFarmTimeZone() from their hass setter; until one has, the
- * browser's zone is used.
+ * The zone is Home Assistant's configured one (hass.config.time_zone), the
+ * language the user's HA one (hass.locale.language). Cards call
+ * syncFarmTimeZone() from their hass setter; until one has, the browser's
+ * zone and language are used.
  */
 
 let zone: string | undefined;
+let lang: string | undefined;
 
 export function setFarmTimeZone(tz: string | undefined | null): void {
   if (tz && tz !== zone) {
@@ -20,8 +22,15 @@ export function setFarmTimeZone(tz: string | undefined | null): void {
 }
 
 /** Sync from a hass object; cheap, call it from every hass setter. */
-export function syncFarmTimeZone(hass: { config?: { time_zone?: string } } | undefined): void {
+export function syncFarmTimeZone(
+  hass: { config?: { time_zone?: string }; locale?: { language?: string }; language?: string } | undefined
+): void {
   setFarmTimeZone(hass?.config?.time_zone);
+  const l = hass?.locale?.language ?? hass?.language;
+  if (l && l !== lang) {
+    lang = l;
+    fmtCache.clear();
+  }
 }
 
 export function farmTimeZone(): string | undefined {
@@ -30,7 +39,7 @@ export function farmTimeZone(): string | undefined {
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();
 
-function fmt(opts: Intl.DateTimeFormatOptions, locale?: string): Intl.DateTimeFormat {
+function fmt(opts: Intl.DateTimeFormatOptions, locale = lang): Intl.DateTimeFormat {
   const key = JSON.stringify([locale ?? "", opts]);
   let f = fmtCache.get(key);
   if (!f) {
@@ -125,7 +134,7 @@ export function farmDate(ms: number, opts: Intl.DateTimeFormatOptions = {}): str
   return fmt(opts).format(ms);
 }
 
-/** "05:00" in farm time. */
+/** "05:00" in farm time, 24 h in every language. */
 export function farmTime(ms: number): string {
-  return fmt({ hour: "2-digit", minute: "2-digit" }).format(ms);
+  return fmt({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ms);
 }

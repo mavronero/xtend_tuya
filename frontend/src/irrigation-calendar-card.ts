@@ -26,6 +26,7 @@ import { farmAddDays, farmDate, farmDayStart, farmHourOfDay, farmWeekStart, sync
 interface HomeAssistant {
   callApi?: <T = unknown>(method: string, path: string) => Promise<T>;
   states?: Record<string, { state: string }>;
+  connection?: { subscribeEvents: (cb: (ev: unknown) => void, type: string) => Promise<() => void> };
 }
 
 interface CalendarApiEvent {
@@ -140,9 +141,9 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _mode: Mode = (["day", "week", "timeline"].includes(pref(MODE_KEY, "day"))
     ? pref(MODE_KEY, "day")
     : "day") as Mode;
-  @state() private _range: 1 | 3 | 7 = ([1, 3, 7].includes(Number(pref(RANGE_KEY, "1")))
-    ? Number(pref(RANGE_KEY, "1"))
-    : 1) as 1 | 3 | 7;
+  @state() private _range: 1 | 3 | 7 = ([1, 3, 7].includes(Number(pref(RANGE_KEY, "7")))
+    ? Number(pref(RANGE_KEY, "7"))
+    : 7) as 1 | 3 | 7;
   @state() private _anchor: Date = startOfDay(new Date());
   @state() private _events: GridEvent[] = [];
   @state() private _problemsOnly = false;
@@ -159,6 +160,8 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _error: string | null = null;
   private _loadedKey = "";
   private _timer: number | undefined;
+  private _unsub?: Promise<() => void>;
+  private _debounce: number | undefined;
 
   setConfig(config: CardConfig): void {
     this._config = config;
@@ -185,10 +188,23 @@ export class IrrigationCalendarCard extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     if (this._timer) window.clearInterval(this._timer);
+    window.clearTimeout(this._debounce);
+    this._unsub?.then((unsub) => unsub(), () => undefined);
+    this._unsub = undefined;
   }
 
   updated(): void {
-    syncFarmTimeZone(this.hass as { config?: { time_zone?: string } } | undefined);
+    syncFarmTimeZone(this.hass as Parameters<typeof syncFarmTimeZone>[0]);
+    // Reload when the backend records or corrects a run (runs_store event),
+    // debounced: many valves close together at 05:00. Non-admin users may
+    // not subscribe: they get the 5-min poll only.
+    if (this.hass?.connection && !this._unsub) {
+      this._unsub = this.hass.connection.subscribeEvents(() => {
+        window.clearTimeout(this._debounce);
+        this._debounce = window.setTimeout(() => this._load(true), 2000);
+      }, "xtend_tuya_run_recorded");
+      this._unsub.catch(() => undefined);
+    }
     if (!this._farmLoaded && this.hass?.callApi) {
       this._farmLoaded = true;
       loadFarmData(this.hass as Parameters<typeof loadFarmData>[0]).then(
@@ -210,8 +226,13 @@ export class IrrigationCalendarCard extends LitElement {
       const from = startOfWeek(this._anchor);
       return [from, addDays(from, 7)];
     }
+    if (this._mode === "timeline") {
+      // the anchor day is the last one: "7 d" = the past week up to today
+      const to = addDays(startOfDay(this._anchor), 1);
+      return [addDays(to, -this._range), to];
+    }
     const from = startOfDay(this._anchor);
-    return [from, addDays(from, this._mode === "timeline" ? this._range : 1)];
+    return [from, addDays(from, 1)];
   }
 
   /** The valves: from the config if it lists them (saved dashboards), else
@@ -342,6 +363,8 @@ export class IrrigationCalendarCard extends LitElement {
   private _setRange(r: 1 | 3 | 7): void {
     this._range = r;
     setPref(RANGE_KEY, String(r));
+    // a shifted anchor made "1 d" show some past day instead of today
+    this._anchor = startOfDay(new Date());
   }
 
   private _shift(n: number): void {
@@ -511,7 +534,7 @@ export class IrrigationCalendarCard extends LitElement {
                 style="min-width:${Math.max(110, maxLanes * laneW)}px"
               >
                 ${days > 1
-                  ? html`<div class="colhead"><span>${farmDate(dayStart, { weekday: "short", day: "numeric" })}</span></div>`
+                  ? html`<div class="colhead"><span>${farmDate(dayStart, { weekday: "long", day: "numeric" })}</span></div>`
                   : nothing}
                 <div class="lines"></div>
                 ${placed.map(({ ev, lane, lanes }) => {
@@ -911,7 +934,6 @@ export class IrrigationCalendarCard extends LitElement {
       height: 22px;
       line-height: 22px;
       font-size: 0.75rem;
-      text-transform: uppercase;
       letter-spacing: 0.04em;
       border-bottom: 1px solid var(--cc-line);
       color: var(--cc-dim);

@@ -9,6 +9,9 @@ import {
   farmWeekStart,
   farmHourOfDay,
   fromWallClock,
+  syncFarmTimeZone,
+  farmDate,
+  farmTime,
 } from "../frontend/src/components/farm-time.ts";
 
 setFarmTimeZone("Asia/Nicosia");
@@ -25,4 +28,11 @@ assert.equal(farmAddDays(run, 1), Date.UTC(2026, 8, 25, 21, 0));
 assert.equal(farmWeekStart(run), Date.UTC(2026, 8, 20, 21, 0)); // Mon 21 Sept 00:00
 // DST end (Cyprus, 25 Oct 2026 04:00 → 03:00): the day is 25 h, next midnight is UTC+2
 assert.equal(farmAddDays(Date.UTC(2026, 9, 25, 6), 1), Date.UTC(2026, 9, 25, 22, 0));
+// language follows HA's, not the browser's; times stay 24 h in English too
+syncFarmTimeZone({ config: { time_zone: "Asia/Nicosia" }, locale: { language: "de" } });
+assert.equal(farmDate(run, { weekday: "long" }), "Freitag");
+syncFarmTimeZone({ config: { time_zone: "Asia/Nicosia" }, locale: { language: "en" } });
+assert.equal(farmDate(run, { weekday: "long" }), "Friday");
+assert.equal(farmTime(run), "05:00");
+assert.equal(farmTime(Date.UTC(2026, 8, 25, 14, 30)), "17:30");
 console.log("ok");
