@@ -23,6 +23,7 @@ export class FarmController implements ReactiveController {
   private host: Host;
   private timer?: number;
   private busy = false;
+  private rerun = false;
   private memo: { at: number; data: FarmData; valves: ValveEntities[]; list: ValveSummary[] } | null = null;
 
   constructor(host: Host) {
@@ -51,7 +52,12 @@ export class FarmController implements ReactiveController {
   /** Reload now; `changed` drops the shared cache after an edit. */
   async refresh(changed = false): Promise<void> {
     const hass = this.host.hass;
-    if (!hass || this.busy) return;
+    if (!hass) return;
+    if (this.busy) {
+      // A load is in flight and may predate the edit: run once more after it.
+      if (changed) this.rerun = true;
+      return;
+    }
     if (changed) invalidateFarmData();
     this.busy = true;
     try {
@@ -66,6 +72,10 @@ export class FarmController implements ReactiveController {
       this.busy = false;
       this.loaded = true;
       this.host.requestUpdate();
+    }
+    if (this.rerun) {
+      this.rerun = false;
+      await this.refresh(true);
     }
   }
 
