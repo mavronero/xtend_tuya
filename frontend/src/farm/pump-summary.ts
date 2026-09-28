@@ -168,3 +168,12 @@ export function balance(
     buckets: [...buckets.values()].sort((a, b) => a.start - b.start),
   };
 }
+
+/** Axis ticks from 0 to at least max, on a 1/2/5 step, about `target` steps. */
+export function niceTicks(max: number, target = 3): number[] {
+  const raw = max / target;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].find((m) => m * mag >= raw)! * mag;
+  const n = Math.ceil(max / step - 1e-9);
+  return Array.from({ length: n + 1 }, (_, i) => Math.round(i * step * 1e9) / 1e9);
+}

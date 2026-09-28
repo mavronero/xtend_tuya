@@ -3,7 +3,7 @@
  *   type: custom:irrigation-pumps-card
  *
  * Left the pumps (live status) and "No pump". Right the selected pump: live
- * figures from its integration's entities, the water balance with the flow
+ * figures from its integration's entities, the water flow (balance) with the
  * chart over 24 h / 7 d / 30 d, what it feeds (sites, metering points,
  * overrides that leave for another pump) and the devices connected by hand.
  * Pump data is only read: live states from hass, history from HA's
@@ -288,7 +288,9 @@ export class IrrigationPumpsCard extends LitElement {
     return html`<div class="figures">
       ${st === "unknown"
         ? html`<span class="warn" title="The pump's meter reports no value">No data from the pump</span>`
-        : html`<span title="Pump status"><i class="dot ${st}"></i>${status ?? (st === "running" ? "Running" : "Idle")}</span>`}
+        : html`<span title=${status ? `Pump status: ${status}` : "Pump status"}
+            ><i class="dot ${st}"></i>${status === "Go" ? "Running" : status ?? (st === "running" ? "Running" : "Idle")}</span
+          >`}
       ${flow !== null ? html`<span title="Live flow"><ha-icon icon="mdi:waves-arrow-right"></ha-icon>${flow.toFixed(1)} L/min</span>` : nothing}
       ${pressure !== null ? html`<span title="Pressure"><ha-icon icon="mdi:gauge"></ha-icon>${pressure.toFixed(1)} bar</span>` : nothing}
       <span title="Metering points and valves fed now"
@@ -320,33 +322,44 @@ export class IrrigationPumpsCard extends LitElement {
       };
     }
     const b = this._balanceMemo!.value;
-    const pct = (l: number) => (b.pump ? ` · ${Math.round((l / b.pump) * 100)} %` : "");
+    const pct = (l: number) => (b.pump ? `${Math.round((l / b.pump) * 100)} %` : "");
     const siteName = this._site ? sitePath(this._farm.data.sites, this._site) : null;
     return html`<section>
       <div class="section-head">
-        <h3>Water balance</h3>
+        <h3>Water flow</h3>
         <div class="chips" role="group" aria-label="Range">
           ${(Object.keys(RANGES) as Range[]).map(
             (r) => html`<button class=${r === this._range ? "on" : ""} @click=${() => this._setRange(r)}>${r}</button>`
           )}
         </div>
       </div>
-      <div class="tiles">
-        <div title="What the pump's meter counted"><span class="dim">Pump delivered</span><b>${b.pump === null ? "no data" : volume(b.pump)}</b></div>
-        <div title="Runs of the valves this pump fed at the time${siteName ? `, in ${siteName}` : ""}">
-          <span class="dim">${siteName ? `Valves in ${siteName}` : "Valves"}</span><b>${volume(b.valves)}</b><span class="dim">${pct(b.valves)}</span>
+      <div class="panel">
+        <div class="tiles">
+          <div title="What the pump's meter counted">
+            <ha-icon icon="mdi:waves"></ha-icon>
+            <div><span>Pump volume</span><b>${b.pump === null ? "no data" : volume(b.pump)}</b><span class="dim">${pct(b.pump ?? 0)}</span></div>
+          </div>
+          <div title="Runs of the valves this pump fed at the time${siteName ? `, in ${siteName}` : ""}">
+            <ha-icon icon="mdi:pipe-valve"></ha-icon>
+            <div>
+              <span>${siteName ? `Valve volume in ${siteName}` : "Valve volume"}</span><b>${volume(b.valves)}</b><span class="dim">${pct(b.valves)}</span>
+            </div>
+          </div>
+          ${siteName
+            ? html`<div class="warn" title="Unaccounted water needs the whole pump: clear the site filter">
+                <ha-icon icon="mdi:alert-outline"></ha-icon>
+                <div><span>Unaccounted water</span><b>–</b><span class="dim">whole pump only</span></div>
+              </div>`
+            : html`<div class="warn" title="Pump minus valves minus metered consumers: tanks, taps, unmetered valves, leaks">
+                <ha-icon icon="mdi:alert-outline"></ha-icon>
+                <div>
+                  <span>Unaccounted water</span><b>${b.unaccounted === null ? "–" : volume(b.unaccounted)}</b
+                  ><span class="dim">${b.unaccounted === null ? "" : pct(b.unaccounted)}</span>
+                </div>
+              </div>`}
         </div>
-        <div title="Metered devices connected as consumers"><span class="dim">Metered consumers</span><b>${volume(b.consumers)}</b><span class="dim">${pct(b.consumers)}</span></div>
-        ${siteName
-          ? html`<div title="Unaccounted water needs the whole pump: clear the site filter">
-              <span class="dim">Unaccounted</span><b>–</b><span class="dim">whole pump only</span>
-            </div>`
-          : html`<div title="Pump minus valves minus consumers: tanks, taps, unmetered valves, leaks">
-              <span class="dim">Unaccounted</span><b>${b.unaccounted === null ? "–" : volume(b.unaccounted)}</b
-              ><span class="dim">${b.unaccounted === null ? "" : pct(b.unaccounted)}</span>
-            </div>`}
+        <xt-pump-chart .buckets=${b.buckets} period=${period}></xt-pump-chart>
       </div>
-      <xt-pump-chart .buckets=${b.buckets} period=${period}></xt-pump-chart>
     </section>`;
   }
 
@@ -376,34 +389,36 @@ export class IrrigationPumpsCard extends LitElement {
     const name = (id: string) => data.locations.find((l) => l.id === id)?.name ?? id;
     const pumpName = (id: string) => data.pumps.find((x) => x.id === id)?.name ?? id;
     return html`<section>
-      <h3>Feeds <span class="count">${f.mps.length}</span></h3>
-      ${this._edit ? this._assignForm(p) : nothing}
-      ${!f.mps.length && !groups.length ? html`<div class="msg">This pump is not assigned to a site or metering point yet.</div>` : nothing}
-      ${groups.map(
-        (g) => g.mps.length === 0 && this._site ? nothing : html`<div class="group">
-            <span>${g.path}</span><span class="dim">assigned here · ${g.mps.length}</span>
-            ${this._edit
-              ? html`<button class="link danger" ?disabled=${this._busy}
-                  @click=${() => this._post({ action: "end_pump_assignment", target_kind: "site", target_id: g.siteId })}>Unassign</button>`
-              : nothing}
-          </div>
-          <div class="grid">${g.mps.map(card)}</div>`
-      )}
-      ${direct.length
-        ? html`<div class="group"><span>Assigned directly</span><span class="dim">${direct.length}</span></div>
-            <div class="grid">${direct.map(card)}</div>`
-        : nothing}
-      ${f.overridden.length
-        ? html`<div class="group"><span>Overridden</span><span class="dim">in these sites, fed by another pump</span></div>
-            <ul class="plain">
-              ${f.overridden.map(
-                (o) => html`<li>
-                  ${name(o.mp)} →
-                  <a href="#" @click=${(e: Event) => (e.preventDefault(), this._open(o.pump))}>${pumpName(o.pump)}</a>
-                </li>`
-              )}
-            </ul>`
-        : nothing}
+      <h3>Assigned Valves <span class="count">· ${f.mps.length}</span></h3>
+      <div class="panel">
+        ${this._edit ? this._assignForm(p) : nothing}
+        ${!f.mps.length && !groups.length ? html`<div class="msg">This pump is not assigned to a site or metering point yet.</div>` : nothing}
+        ${groups.map(
+          (g) => g.mps.length === 0 && this._site ? nothing : html`<div class="group">
+              <span>${g.path}</span><span class="dim">assigned here · ${g.mps.length}</span>
+              ${this._edit
+                ? html`<button class="link danger" ?disabled=${this._busy}
+                    @click=${() => this._post({ action: "end_pump_assignment", target_kind: "site", target_id: g.siteId })}>Unassign</button>`
+                : nothing}
+            </div>
+            <div class="grid">${g.mps.map(card)}</div>`
+        )}
+        ${direct.length
+          ? html`<div class="group"><span>Assigned directly</span><span class="dim">${direct.length}</span></div>
+              <div class="grid">${direct.map(card)}</div>`
+          : nothing}
+        ${f.overridden.length
+          ? html`<div class="group"><span>Overridden</span><span class="dim">in these sites, fed by another pump</span></div>
+              <ul class="plain">
+                ${f.overridden.map(
+                  (o) => html`<li>
+                    ${name(o.mp)} →
+                    <a href="#" @click=${(e: Event) => (e.preventDefault(), this._open(o.pump))}>${pumpName(o.pump)}</a>
+                  </li>`
+                )}
+              </ul>`
+          : nothing}
+      </div>
     </section>`;
   }
 
@@ -427,28 +442,30 @@ export class IrrigationPumpsCard extends LitElement {
     const open = this._farm.data.pumpConnections.filter((c) => c.pump_id === p.id && c.end === null);
     return html`<section>
       <h3>Connected devices <span class="count">${open.length + valveCount}</span></h3>
-      <ul class="rows">
-        <li>
-          <ha-icon icon="mdi:valve"></ha-icon><span>${valveCount} valves</span>
-          <span class="chip">consumer</span><span class="dim">through the metering points it feeds</span>
-        </li>
-        ${open.map((c) => {
-          const meter = this._state(c.meter_entity);
-          return html`<li>
-            <ha-icon icon=${c.role === "consumer" ? "mdi:water-outline" : "mdi:eye-outline"}></ha-icon>
-            <span>${this._deviceName(c.device_id)}</span>
-            <span class="chip ${c.role}">${c.role}</span>
-            ${meter
-              ? html`<span class="dim" title=${c.meter_entity ?? ""}>${meter.state} ${meter.attributes.unit_of_measurement ?? ""}</span>`
-              : html`<span class="dim">${c.role === "consumer" ? "not metered" : ""}</span>`}
-            ${this._edit
-              ? html`<button class="link danger" ?disabled=${this._busy}
-                  @click=${() => this._post({ action: "disconnect_device", pump_id: p.id, device_id: c.device_id })}>Disconnect</button>`
-              : nothing}
-          </li>`;
-        })}
-      </ul>
-      ${this._edit ? this._connectForm(p, open.map((c) => c.device_id)) : nothing}
+      <div class="panel">
+        <ul class="rows">
+          <li>
+            <ha-icon icon="mdi:valve"></ha-icon><span>${valveCount} valves</span>
+            <span class="chip">consumer</span><span class="dim">through the metering points it feeds</span>
+          </li>
+          ${open.map((c) => {
+            const meter = this._state(c.meter_entity);
+            return html`<li>
+              <ha-icon icon=${c.role === "consumer" ? "mdi:water-outline" : "mdi:eye-outline"}></ha-icon>
+              <span>${this._deviceName(c.device_id)}</span>
+              <span class="chip ${c.role}">${c.role}</span>
+              ${meter
+                ? html`<span class="dim" title=${c.meter_entity ?? ""}>${meter.state} ${meter.attributes.unit_of_measurement ?? ""}</span>`
+                : html`<span class="dim">${c.role === "consumer" ? "not metered" : ""}</span>`}
+              ${this._edit
+                ? html`<button class="link danger" ?disabled=${this._busy}
+                    @click=${() => this._post({ action: "disconnect_device", pump_id: p.id, device_id: c.device_id })}>Disconnect</button>`
+                : nothing}
+            </li>`;
+          })}
+        </ul>
+        ${this._edit ? this._connectForm(p, open.map((c) => c.device_id)) : nothing}
+      </div>
     </section>`;
   }
 
@@ -621,15 +638,27 @@ export class IrrigationPumpsCard extends LitElement {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 12px;
-        margin: 12px 0 16px;
+        margin: 0 0 16px;
       }
-      .tiles div {
+      .tiles > div {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--xt-track);
+      }
+      .tiles > div > div {
         display: flex;
         flex-direction: column;
         gap: 2px;
-        padding: 10px 12px;
-        border-radius: 12px;
-        border: 1px solid var(--xt-track);
+      }
+      .tiles ha-icon {
+        --mdc-icon-size: 32px;
+        color: var(--xt-water);
+      }
+      .tiles .warn ha-icon {
+        color: var(--xt-warn);
       }
       .tiles b {
         font-size: 1.3rem;
@@ -644,10 +673,10 @@ export class IrrigationPumpsCard extends LitElement {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: var(--xt-ok);
+        background: var(--xt-dim);
       }
       .dot.running {
-        background: var(--xt-water);
+        background: var(--xt-ok);
       }
       .group {
         display: flex;
@@ -659,6 +688,9 @@ export class IrrigationPumpsCard extends LitElement {
         font-size: 0.75rem;
         font-weight: 600;
         color: var(--primary-color);
+      }
+      .panel > .group:first-child {
+        margin-top: 0;
       }
       .group .dim {
         text-transform: none;
