@@ -361,8 +361,10 @@ def demo():
     # the last reading lands just after the close report: the run takes it
     now = datetime.now().astimezone()
     s.add_run(DEV, now - timedelta(minutes=5), now - timedelta(seconds=2), 93.0)
+    s.hass.bus.fired.clear()
     s._late_close_reading(DEV, 94.0, now)
     assert s.runs[DEV][-1]["total_l"] == 94.0
+    assert s.hass.bus.fired == [(rs.EVENT_RUN_RECORDED, {"device_id": DEV})]
     s._late_close_reading(DEV, 95.0, now + timedelta(minutes=5))  # too late: next run's
     assert s.runs[DEV][-1]["total_l"] == 94.0
 

@@ -408,7 +408,7 @@ class RunsStore:
             return
         if _sane_liters(value, last["duration_seconds"]) is not None:
             last["total_l"] = value
-            self.async_schedule_save()
+            self._recorded(device_id)
 
     def _reset_accumulator(self, device_id: str) -> None:
         if acc := self._vol.get(device_id):
