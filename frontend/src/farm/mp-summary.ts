@@ -30,7 +30,7 @@ export interface MpSummary {
   last: RunInfo | null;
   next: RunInfo | null;
   week: Week;
-  /** Mean flow of the last 30 days' metered runs. */
+  /** Mean flow of the last 30 days' runs that measured water (0 L runs excluded). */
   avg_lpm: number | null;
   expected_lpm: number | null;
   pump: { name: string; via: string | null } | null;
@@ -63,7 +63,9 @@ export function summarizeMp(mp: MeteringPoint, data: FarmData, valves: ValveSumm
   const runs = mpRuns(mp, data);
   const metered = current.some((v) => v.has_flow_meter) || runs.some((r) => r.liters !== null && r.liters > 0);
 
-  const recent = runs.filter((r) => r.start >= now - 30 * DAY_MS && r.liters !== null && r.minutes >= MIN_METERED_MINUTES);
+  // Dry runs (0 L) are no-waterings, not slow flow: they would drag the mean
+  // toward 0. An all-dry point gets avg null and no_flow from its last run.
+  const recent = runs.filter((r) => r.start >= now - 30 * DAY_MS && (r.liters ?? 0) > 0 && r.minutes >= MIN_METERED_MINUTES);
   const minutes = recent.reduce((t, r) => t + r.minutes, 0);
   const avg_lpm = metered && minutes > 0 ? recent.reduce((t, r) => t + (r.liters ?? 0), 0) / minutes : null;
 
