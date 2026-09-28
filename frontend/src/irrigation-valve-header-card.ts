@@ -22,13 +22,35 @@ interface CardConfig {
   device_id: string;
 }
 
+// [label, what it means + what to do, tone]. The text shows on tap (touch
+// has no tooltip), and as the tooltip on desktop.
 const BADGE: Record<string, [string, string, "warn" | "bad"]> = {
-  low_battery: ["Low battery", "Battery below 20 %", "warn"],
-  stale: ["No report 36 h", "The valve has not reported for more than 36 hours", "warn"],
-  missed: ["Missed", "A planned run in the last 24 hours did not happen", "bad"],
-  no_flow: ["No water flow", "The last run measured no water", "bad"],
-  flow_low: ["Flow low", "Mean flow of the last 30 days is well below the expected L/min", "bad"],
-  flow_high: ["Flow high", "Mean flow of the last 30 days is well above the expected L/min (leak?)", "bad"],
+  low_battery: ["Low battery", "Battery below 20 %. Replace the valve's batteries soon.", "warn"],
+  stale: [
+    "No report 36 h",
+    "The valve has not reported for over 36 h. Check it is online in SmartLife and has battery. Clears on its next report.",
+    "warn",
+  ],
+  missed: [
+    "Missed",
+    "A planned run in the last 24 h did not happen. Check the valve is online and has battery. Clears 24 h after the slot.",
+    "bad",
+  ],
+  no_flow: [
+    "No water flow",
+    "The last run measured no water. Check the pump ran and the supply is open. Clears after a run that measures water.",
+    "bad",
+  ],
+  flow_low: [
+    "Flow low",
+    "30-day mean flow is well below the expected L/min: check the filter, or set the expected L/min for this metering point.",
+    "bad",
+  ],
+  flow_high: [
+    "Flow high",
+    "30-day mean flow is well above the expected L/min: check for a leak, or set the expected L/min for this metering point.",
+    "bad",
+  ],
 };
 
 function runText(r: RunInfo): string {
@@ -40,6 +62,8 @@ function runText(r: RunInfo): string {
 export class IrrigationValveHeaderCard extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistantLike;
   @state() private _config?: CardConfig;
+  /** Badge whose explanation is open (tap toggles). */
+  @state() private _help: string | null = null;
   private _farm = new FarmController(this);
 
   setConfig(config: CardConfig): void {
@@ -105,9 +129,19 @@ export class IrrigationValveHeaderCard extends LitElement {
             ? html`<div class="badges">
                 ${badges.map((b) => {
                   const [text, title, tone] = BADGE[b] ?? [b, b, "warn"];
-                  return html`<span class="badge ${tone}" title=${title}>${text}</span>`;
+                  return html`<button
+                    class="badge ${tone} ${this._help === b ? "open" : ""}"
+                    title=${title}
+                    aria-expanded=${this._help === b ? "true" : "false"}
+                    @click=${() => (this._help = this._help === b ? null : b)}
+                  >
+                    ${text}
+                  </button>`;
                 })}
-              </div>`
+              </div>
+              ${this._help && badges.includes(this._help as (typeof badges)[number])
+                ? html`<div class="help">${BADGE[this._help]?.[1] ?? this._help}</div>`
+                : nothing}`
             : nothing}
         </div>
         <div class="tiles">
@@ -233,9 +267,19 @@ export class IrrigationValveHeaderCard extends LitElement {
         gap: 4px;
       }
       .badge {
+        all: unset;
+        cursor: pointer;
         font-size: 0.8rem;
         padding: 2px 10px;
         border-radius: 12px;
+      }
+      .badge.open,
+      .badge:focus-visible {
+        outline: 1px solid currentColor;
+      }
+      .help {
+        font-size: 0.85rem;
+        color: var(--xt-dim);
       }
       .badge.warn {
         background: color-mix(in srgb, var(--xt-warn) 18%, transparent);

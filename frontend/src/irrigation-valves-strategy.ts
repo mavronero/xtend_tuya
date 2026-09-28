@@ -376,25 +376,19 @@ function buildWateringHistoryCard(v: ValveEntities, hours: number): unknown | nu
   // valve is open so the area under the curve equals total liters.
   // FDM5KW has no flow meter; the integration derives l/min from
   // cur_cap and elapsed-since-start, publishing fresh state every 10 s
-  // while a run is active. Fall back to the volume sensor for legacy
-  // installs that lack the derived flow entity.
+  // while a run is active.
   //
   // grid_columns=12: span the full row. The 10 s sample spacing is
   // narrow, and at 1/3-width on a 24h window the on-pulse rectangle
   // collapses to a single hairline; full-width gives Simon's team a
   // legible flow curve.
-  // Footer (the history-graph legend) shows each entity's current value.
-  // Per Simon/Uli 2026-06-03 it should carry BOTH the live flow rate and
-  // the volume watered so far in the current cycle. `volume_sensor`
-  // (cur_cap) resets to 0 between runs, so it reads as the running total
-  // for the active cycle; on the graph it ramps up during a run,
-  // complementing the flow curve.
+  // The "Watered (cycle)" volume_sensor line (2026-06-03) was dropped
+  // 2026-09 (Trello 8BibGJI0): Simon found it confusing; the watering log
+  // below lists liters per run.
   const entities: unknown[] = [];
   if (v.switch) entities.push({ entity: v.switch, name: "Valve" });
   if (v.flow_rate_sensor)
     entities.push({ entity: v.flow_rate_sensor, name: "Flow rate" });
-  if (v.volume_sensor)
-    entities.push({ entity: v.volume_sensor, name: "Watered (cycle)" });
   if (entities.length === 0) return null;
   return {
     type: "history-graph",

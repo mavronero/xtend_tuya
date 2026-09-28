@@ -8,7 +8,7 @@ import type { Run } from "../farm/data.ts";
 import { dayLabel, time } from "./format.ts";
 import { farmTokens } from "./theme.ts";
 
-const PAGE = 15;
+const PAGE = 5;
 
 function duration(seconds: number): string {
   const min = Math.round(seconds / 60);
@@ -79,6 +79,7 @@ export class XtRunHistory extends LitElement {
       }
       td {
         padding: 6px;
+        white-space: nowrap;
         border-bottom: 1px solid color-mix(in srgb, var(--xt-track) 60%, transparent);
       }
       .num {

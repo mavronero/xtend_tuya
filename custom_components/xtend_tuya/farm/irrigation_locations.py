@@ -126,7 +126,8 @@ def _stats(rows: list[dict[str, Any]], now: datetime) -> dict[str, Any]:
         return float(sum(r["total_l"] for r in rs if r.get("total_l") is not None))
 
     r7, r30 = window(7), window(30)
-    with_l = [r for r in r30 if r.get("total_l") is not None]
+    # 0 L runs are no-waterings; counting their minutes drags the mean to ~0.
+    with_l = [r for r in r30 if (r.get("total_l") or 0) > 0]
     minutes = sum(r["duration_seconds"] for r in with_l) / 60.0
     last = rows[-1] if rows else None
     return {

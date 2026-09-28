@@ -184,9 +184,15 @@ assert.equal(m1.next.start, now + 18 * H);
 // 386 L over 36 min = 10.7 L/min vs expected 20 -> flow_low
 assert.ok(Math.abs(m1.avg_lpm - 386 / 36) < 1e-9);
 assert.deepEqual(m1.badges, ["flow_low"]);
+// Dry (0 L) runs are no-waterings: they must not drag the mean toward 0.
+const data3 = { ...data2, runs: [...data2.runs, run("a", now - 26 * H, 30, 0)] };
+const m1dry = summarizeMp(data3.locations[0], data3, all, now);
+assert.ok(Math.abs(m1dry.avg_lpm - 386 / 36) < 1e-9);
+assert.deepEqual(m1dry.badges, ["flow_low"]);
 
 const m2 = summarizeMp(data2.locations[1], data2, all, now);
 assert.deepEqual(m2.badges, ["low_battery", "stale", "missed", "no_flow"]);
+assert.equal(m2.avg_lpm, null); // all dry: no mean, but still no_flow
 const m4 = summarizeMp(data2.locations[3], data2, all, now);
 assert.deepEqual([m4.status, m4.badges, m4.last], ["empty", ["no_valve"], null]);
 
