@@ -133,6 +133,16 @@ export function invalidateFarmData(): void {
   cached = null;
 }
 
+// Cards live in separate bundles, each with its own copy of this cache, so an
+// edit is announced page-wide and every FarmController reloads (controller.ts).
+export const FARM_CHANGED_EVENT = "xt-farm-changed";
+
+/** Call after a POST that changes locations, sites or pumps. */
+export function announceFarmChange(): void {
+  invalidateFarmData();
+  window.dispatchEvent(new Event(FARM_CHANGED_EVENT));
+}
+
 export function loadFarmData(hass: CallApi, now = Date.now()): Promise<FarmData> {
   if (!cached || now - cached.at > MAX_AGE_MS) {
     const data = fetchFarmData(hass, now);

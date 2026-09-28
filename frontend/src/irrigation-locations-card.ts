@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { farmDate } from "./components/farm-time.ts";
+import { announceFarmChange } from "./farm/data.ts";
 
 interface HomeAssistant {
   callApi?: <T = unknown>(
@@ -128,6 +129,7 @@ export class IrrigationLocationsCard extends LitElement {
     this._postError = null;
     try {
       await this.hass.callApi("POST", API, body);
+      announceFarmChange(); // header, Valves page, Sites view reload too
       await this._load();
       return true;
     } catch (e) {

@@ -4,7 +4,7 @@
 
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { discoverValves, fetchLocations, type HomeAssistantLike, type ValveEntities } from "./discovery.ts";
-import { EMPTY_FARM_DATA, invalidateFarmData, loadFarmData, type FarmData } from "./data.ts";
+import { EMPTY_FARM_DATA, FARM_CHANGED_EVENT, invalidateFarmData, loadFarmData, type FarmData } from "./data.ts";
 import { summarize, type ValveSummary } from "./valve-summary.ts";
 import { syncFarmTimeZone } from "../components/farm-time.ts";
 
@@ -30,12 +30,16 @@ export class FarmController implements ReactiveController {
     host.addController(this);
   }
 
+  private onFarmChanged = (): void => void this.refresh(true);
+
   hostConnected(): void {
     this.timer = window.setInterval(() => void this.refresh(), REFRESH_MS);
+    window.addEventListener(FARM_CHANGED_EVENT, this.onFarmChanged);
   }
 
   hostDisconnected(): void {
     if (this.timer) window.clearInterval(this.timer);
+    window.removeEventListener(FARM_CHANGED_EVENT, this.onFarmChanged);
   }
 
   hostUpdated(): void {

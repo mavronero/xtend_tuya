@@ -13,7 +13,7 @@
 import { LitElement, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { HomeAssistantLike } from "./farm/discovery.ts";
-import type { MeteringPoint, Site } from "./farm/data.ts";
+import { announceFarmChange, type MeteringPoint, type Site } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { childSites, NO_SITE, summarizeSite, type SiteSummary } from "./farm/site-summary.ts";
 import { sitePath, subtree } from "./farm/valve-filter.ts";
@@ -91,6 +91,7 @@ export class IrrigationSitesCard extends LitElement {
     this._error = null;
     try {
       await this.hass.callApi("POST", API, body);
+      announceFarmChange(); // its own controller reloads too
       await this._farm.refresh(true);
       return true;
     } catch (e) {
