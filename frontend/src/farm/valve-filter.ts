@@ -33,12 +33,14 @@ export interface Section {
 export const SECTION_TITLES: Record<SectionKey, string> = {
   watering: "Watering now",
   attention: "Needs attention",
-  sites: "Valves",
+  sites: "Online",
   offline: "Offline",
   unassigned: "Without location",
 };
 
-export const ALL_SECTIONS: SectionKey[] = ["watering", "attention", "sites", "offline", "unassigned"];
+// "unassigned" stays opt-in: the valves page lists those valves in the
+// irrigation-locations-card (unassigned: true) with its "Assign to…" select.
+export const ALL_SECTIONS: SectionKey[] = ["watering", "attention", "sites", "offline"];
 
 /** The site and every site below it. */
 export function subtree(sites: Site[], id: string): Set<string> {

@@ -42,7 +42,7 @@ export interface MpSaveDetail {
 const STATUS_TEXT: Record<ValveStatus, string> = { watering: "Watering", idle: "Idle", offline: "Offline" };
 
 function date(ms: number): string {
-  return farmDate(ms, { day: "numeric", month: "short", year: "numeric" });
+  return farmDate(ms, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 export class XtMpEditor extends LitElement {

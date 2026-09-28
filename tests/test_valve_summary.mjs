@@ -127,8 +127,11 @@ assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, search: "olive" }, sites
 const sections = sectionize(all, sites);
 assert.deepEqual(
   sections.map((s) => [s.key, s.count]),
-  [["watering", 1], ["attention", 1], ["sites", 2], ["offline", 1], ["unassigned", 1]]
+  [["watering", 1], ["attention", 1], ["sites", 2], ["offline", 1]]
 );
+assert.equal(sections[2].title, "Online");
+// Without location is opt-in (the locations card lists them on the page).
+assert.deepEqual(sectionize(all, sites, ["unassigned"]).map((s) => [s.key, s.count]), [["unassigned", 1]]);
 assert.deepEqual(
   sections[2].groups.map((g) => [g.title, names(g.valves)]),
   [["Big Farm › FF East", ["907"]], ["Honeymoon", ["703"]]]
@@ -218,5 +221,12 @@ assert.equal(hm.last, now - 5 * H);
 
 const loose = summarizeSite(NO_SITE, data2, mps);
 assert.deepEqual([loose.name, loose.mps, loose.valves], ["No site", 1, 0]);
+
+// --- readable callApi errors (HA restarting showed "[object Object]") --
+const { errText } = await import("../frontend/src/farm/controller.ts");
+assert.equal(errText({ status_code: 404, body: { message: "Not found" } }), "Not found");
+assert.equal(errText({ status_code: 502, body: "Bad Gateway" }), "Bad Gateway");
+assert.equal(errText({ status_code: 503 }), "HTTP 503");
+assert.equal(errText(new Error("boom")), "boom");
 
 console.log("ok");

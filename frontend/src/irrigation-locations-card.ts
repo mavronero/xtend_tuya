@@ -1,9 +1,11 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
-import { farmDate } from "./components/farm-time.ts";
-import { announceFarmChange } from "./farm/data.ts";
+import { farmDate, syncFarmTimeZone } from "./components/farm-time.ts";
+import { announceFarmChange, FARM_CHANGED_EVENT } from "./farm/data.ts";
+import { errText } from "./farm/controller.ts";
 
 interface HomeAssistant {
+  config?: { time_zone?: string };
   callApi?: <T = unknown>(
     method: string,
     path: string,
@@ -62,12 +64,6 @@ interface CardConfig {
 
 const API = "xtend_tuya/irrigation_locations";
 
-// HA's callApi rejects with {status_code, body} where body is the parsed JSON.
-function errText(e: unknown): string {
-  const o = e as { body?: { error?: string; message?: string }; error?: string; message?: string };
-  return o?.body?.error ?? o?.body?.message ?? o?.error ?? o?.message ?? String(e);
-}
-
 function relDate(iso: string | null): string {
   if (!iso) return "never";
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -77,7 +73,8 @@ function relDate(iso: string | null): string {
   return farmDate(new Date(iso).getTime());
 }
 
-const day = (iso: string) => farmDate(new Date(iso).getTime());
+const day = (iso: string) =>
+  farmDate(new Date(iso).getTime(), { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const liters = (n: number | null | undefined) => (n == null ? "–" : `${Math.round(n)} L`);
 const numOrNull = (s: string) => (s.trim() === "" || isNaN(Number(s)) ? null : Number(s));
 
@@ -100,6 +97,25 @@ export class IrrigationLocationsCard extends LitElement {
   @state() private _newName: string | null = null; // null = create form hidden
   @state() private _showUnassigned = false;
   private _fetched = false;
+
+  // Another card changed locations (or this one did, and reloads itself).
+  private _onFarmChanged = (): void => {
+    if (this._fetched && !this._busy) void this._load();
+  };
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    window.addEventListener(FARM_CHANGED_EVENT, this._onFarmChanged);
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    window.removeEventListener(FARM_CHANGED_EVENT, this._onFarmChanged);
+  }
+
+  protected willUpdate(): void {
+    syncFarmTimeZone(this.hass);
+  }
 
   setConfig(config: CardConfig): void {
     this._config = config;
