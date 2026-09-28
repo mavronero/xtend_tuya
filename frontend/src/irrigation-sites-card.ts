@@ -10,7 +10,7 @@
  * sites, and move metering points between sites.
  */
 
-import { LitElement, html, nothing } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { HomeAssistantLike } from "./farm/discovery.ts";
 import { announceFarmChange, type MeteringPoint, type Site } from "./farm/data.ts";
@@ -312,6 +312,7 @@ export class IrrigationSitesCard extends LitElement {
     };
 
     const editing = this._editing ? data.locations.find((m) => m.id === this._editing) : undefined;
+    const isAdmin = !!this.hass.user?.is_admin;
     return html`<div
       class="layout"
       @xt-site-open=${(e: CustomEvent<string | null>) => this._open(e.detail)}
@@ -322,21 +323,30 @@ export class IrrigationSitesCard extends LitElement {
         <xt-site-tree .sites=${data.sites} .selected=${sel} .counts=${counts} ?noSite=${hasNoSite}></xt-site-tree>
       </aside>
       <main>
-        ${this._header(sum, total)}
-        ${this._error && !editing ? html`<div class="msg err">${this._error}</div>` : nothing}
-        ${this._farm.error ? html`<div class="msg err">Could not load farm data: ${this._farm.error}</div>` : nothing}
-        ${this._edit && site ? this._editSite(site) : nothing}
+        <section class="panel">
+          ${this._header(sum, total)}
+          ${this._error && !editing ? html`<div class="msg err">${this._error}</div>` : nothing}
+          ${this._farm.error ? html`<div class="msg err">Could not load farm data: ${this._farm.error}</div>` : nothing}
+          ${this._edit && site ? this._editSite(site) : nothing}
+        </section>
         ${children.length || (this._edit && sel !== NO_SITE)
-          ? html`<h3>${sel ? "Sub-sites" : "Sites"} <span class="count">${children.length}</span></h3>
+          ? html`<section class="panel">
+              <h3>${sel ? "Sub-sites" : "Sites"} <span class="count">${children.length}</span></h3>
               <div class="grid">${children.map((c) => html`<xt-site-card .summary=${c}></xt-site-card>`)}</div>
-              ${this._edit && sel !== NO_SITE ? this._addSite(sel) : nothing}`
+              ${this._edit && sel !== NO_SITE ? this._addSite(sel) : nothing}
+            </section>`
           : nothing}
         ${mps.length || (this._edit && sel)
-          ? html`<h3>Metering points <span class="count">${mps.length}</span></h3>
+          ? html`<section class="panel">
+              <h3>Metering points <span class="count">${mps.length}</span></h3>
               <div class="grid">
-                ${mps.map((m) => html`<xt-mp-card .summary=${mpById.get(m.id)} ?editable=${this._edit}></xt-mp-card>`)}
+                ${mps.map(
+                  (m) =>
+                    html`<xt-mp-card .summary=${mpById.get(m.id)} ?editable=${this._edit} ?admin=${isAdmin}></xt-mp-card>`
+                )}
               </div>
-              ${this._edit && sel ? this._addMp(sel === NO_SITE ? null : sel) : nothing}`
+              ${this._edit && sel ? this._addMp(sel === NO_SITE ? null : sel) : nothing}
+            </section>`
           : nothing}
         ${!sel && !data.sites.length
           ? html`<div class="msg">No sites yet. Sites are created from the Tuya rooms once the valves report them, or by hand in Edit.</div>`
@@ -346,7 +356,15 @@ export class IrrigationSitesCard extends LitElement {
     </div>`;
   }
 
-  static styles = [farmTokens, pageStyles];
+  static styles = [
+    farmTokens,
+    pageStyles,
+    css`
+      .panel > h3:first-child {
+        margin-top: 0;
+      }
+    `,
+  ];
 }
 
 if (!customElements.get("irrigation-sites-card")) customElements.define("irrigation-sites-card", IrrigationSitesCard);

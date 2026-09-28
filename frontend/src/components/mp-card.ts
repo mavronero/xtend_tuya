@@ -32,6 +32,12 @@ export class XtMpCard extends LitElement {
   @property({ attribute: false }) summary?: MpSummary;
   /** Show a pencil that fires `xt-mp-edit` (detail: metering point id). */
   @property({ type: Boolean }) editable = false;
+  /** With no valve here, offer "Assign valve…" (also fires `xt-mp-edit`). */
+  @property({ type: Boolean }) admin = false;
+
+  private _edit(): void {
+    this.dispatchEvent(new CustomEvent("xt-mp-edit", { detail: this.summary?.id, bubbles: true, composed: true }));
+  }
 
   private _openValve(e: Event, v: MpValve): void {
     e.stopPropagation();
@@ -72,14 +78,17 @@ export class XtMpCard extends LitElement {
               class="edit"
               aria-label="Edit ${s.name}"
               title="Edit metering point"
-              @click=${() =>
-                this.dispatchEvent(new CustomEvent("xt-mp-edit", { detail: s.id, bubbles: true, composed: true }))}
+              @click=${this._edit}
             >
               <ha-icon icon="mdi:pencil-outline"></ha-icon>
             </button>`
           : nothing}
       </div>
-      ${s.valves.length ? s.valves.map((v) => this._valve(v)) : html`<div class="row dim">No valve assigned</div>`}
+      ${s.valves.length
+        ? s.valves.map((v) => this._valve(v))
+        : this.admin
+          ? html`<button class="assign" @click=${this._edit}><ha-icon icon="mdi:valve"></ha-icon>Assign valve…</button>`
+          : html`<div class="row dim">No valve assigned</div>`}
       ${s.pump
         ? html`<div class="row" title="Pump${s.pump.via ? `, inherited from ${s.pump.via}` : ""}">
             <ha-icon icon="mdi:pump"></ha-icon><span>${s.pump.name}${s.pump.via ? ` · via ${s.pump.via}` : ""}</span>
@@ -169,6 +178,21 @@ export class XtMpCard extends LitElement {
       display: flex;
       align-items: center;
       gap: 6px;
+    }
+    .assign {
+      all: unset;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--primary-color);
+      border-radius: 8px;
+      padding: 2px 6px;
+      margin: 0 -6px;
+    }
+    .assign:hover,
+    .assign:focus-visible {
+      background: color-mix(in srgb, var(--primary-color) 8%, transparent);
     }
     .valve {
       all: unset;

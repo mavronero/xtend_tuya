@@ -85,6 +85,10 @@ export class XtValveFilterBar extends LitElement {
       min-height: 36px;
       box-sizing: border-box;
     }
+    select {
+      /* keep the native chevron off the rounded edge */
+      padding-right: 28px;
+    }
     input {
       flex: 1;
       min-width: 180px;

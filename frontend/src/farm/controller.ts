@@ -9,11 +9,26 @@ import { summarize, type ValveSummary } from "./valve-summary.ts";
 import { syncFarmTimeZone } from "../components/farm-time.ts";
 
 const REFRESH_MS = 60_000;
+// A failed load is mostly HA restarting: try again soon, not in a minute.
+const RETRY_MS = 10_000;
 // HA pushes state changes many times a second and every card re-renders on
 // each; statuses a second or two old are fine, a frozen page is not.
 const SUMMARY_TTL_MS = 2_000;
 
 type Host = ReactiveControllerHost & { hass?: HomeAssistantLike };
+
+/** Readable text of a callApi rejection: {status_code, body} with body the
+ * parsed JSON (or text), or an Error. */
+export function errText(e: unknown): string {
+  const o = e as { status_code?: number; body?: unknown; error?: string; message?: string } | null;
+  const b = o?.body as { error?: string; message?: string } | string | null | undefined;
+  return (
+    (typeof b === "string" ? b : (b?.error ?? b?.message)) ??
+    o?.error ??
+    o?.message ??
+    (o?.status_code ? `HTTP ${o.status_code}` : String(e))
+  );
+}
 
 export class FarmController implements ReactiveController {
   valves: ValveEntities[] = [];
@@ -22,6 +37,8 @@ export class FarmController implements ReactiveController {
   error: string | null = null;
   private host: Host;
   private timer?: number;
+  private retry?: number;
+  private connected = false;
   private busy = false;
   private rerun = false;
   private memo: { at: number; data: FarmData; valves: ValveEntities[]; list: ValveSummary[] } | null = null;
@@ -34,12 +51,15 @@ export class FarmController implements ReactiveController {
   private onFarmChanged = (): void => void this.refresh(true);
 
   hostConnected(): void {
+    this.connected = true;
     this.timer = window.setInterval(() => void this.refresh(), REFRESH_MS);
     window.addEventListener(FARM_CHANGED_EVENT, this.onFarmChanged);
   }
 
   hostDisconnected(): void {
+    this.connected = false;
     if (this.timer) window.clearInterval(this.timer);
+    window.clearTimeout(this.retry);
     window.removeEventListener(FARM_CHANGED_EVENT, this.onFarmChanged);
   }
 
@@ -60,14 +80,22 @@ export class FarmController implements ReactiveController {
     }
     if (changed) invalidateFarmData();
     this.busy = true;
+    window.clearTimeout(this.retry);
     try {
-      const [data, locations] = await Promise.all([loadFarmData(hass), fetchLocations(hass)]);
-      // Discovery walks every entity; once a minute is plenty.
+      let failed: unknown;
+      const [data, locations] = await Promise.all([
+        loadFarmData(hass).catch((e: unknown) => ((failed = e), null)),
+        fetchLocations(hass), // never rejects
+      ]);
+      // Discovery walks every entity; once a minute is plenty. It needs no
+      // farm data, so the valve list shows even while that fails.
       this.valves = discoverValves(hass, locations);
+      if (!data) throw failed;
       this.data = data;
       this.error = null;
     } catch (e) {
-      this.error = e instanceof Error ? e.message : String(e);
+      this.error = `Home Assistant is starting, retrying… (${errText(e)})`;
+      if (this.connected) this.retry = window.setTimeout(() => void this.refresh(), RETRY_MS);
     } finally {
       this.busy = false;
       this.loaded = true;
