@@ -159,6 +159,7 @@ export class IrrigationControlCard extends LitElement {
   //   - Manual ON: the window is stale (no fresh start_time push), so its
   //     last_changed is old → elapsed ≫ total → null → controls, not a countdown
   private _runTiming(): { total: number; elapsed: number; remaining: number } | null {
+    if (this._isT3()) return this._t3RunTiming();
     const start = this._startTime();
     const end = this._endTime();
     if (!start || !end || !this._config.start_time_sensor) return null;
@@ -169,6 +170,20 @@ export class IrrigationControlCard extends LitElement {
       | undefined;
     if (!startEnt?.last_changed) return null;
     const elapsed = (Date.now() - new Date(startEnt.last_changed).getTime()) / 1000;
+    if (elapsed < 0 || elapsed >= total) return null;
+    return { total, elapsed, remaining: Math.max(0, total - elapsed) };
+  }
+
+  // QT-08W-T3: the valve reports its planned window (flow_sta_0), which the
+  // backend puts on the switch as tz-aware run_start / run_end. Covers timer
+  // runs and a reload mid-run too.
+  private _t3RunTiming(): { total: number; elapsed: number; remaining: number } | null {
+    const attrs = this.hass.states[this._config.valve]?.attributes;
+    const start = attrs?.run_start ? new Date(attrs.run_start as string).getTime() : NaN;
+    const end = attrs?.run_end ? new Date(attrs.run_end as string).getTime() : NaN;
+    const total = (end - start) / 1000;
+    if (!(total > 0) || total >= 86400) return null;
+    const elapsed = (Date.now() - start) / 1000;
     if (elapsed < 0 || elapsed >= total) return null;
     return { total, elapsed, remaining: Math.max(0, total - elapsed) };
   }

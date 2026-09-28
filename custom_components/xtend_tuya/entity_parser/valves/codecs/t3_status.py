@@ -6,7 +6,10 @@ sat_0, 13 bytes: 00 01 00 [BB] 00 01 00 [Y M D H M] 00
   by switch.XTT3ValveSwitchEntity; Tuya logs 2026-09-26/28, 711 + 708);
   bytes[7..11] = next irrigation [Y-2000, M, D, H, M], 0xFF year / month 0 =
   no schedule.
-flow_sta_0: bytes[1:5] BE = liters, live during a run, then the run total.
+flow_sta_0: bytes[1:5] BE = liters, live during a run, then the run total;
+  bytes[5:9] BE = run seconds, set at close; bytes[9:17] = planned start and
+  end [D, H, M, S] in farm time during a run, 0xFF when idle (read by
+  switch.XTT3ValveSwitchEntity for run_start / run_end).
 """
 
 from __future__ import annotations

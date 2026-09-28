@@ -27,7 +27,8 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-25 | 4.4.273 | 4.4.272 | ok (SMOKE OK; farm cards in farm time — 908 log shows 05:00/17:00 from a Berlin browser after a reload (HA service worker serves the old bundle until then). Frontend only; rollback: HACS 4.4.272) |
 | 2026-09-28 | 4.4.275 | 4.4.273 (4.4.274 released, not deployed alone: timeline 0 L flag, frontend only) | ok (SMOKE OK over Tailscale; 755 timer run 09:00 switch on, 15 L, off at its counter_custom close. But 719 read "on" from a stale startup frame: hotfix 4.4.276) |
 | 2026-09-28 | 4.4.276 | 4.4.275 (or 4.4.273 to drop the T3 switch entirely) | ok (SMOKE OK; 719 reads off, no T3 falsely on) |
-| 2026-09-28 | 4.4.277 | 4.4.276 | pending |
+| 2026-09-28 | 4.4.277 | 4.4.276 | ok (SMOKE OK; Uli tested 711: Watering shown, Stop works, 5 L logged; countdown froze -> 4.4.278) |
+| 2026-09-28 | 4.4.278 | 4.4.277 | pending |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.

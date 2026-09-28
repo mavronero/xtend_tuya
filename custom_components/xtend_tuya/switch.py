@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import binascii
 import time
+from datetime import datetime, timedelta
 from typing import cast, Any
 from dataclasses import dataclass
 from tuya_device_handlers.definition.switch import (
@@ -14,6 +15,8 @@ from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .util import (
     restrict_descriptor_category,
@@ -674,13 +677,42 @@ class XTSwitchEntity(XTEntity, TuyaSwitchEntity):
         )
 
 
-# QT-08W-T3 status DP; layout in entity_parser/valves/codecs/t3_status.py. Read
-# inline here because the platform layer may not import the valve drivers.
+# QT-08W-T3 status DPs; layouts in entity_parser/valves/codecs/t3_status.py.
+# Read inline here because the platform layer may not import the valve drivers.
 T3_SAT_CODE = "sat_0"
 T3_SAT_OPEN_BYTE = 4
-# ponytail: a run longer than this reads "off" until its next sat_0 frame;
-# raise it if the farm ever schedules longer runs.
+# flow_sta_0 bytes[9..16] during a run: planned start and end as [D, H, M, S]
+# in farm time, 0xFF when idle (Tuya logs 2026-09-26/28: 711 x2, 708 timer run).
+T3_FLOW_CODE = "flow_sta_0"
+T3_WINDOW_START = 9
+# ponytail: without a run window, a live open frame counts this long; the
+# window covers normal runs, this only bounds a lost close frame.
 T3_OPEN_FRAME_MAX_AGE_S = 2 * 3600
+
+
+def _b64_status(device: XTDevice, code: str) -> bytes:
+    raw = device.status.get(code)
+    try:
+        return base64.b64decode(raw) if isinstance(raw, str) and raw else b""
+    except (binascii.Error, ValueError):
+        return b""
+
+
+def _t3_farm_time(day: int, hour: int, minute: int, second: int, now: datetime) -> datetime | None:
+    """[D, H, M, S] without month or year: take the occurrence nearest to now."""
+    try:
+        stamp = now.replace(day=day, hour=hour, minute=minute, second=second, microsecond=0)
+        if stamp - now > timedelta(days=15):  # e.g. day 31 seen on the 1st
+            stamp = (now.replace(day=1) - timedelta(days=1)).replace(
+                day=day, hour=hour, minute=minute, second=second, microsecond=0
+            )
+        elif now - stamp > timedelta(days=15):  # e.g. day 1 seen on the 31st
+            stamp = (now.replace(day=28) + timedelta(days=4)).replace(
+                day=day, hour=hour, minute=minute, second=second, microsecond=0
+            )
+    except ValueError:
+        return None
+    return stamp
 
 
 class XTT3ValveSwitchEntity(XTSwitchEntity):
@@ -689,35 +721,79 @@ class XTT3ValveSwitchEntity(XTSwitchEntity):
     The firmware never reports switch_1 during a run (0 "on" states in 14 days
     across the fleet), so the switch read "off" while water flowed and every
     consumer (Water-now card, Valves page, timeline, Simon's watchdog) missed
-    T3 runs. The open state lives in sat_0 byte[4] instead. Writes go through
-    the single-run codec: cyc_control_0 is the only run DP the T3 acts on.
+    T3 runs. The valve reports a run in two places instead: sat_0 byte[4]
+    (open/closed) and the planned window in flow_sta_0. Writes go through the
+    single-run codec: cyc_control_0 is the only run DP the T3 acts on.
     """
-
-    # Tells the Water-now card there is no manual open on this valve.
-    _attr_extra_state_attributes = {"timed_runs_only": True}
 
     # Monotonic time of the last live sat_0 frame with the open byte set. The
     # snapshot loaded at startup does not count: 719 sent one "open" frame on
     # 2026-09-27 and nothing after, and read as watering for good.
     _open_frame_at: float | None = None
+    _window_end_unsub = None
 
     def _sat_open(self) -> bool | None:
-        raw = self.device.status.get(T3_SAT_CODE)
-        try:
-            sat = base64.b64decode(raw) if isinstance(raw, str) and raw else b""
-        except (binascii.Error, ValueError):
-            sat = b""
+        sat = _b64_status(self.device, T3_SAT_CODE)
         return sat[T3_SAT_OPEN_BYTE] == 1 if len(sat) > T3_SAT_OPEN_BYTE else None
+
+    def _run_window(self) -> tuple[datetime, datetime] | None:
+        flow = _b64_status(self.device, T3_FLOW_CODE)
+        if len(flow) < T3_WINDOW_START + 8 or flow[T3_WINDOW_START] == 0xFF:
+            return None
+        now = dt_util.now()
+        start = _t3_farm_time(*flow[T3_WINDOW_START : T3_WINDOW_START + 4], now)
+        end = _t3_farm_time(*flow[T3_WINDOW_START + 4 : T3_WINDOW_START + 8], now)
+        if start is None or end is None or end <= start:
+            return None
+        return start, end
 
     @property
     def is_on(self) -> bool | None:
         is_open = self._sat_open()
-        if not is_open:
-            return is_open
-        return (
+        if is_open is False:
+            return False
+        window = self._run_window()
+        in_window = window is not None and window[0] <= dt_util.now() < window[1]
+        if is_open is None:
+            return True if in_window else None
+        fresh = (
             self._open_frame_at is not None
             and time.monotonic() - self._open_frame_at < T3_OPEN_FRAME_MAX_AGE_S
         )
+        return fresh or in_window
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        # timed_runs_only: no manual open, the Water-now card hides it.
+        attrs: dict[str, Any] = {"timed_runs_only": True}
+        if window := self._run_window():
+            attrs["run_start"] = window[0].isoformat()
+            attrs["run_end"] = window[1].isoformat()
+        return attrs
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._arm_window_end()
+        self.async_on_remove(self._cancel_window_end)
+
+    def _cancel_window_end(self) -> None:
+        if self._window_end_unsub is not None:
+            self._window_end_unsub()
+            self._window_end_unsub = None
+
+    def _arm_window_end(self) -> None:
+        """Re-read the state when the run window closes, frame or not."""
+        self._cancel_window_end()
+        window = self._run_window()
+        if window is None or window[1] <= dt_util.now():
+            return
+
+        @callback
+        def _on_window_end(_now: datetime) -> None:
+            self._window_end_unsub = None
+            self.async_write_ha_state()
+
+        self._window_end_unsub = async_track_point_in_time(self.hass, _on_window_end, window[1])
 
     async def _process_device_update(
         self,
@@ -726,6 +802,8 @@ class XTT3ValveSwitchEntity(XTSwitchEntity):
     ) -> bool:
         if T3_SAT_CODE in updated_status_properties:
             self._open_frame_at = time.monotonic() if self._sat_open() else None
+        if T3_SAT_CODE in updated_status_properties or T3_FLOW_CODE in updated_status_properties:
+            self._arm_window_end()
             return True
         return await super()._process_device_update(updated_status_properties, dp_timestamps)
 
