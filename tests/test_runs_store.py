@@ -100,8 +100,16 @@ class _FakeStates:
         return None if v is None else types.SimpleNamespace(state=v)
 
 
+class _FakeBus:
+    def __init__(self):
+        self.fired = []
+
+    def async_fire(self, event_type, data):
+        self.fired.append((event_type, data))
+
+
 def store(states=None):
-    s = rs.RunsStore(types.SimpleNamespace(states=_FakeStates(states or {})))
+    s = rs.RunsStore(types.SimpleNamespace(states=_FakeStates(states or {}), bus=_FakeBus()))
     return s
 
 
@@ -162,6 +170,8 @@ def demo():
         f"0,1,900,103,{real_end.strftime('%Y%m%d%H%M%S')}",
     )
     assert len(s.runs[DEV]) == 1, s.runs[DEV]
+    # the watering log card reloads on this event
+    assert s.hass.bus.fired == [(rs.EVENT_RUN_RECORDED, {"device_id": DEV})]
     row = s.runs[DEV][0]
     assert row["duration_seconds"] == 900.0
     assert row["total_l"] == 103.0
@@ -357,6 +367,7 @@ def demo():
     s.add_run(DEV, t(14, 0) + timedelta(seconds=6), t(14, 8), None)
     assert s.merge_backfill(DEV, [{"start": t(14), "end": t(14, 15), "total_l": None}]) == 0
     assert s.merge_backfill(DEV, [{"start": t(15), "end": t(15, 15), "total_l": None}]) == 1
+    assert s.hass.bus.fired == []  # backfill stays quiet
 
     print("ok: runs are recorded once, with liters that survive an odometer")
 

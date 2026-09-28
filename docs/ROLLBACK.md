@@ -28,7 +28,8 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-28 | 4.4.275 | 4.4.273 (4.4.274 released, not deployed alone: timeline 0 L flag, frontend only) | ok (SMOKE OK over Tailscale; 755 timer run 09:00 switch on, 15 L, off at its counter_custom close. But 719 read "on" from a stale startup frame: hotfix 4.4.276) |
 | 2026-09-28 | 4.4.276 | 4.4.275 (or 4.4.273 to drop the T3 switch entirely) | ok (SMOKE OK; 719 reads off, no T3 falsely on) |
 | 2026-09-28 | 4.4.277 | 4.4.276 | ok (SMOKE OK; Uli tested 711: Watering shown, Stop works, 5 L logged; countdown froze -> 4.4.278) |
-| 2026-09-28 | 4.4.278 | 4.4.277 | pending |
+| 2026-09-28 | 4.4.278 | 4.4.277 | ok (SMOKE OK; Uli tested 711 after a browser reload: countdown ticks, stop works. Browsers keep the old card until the HA service worker lets go) |
+| 2026-09-28 | 4.4.279 | 4.4.278 | pending |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.

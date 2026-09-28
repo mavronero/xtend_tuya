@@ -43,6 +43,8 @@ from .water_math import plausible_delta, sum_plausible_deltas
 _LOGGER = logging.getLogger(__name__)
 
 STORE_KEY = "xtend_tuya.irrigation_runs"
+# Fired when a live run lands in the store; the watering log card reloads on it.
+EVENT_RUN_RECORDED = "xtend_tuya_run_recorded"
 STORE_VERSION = 1
 SAVE_DELAY_SEC = 30
 
@@ -148,6 +150,11 @@ class RunsStore:
 
     def async_schedule_save(self) -> None:
         self._store.async_delay_save(self._data, SAVE_DELAY_SEC)
+
+    def _recorded(self, device_id: str) -> None:
+        """A live run was added or corrected: save, and tell open dashboards."""
+        self.async_schedule_save()
+        self.hass.bus.async_fire(EVENT_RUN_RECORDED, {"device_id": device_id})
 
     def _prune(self, device_id: str) -> None:
         cutoff = (
@@ -434,7 +441,7 @@ class RunsStore:
             return
         total_l = self._run_liters(d, (end - start).total_seconds())
         if self.add_run(d["tuya_device_id"], start, end, total_l):
-            self.async_schedule_save()
+            self._recorded(d["tuya_device_id"])
             _LOGGER.debug(
                 "runs_store: recorded run %s %s→%s %.0f L",
                 d["tuya_device_id"],
@@ -526,7 +533,7 @@ class RunsStore:
             return  # already recorded from counter_custom
         start = end - timedelta(seconds=duration)
         if self.add_run(device_id, start, end, _sane_liters(liters, duration)):
-            self.async_schedule_save()
+            self._recorded(device_id)
             _LOGGER.debug(
                 "runs_store: recorded flow-derived run %s %s→%s %.0f L",
                 device_id, start, end, liters if liters is not None else -1,
@@ -634,10 +641,10 @@ class RunsStore:
             )
             self.runs[device_id].sort(key=lambda r: r["end"])
             self._end_index.pop(device_id, None)
-            self.async_schedule_save()
+            self._recorded(device_id)
             return
         if self.add_run(device_id, start, end, total_l):
-            self.async_schedule_save()
+            self._recorded(device_id)
             _LOGGER.debug(
                 "runs_store: recorded T3 run %s end=%s %.0f L",
                 device_id,

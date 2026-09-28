@@ -9,7 +9,7 @@
 
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
-import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
+import { EMPTY_FARM_DATA, invalidateFarmData, loadFarmData, type FarmData } from "./farm/data.ts";
 import "./components/run-history.ts";
 
 interface CardConfig {
@@ -20,7 +20,12 @@ interface CardConfig {
 }
 
 export class IrrigationRunHistoryCard extends LitElement {
-  @property({ attribute: false }) hass?: { callApi?: <T>(method: string, path: string) => Promise<T> };
+  @property({ attribute: false }) hass?: {
+    callApi?: <T>(method: string, path: string) => Promise<T>;
+    connection?: {
+      subscribeEvents: (cb: (ev: { data: { device_id?: string } }) => void, type: string) => Promise<() => void>;
+    };
+  };
   @state() private _config?: CardConfig;
   @state() private _data: FarmData = EMPTY_FARM_DATA;
   @state() private _loaded = false;
@@ -34,14 +39,37 @@ export class IrrigationRunHistoryCard extends LitElement {
     return 6;
   }
 
+  private _unsub?: Promise<() => void>;
+
   protected updated(): void {
     if (this.hass && !this._loaded) {
       this._loaded = true;
-      loadFarmData(this.hass).then(
-        (d) => (this._data = d),
-        () => undefined
-      );
+      this._load();
     }
+    // Reload when the backend records a run of this valve (runs_store event).
+    // Non-admin users may not subscribe: the log then refreshes on page load only.
+    if (this.hass?.connection && !this._unsub) {
+      this._unsub = this.hass.connection.subscribeEvents((ev) => {
+        if (ev.data.device_id !== this._config?.device_id) return;
+        invalidateFarmData();
+        this._load();
+      }, "xtend_tuya_run_recorded");
+      this._unsub.catch(() => undefined);
+    }
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._unsub?.then((unsub) => unsub(), () => undefined);
+    this._unsub = undefined;
+  }
+
+  private _load(): void {
+    if (!this.hass) return;
+    loadFarmData(this.hass).then(
+      (d) => (this._data = d),
+      () => undefined
+    );
   }
 
   render() {
