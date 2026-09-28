@@ -83,7 +83,9 @@ class MultiDeviceListener:
         self.add_device_by_id(device.id)
 
     def add_device_by_id(self, device_id: str):
-        self.hass.add_job(self.async_remove_device, device_id)
+        # No async_remove_device first (core tuya does that): its registry
+        # removal is queued behind the discovery jobs, so it deleted the
+        # entities discovery had just re-attached to a known device.
         signal_list: list[str] = []
         for account in self.multi_manager.accounts.values():
             signal_list = util.append_lists(

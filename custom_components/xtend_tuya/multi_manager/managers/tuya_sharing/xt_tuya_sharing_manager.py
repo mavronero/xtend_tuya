@@ -225,8 +225,8 @@ class XTSharingDeviceManager(Manager):  # noqa: F811
             device = self.device_map.get(device_id)
             if device is not None and self.mq is not None:
                 self.mq.subscribe_device(device_id, device)
-                for listener in self.device_listeners:
-                    listener.add_device(device)
+        # Discovery is MultiManager.add_device_by_id's job, after it has
+        # prepared the device like at setup.
 
     def _on_device_other(self, device_id: str, biz_code: str, data: dict[str, Any]):
         self.multi_manager.device_watcher.report_message(

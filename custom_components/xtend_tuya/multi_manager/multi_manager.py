@@ -282,23 +282,7 @@ class MultiManager(TuyaManager):
             self._merge_devices_from_multiple_sources()
             fetch_ts = time.time()
             for device in self.device_map.values():
-                # The device-list fetch is itself a report: it carries the
-                # cloud's current status for the device (audit C23).
-                device.last_report_ts = fetch_ts
-                # Applied twice because some parts at the end of apply_fix would change values of previous calls
-                CloudFixes.apply_fixes(device, self)
-                CloudFixes.apply_fixes(device, self)
-                CloudFixes.apply_post_init_fixes(device, self)
-                self._add_dpcodes_supported_by_all_devices(device)
-
-                # Don't allow changes to DPCodes after the global initialization
-                device.force_compatibility = True
-
-                # Apply conversion strategy after initial import
-                for dpcode in device.status:
-                    device.status[dpcode] = device.apply_dpcode_strategy(
-                        dpcode, device.status[dpcode], self
-                    )
+                self._prepare_device(device, fetch_ts)
             self._enable_multi_map_device_alignment()
         except ConfigEntryNotReady:
             # A source could not produce a usable device list and kept its
@@ -320,6 +304,26 @@ class MultiManager(TuyaManager):
             ):
                 if isinstance(device.status, XTTrackedDictionnary) is False:
                     device.status = XTTrackedDictionnary(self, device, device.status)  # type: ignore
+
+    def _prepare_device(self, device: XTDevice, fetch_ts: float) -> None:
+        """Per-device setup after the sources are merged (setup and hot add)."""
+        # The device-list fetch is itself a report: it carries the
+        # cloud's current status for the device (audit C23).
+        device.last_report_ts = fetch_ts
+        # Applied twice because some parts at the end of apply_fix would change values of previous calls
+        CloudFixes.apply_fixes(device, self)
+        CloudFixes.apply_fixes(device, self)
+        CloudFixes.apply_post_init_fixes(device, self)
+        self._add_dpcodes_supported_by_all_devices(device)
+
+        # Don't allow changes to DPCodes after the global initialization
+        device.force_compatibility = True
+
+        # Apply conversion strategy after initial import
+        for dpcode in device.status:
+            device.status[dpcode] = device.apply_dpcode_strategy(
+                dpcode, device.status[dpcode], self
+            )
 
     def _add_dpcodes_supported_by_all_devices(self, device: XTDevice):
         # Events can be triggered device wide by the BizCode "event_notify"
@@ -471,12 +475,15 @@ class MultiManager(TuyaManager):
     def _merge_devices_from_multiple_sources(self):
         # Merge the device function, status_range and status between managers
         for device in self.device_map.values():
-            to_be_merged: list[XTDevice] = []
-            devices = self.__get_devices_from_device_id(device.id)
-            for current_device in devices:
-                for prev_device in to_be_merged:
-                    XTMergingManager.merge_devices(prev_device, current_device, self)
-                to_be_merged.append(current_device)
+            self._merge_device_sources(device)
+
+    def _merge_device_sources(self, device: XTDevice):
+        to_be_merged: list[XTDevice] = []
+        devices = self.__get_devices_from_device_id(device.id)
+        for current_device in devices:
+            for prev_device in to_be_merged:
+                XTMergingManager.merge_devices(prev_device, current_device, self)
+            to_be_merged.append(current_device)
 
     def _enable_multi_map_device_alignment(self):
         for device_map in self.__get_available_device_maps():
@@ -497,9 +504,9 @@ class MultiManager(TuyaManager):
             XTDeviceMap.unregister_device_map(device_map)
         XTDeviceMap.unregister_device_map(self.device_map)
 
-    def _align_multi_map_devices(self):
+    def _align_multi_map_devices(self, devices: list[XTDevice] | None = None):
         # Refresh all master device variables with themselves to trigger alignment
-        for device in self.device_map.values():
+        for device in self.device_map.values() if devices is None else devices:
             for key, value in vars(device).items():
                 setattr(device, key, value)
 
@@ -661,9 +668,34 @@ class MultiManager(TuyaManager):
             self.accounts[source].on_message(new_message)
 
     def add_device_by_id(self, device_id: str):
+        """bindUser: a device added to Tuya while HA runs (Trello qYyTmusI).
+
+        Used to fetch it into the source maps only: no merge, no CloudFixes,
+        no dpcode strategy, and the accounts refused the discovery signal
+        because their device_ids list is only rebuilt at setup, so the
+        device got entities at the next reload at the earliest. Now it goes
+        through the same per-device preparation as at setup, then discovery.
+        """
+        owner = MultiManager.device_owner.get(device_id)
+        if owner is not None and owner != self.config_entry.entry_id:
+            return  # another hub serves it: don't even fetch a copy to mirror
+        known = device_id in self.device_map
         for account in self.accounts.values():
             account.add_device_by_id(device_id)
         self.update_master_device_map()
+        device = self.device_map.get(device_id)
+        if device is None:
+            return
+        if known:
+            # Re-bind of a device we already serve: the fetch merged into the
+            # live object (put_device_keeping_object); refresh, don't
+            # re-discover (the old remove-then-discover dropped its entities).
+            self.multi_device_listener.update_device(device)
+            return
+        self._merge_device_sources(device)
+        self._prepare_device(device, time.time())
+        self._align_multi_map_devices([device])
+        self.multi_device_listener.add_device_by_id(device_id)
 
     def _get_device_id_from_message(self, msg: dict) -> str | None:
         protocol = msg.get("protocol", 0)
