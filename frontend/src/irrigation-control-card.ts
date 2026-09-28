@@ -91,7 +91,9 @@ export class IrrigationControlCard extends LitElement {
     const e = this.hass.states[this._config.duration];
     if (!e) return;
     const n = parseFloat(e.state);
-    if (Number.isFinite(n) && n > 0) {
+    // Under a minute is a device leftover, not a choice: every T3 holds 1 s
+    // (countdown_1), which the field showed as "1 min" and Start sent as 1 s.
+    if (Number.isFinite(n) && n >= 60) {
       this._target = n;
     }
   }
