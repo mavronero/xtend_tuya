@@ -39,9 +39,17 @@ _ENTITY_SUFFIX_TO_ROLE: tuple[tuple[str, str], ...] = (
 )
 
 
-def device_identifiers(tuya_device_id: str) -> set[tuple[str, str]]:
-    """Device-registry identifiers under which a valve can be registered."""
-    return {(domain, tuya_device_id) for domain in VALVE_DEVICE_DOMAINS}
+def valve_device(dev_reg: dr.DeviceRegistry, tuya_device_id: str) -> dr.DeviceEntry | None:
+    """The valve's HA device: ours (xtend_tuya) first, else core tuya's.
+
+    Not dev_reg.async_get_device: HA 2026.9 deprecated it and its caller
+    check walks the stack on every call, ~16 ms each on the farm's HA Green,
+    which made the locations endpoints take 4-5 s.
+    """
+    for domain in VALVE_DEVICE_DOMAINS:
+        if devices := dev_reg.async_get_devices(identifiers={(domain, tuya_device_id)}):
+            return devices[0]
+    return None
 
 
 def tuya_id_of(device: dr.DeviceEntry | dr.ChildDeviceEntry) -> str | None:

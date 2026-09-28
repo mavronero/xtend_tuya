@@ -168,7 +168,8 @@ class XTValveLocationsView(HomeAssistantView):
         payload: dict[str, dict[str, str]] = dict(by_device)
         dev_reg = dr.async_get(hass)
         for tuya_id, loc in by_device.items():
-            device = dev_reg.async_get_device(identifiers={(DOMAIN, tuya_id)})
-            if device is not None:
+            # async_get_devices, not the deprecated async_get_device: its
+            # caller check walks the stack per call (~16 ms on the HA Green).
+            for device in dev_reg.async_get_devices(identifiers={(DOMAIN, tuya_id)})[:1]:
                 payload[device.id] = loc
         return self.json({"locations": payload})

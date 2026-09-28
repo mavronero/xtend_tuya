@@ -27,7 +27,7 @@ from homeassistant.helpers.storage import Store
 
 from . import location_model as lm
 from ..const import DOMAIN
-from .contract import device_identifiers, discover_valves
+from .contract import discover_valves, valve_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ class XTIrrigationLocationsView(HomeAssistantView):
         dev_reg = dr.async_get(hass)
 
         def device_info(device_id: str) -> dict[str, Any]:
-            ha_dev = dev_reg.async_get_device(identifiers=device_identifiers(device_id))
+            ha_dev = valve_device(dev_reg, device_id)
             d = live.get(device_id)
             name = d["valve_name"] if d else (
                 (ha_dev.name_by_user or ha_dev.name) if ha_dev else None

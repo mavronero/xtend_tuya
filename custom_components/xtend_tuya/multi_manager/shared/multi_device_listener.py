@@ -62,8 +62,13 @@ class MultiDeviceListener:
         if not device.name:
             return
         device_registry = dr.async_get(self.hass)
-        device_entry = device_registry.async_get_device(
-            identifiers={(DOMAIN_ORIG, device.id), (DOMAIN, device.id)}
+        # Runs on every device update: async_get_devices, not the deprecated
+        # async_get_device, whose caller check walks the stack per call
+        # (~16 ms on the HA Green). Our device carries the (DOMAIN, id)
+        # identifier; core tuya's own device does not.
+        device_entry = next(
+            iter(device_registry.async_get_devices(identifiers={(DOMAIN, device.id)})),
+            None,
         )
         if device_entry is not None and device_entry.name != device.name:
             self.hass.add_job(
