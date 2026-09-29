@@ -56,6 +56,33 @@ FLOW_RATE_REFRESH = timedelta(seconds=10)
 
 from .const import DEVICE_CATEGORY
 
+# DPs a valve only sends when it is awake for its schedule or a run: T3 status
+# and flow frames, the last-run counter, the timer DPs, the QT-08W run DPs.
+# Heartbeats (online/offline, event notices) are none of these.
+WATERING_REPORT_CODES = frozenset(
+    {
+        t3_status.SAT_CODE,
+        t3_status.FLOW_STA_CODE,
+        counter_custom.CODE,
+        tt.QT08W_CODE,
+        tt.T3_CODE,
+        DP_CUR_CAP,
+        DP_START_TIME,
+        XTDPCode.CLOSE_TIME,
+    }
+)
+
+
+def _parse_local(raw: Any) -> datetime | None:
+    """An ISO timestamp, or a T3 'YYYYmmddHHMMSS' (farm local), as an aware datetime."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = datetime.strptime(raw, "%Y%m%d%H%M%S") if raw.isdigit() else datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=DEFAULT_TIME_ZONE)
+
 
 # ---------------------------------------------------------------------------
 # Raw DP Wrappers
@@ -256,7 +283,23 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
     registry for the timer card and the valve contract the farm layer reads
     (farm/contract.py). The slots live in the valve's TimerState; it survives
     HA restarts through this sensor's restored state.
+
+    It also carries `last_valve_report`: when the valve last sent a
+    watering-relevant DP (WATERING_REPORT_CODES). The `last_report` sensor
+    can't tell a silent valve: every restart stamps it with the device-list
+    fetch time (C23 seed), and T3 valves that stopped reporting runs keep up
+    hourly heartbeats (712/706/707, 2026-09).
     """
+
+    _last_valve_report: datetime | None = None
+
+    async def _process_device_update(
+        self, updated_status_properties: list[str], dp_timestamps: dict | None
+    ) -> bool:
+        if WATERING_REPORT_CODES.intersection(updated_status_properties):
+            self._last_valve_report = datetime.now(DEFAULT_TIME_ZONE).replace(microsecond=0)
+            return True
+        return await super()._process_device_update(updated_status_properties, dp_timestamps)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
@@ -269,6 +312,7 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
             "active_count": wrapper.timer_state.active_count,
             "schedule_changed_at": wrapper.timer_state.changed_at,
             "cloud": wrapper.timer_state.cloud,
+            "last_valve_report": self._last_valve_report.isoformat() if self._last_valve_report else None,
             "valve_name": self.device.name,
             "valve_home": location.get("home"),
             "valve_room": location.get("room"),
@@ -308,6 +352,15 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
                     last_state.attributes.get("cloud"),
                 )
                 _LOGGER.debug("Restored timer registry for %s: %s", self.entity_id, slots_data)
+        # No live stamp before the first report: the restored one, else the
+        # T3's last run (counter_custom ts) so a valve silent since before
+        # this attribute existed still shows. ponytail: old QT-08W gets no
+        # seed (close_time is farm-local bytes); add it if one goes silent.
+        seeds = [
+            _parse_local(last_state.attributes.get("last_valve_report") if last_state else None),
+            _parse_local(getattr(counter_custom.parse(self.device.status.get(counter_custom.CODE)), "ts", None)),
+        ]
+        self._last_valve_report = max((s for s in seeds if s), default=None)
 
         try:
             wrapper.read_device_status(self.device)

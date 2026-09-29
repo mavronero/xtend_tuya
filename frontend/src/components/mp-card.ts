@@ -13,7 +13,7 @@ import { farmTokens } from "./theme.ts";
 const BADGE: Record<MpBadge, [string, string, "warn" | "bad"]> = {
   no_valve: ["No valve", "No valve is assigned to this metering point", "warn"],
   low_battery: ["Low battery", "The valve's battery is below 20 %", "warn"],
-  stale: ["No report 36 h", "The valve has not reported for more than 36 hours", "warn"],
+  stale: ["Silent", "No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.", "bad"],
   missed: ["Missed", "A planned run in the last 24 hours did not happen", "bad"],
   no_flow: ["No water flow", "The last run here measured no water", "bad"],
   flow_low: ["Flow low", "Mean flow of the last 30 days is well below the expected L/min", "bad"],

@@ -28,9 +28,9 @@ interface CardConfig {
 const BADGE: Record<string, [string, string, "warn" | "bad"]> = {
   low_battery: ["Low battery", "Battery below 20 %. Replace the valve's batteries soon.", "warn"],
   stale: [
-    "No report 36 h",
-    "The valve has not reported for over 36 h. Check it is online in SmartLife and has battery. Clears on its next report.",
-    "warn",
+    "Silent",
+    "No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.",
+    "bad",
   ],
   missed: [
     "Missed",
