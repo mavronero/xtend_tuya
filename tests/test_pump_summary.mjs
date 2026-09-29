@@ -1,7 +1,7 @@
 // Pump feeds (inheritance, overrides, dated) and the water balance.
 // Run: node --experimental-strip-types tests/test_pump_summary.mjs
 import assert from "node:assert/strict";
-import { balance, niceTicks, pumpFeeds, pumpOfMpAt, periodStart } from "../frontend/src/farm/pump-summary.ts";
+import { balance, flowLines, niceTicks, pumpFeeds, pumpOfMpAt, periodStart } from "../frontend/src/farm/pump-summary.ts";
 
 const H = 3_600_000;
 const now = new Date(2026, 8, 24, 12, 0).getTime();
@@ -102,5 +102,29 @@ assert.deepEqual(niceTicks(1.1), [0, 0.5, 1, 1.5]);
 assert.deepEqual(niceTicks(1), [0, 0.5, 1]);
 assert.deepEqual(niceTicks(9.6), [0, 5, 10]);
 assert.deepEqual(niceTicks(0.1), [0, 0.05, 0.1]);
+
+// Flow line: raw states hold until the next change; unavailable breaks it.
+const raw = flowLines(
+  [
+    { start: 0, mean: 0, max: null },
+    { start: 10, mean: 40, max: null },
+    { start: 20, mean: null, max: null },
+    { start: 30, mean: 35, max: null },
+  ],
+  true,
+  50
+);
+assert.deepEqual(raw.mean, [
+  [[0, 0], [10, 0], [10, 40], [20, 40]],
+  [[30, 35], [50, 35]],
+]);
+assert.deepEqual(raw.max, []);
+assert.equal(raw.peak, 40);
+// Statistics: point to point, max as its own line.
+const agg = flowLines([{ start: 0, mean: 10, max: 30 }, { start: 5, mean: 12, max: 45 }], false, 10);
+assert.deepEqual(agg.mean, [[[0, 10], [5, 12]]]);
+assert.deepEqual(agg.max, [[[0, 30], [5, 45]]]);
+assert.equal(agg.peak, 45);
+assert.equal(flowLines([], true, 10).peak, 0);
 
 console.log("ok");
