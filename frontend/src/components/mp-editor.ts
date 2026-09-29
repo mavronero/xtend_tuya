@@ -134,7 +134,7 @@ export class XtMpEditor extends LitElement {
               "Type a number or name…",
               candidates.map((v) => ({
                 key: v.device_id,
-                text: `${v.label}${v.name && v.name !== v.label ? ` · ${v.name}` : ""}${v.at ? ` — now at ${v.at}` : " — free"}${v.status === "offline" ? " (offline)" : ""}`,
+                text: `${v.label}${v.name && `#${v.name}` !== v.label && v.name !== v.label ? ` · ${v.name}` : ""}${v.at ? ` — now at ${v.at}` : " — free"}${v.status === "offline" ? " (offline)" : ""}`,
               })),
               this.busy,
               (id) => this._fire("xt-mp-assign", id)
