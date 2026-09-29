@@ -81,11 +81,16 @@ export interface Pairable extends LaneEvent {
  *   ran       — slot ran: drawn at the run's times, plan kept alongside
  *   missed    — slot ended in the past and nothing ran
  *   unplanned — run with no slot near it
- *   running   — an open run (kept as is) */
+ *   running   — an open run (kept as is)
+ * Plans are the CURRENT slots expanded over the whole window. Before a
+ * valve's schedule last changed (`changedAt`, ms) they were not the
+ * schedule: an unanswered one there is dropped (not missed) and a lone run
+ * there stays "ran" (not unplanned). */
 export function pairPlanRuns<T extends Pairable>(
   plans: T[],
   runs: T[],
   nowMs: number,
+  changedAt: (key: string) => number = () => -Infinity,
   tolMs = 15 * 60 * 1000
 ): T[] {
   const used = new Set<T>();
@@ -107,6 +112,8 @@ export function pairPlanRuns<T extends Pairable>(
         summary: `${best.summary ?? ""}
 planned ${plan.summary ?? ""}`,
       });
+    } else if (plan.start < changedAt(plan.key)) {
+      continue; // superseded: the slot did not exist yet
     } else if (plan.end + tolMs < nowMs) {
       out.push({ ...plan, kind: "missed" });
     } else {
@@ -115,9 +122,17 @@ planned ${plan.summary ?? ""}`,
   }
   for (const run of runs) {
     if (used.has(run)) continue;
-    out.push(run.kind === "running" ? run : { ...run, kind: "unplanned" });
+    if (run.kind === "running") out.push(run);
+    else out.push({ ...run, kind: run.start < changedAt(run.key) ? "ran" : "unplanned" });
   }
   return out;
+}
+
+/** When a valve's timers last changed (ms; -Infinity = unknown), from its
+ * timer registry sensor's `schedule_changed_at` attribute. */
+export function scheduleChangedAt(registry?: { attributes?: Record<string, unknown> }): number {
+  const t = Date.parse(String(registry?.attributes?.schedule_changed_at ?? ""));
+  return Number.isFinite(t) ? t : -Infinity;
 }
 
 /** One entry of HA's history API (minimal_response): state and when it began. */

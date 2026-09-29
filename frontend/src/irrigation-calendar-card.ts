@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
-import { offlineSpans, packLanes, pairPlanRuns, Pairable, type HistoryPoint } from "./calendar-lanes";
+import { offlineSpans, packLanes, pairPlanRuns, Pairable, scheduleChangedAt, type HistoryPoint } from "./calendar-lanes";
 import { EMPTY_FARM_DATA, loadFarmData, type FarmData } from "./farm/data.ts";
 import { discoverValves, type HomeAssistantLike } from "./farm/discovery.ts";
 import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
@@ -319,7 +319,10 @@ export class IrrigationCalendarCard extends LitElement {
       const plans = (p ?? [])
         .map((e) => toEvent(e, "planned"))
         .filter((e): e is GridEvent => !!e);
-      this._events = pairPlanRuns(plans, runs, Date.now());
+      // key = the valve's registry sensor
+      const states = (this.hass as unknown as HomeAssistantLike).states;
+      const changedAt = (key: string) => scheduleChangedAt(states?.[key]);
+      this._events = pairPlanRuns(plans, runs, Date.now(), changedAt);
     } catch (e) {
       this._error = errText(e);
     } finally {

@@ -6,7 +6,7 @@
  */
 
 import type { HassState, ValveEntities } from "./discovery.ts";
-import { pairPlanRuns, type Pairable } from "../calendar-lanes.ts";
+import { pairPlanRuns, scheduleChangedAt, type Pairable } from "../calendar-lanes.ts";
 import { plannedOf, runsOf, type FarmData, type Run } from "./data.ts";
 import { farmDayStart } from "../components/farm-time.ts";
 
@@ -107,14 +107,15 @@ export function summarize(
   const nextPlan = plans.find((p) => p.start > now);
 
   // Missed = a planned slot in the last 24 h that no run answered (same
-  // pairing as the calendar).
+  // pairing as the calendar, incl. ignoring slots from before a timer change).
   const recentPlans: Pairable[] = plans
     .filter((p) => p.end > now - MISSED_WINDOW_MS && p.end < now)
     .map((p) => ({ start: p.start, end: p.end, kind: "planned", name: v.valve_name, key: v.device_id }));
   const recentRuns: Pairable[] = runs
     .filter((x) => x.end > now - MISSED_WINDOW_MS - DAY_MS)
     .map((x) => ({ start: x.start, end: x.end, kind: "ran", name: v.valve_name, key: v.device_id }));
-  const missed = pairPlanRuns(recentPlans, recentRuns, now).filter((e) => e.kind === "missed").length;
+  const scheduleChanged = scheduleChangedAt(reg);
+  const missed = pairPlanRuns(recentPlans, recentRuns, now, () => scheduleChanged).filter((e) => e.kind === "missed").length;
 
   const has_flow_meter = !!v.volume_sensor;
 

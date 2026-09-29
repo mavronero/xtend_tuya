@@ -100,6 +100,14 @@ assert.equal(b.status, "idle");
 assert.equal(b.flow_lpm, null);
 assert.equal(b.missed, 1);
 assert.deepEqual(b.badges, ["low_battery", "stale", "missed", "no_flow"]);
+// b's timer moved after that slot (22.09: 7 valves moved 1 h): it was not the
+// schedule then, so it is not missed.
+{
+  const moved = { ...states, "sensor.b_irrigation_timer_registry": { ...st("1"), attributes: { schedule_changed_at: iso(now - 2 * H) } } };
+  const b2 = summarize(valve("b", "HM Olive (703)"), moved, data, now);
+  assert.equal(b2.missed, 0);
+  assert.ok(!b2.badges.includes("missed"));
+}
 
 const c = summarize(valve("c", "Old bed (801)"), states, data, now);
 assert.equal(c.status, "offline");

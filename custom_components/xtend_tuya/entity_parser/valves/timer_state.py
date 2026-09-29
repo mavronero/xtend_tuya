@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -32,12 +33,25 @@ class TimerState:
         # The DP keeps re-reporting its last write. Apply each payload once, or
         # every state read would re-apply the last delete over restored slots.
         self._last_payload: bytes | None = None
+        # When the slots last changed (ISO, UTC; None = unknown). The calendar
+        # expands the CURRENT slots over past days too; plans before this
+        # moment were never the schedule, so they can't be "missed".
+        self.changed_at: str | None = None
 
     def apply_report(self, payload: bytes, frame: TimeTaskFrame | None) -> None:
         """A timer DP report (raw payload + its decoded frame)."""
         if payload == self._last_payload:
             return
         self._last_payload = payload
+        before = dict(self._slots)
+        self._apply(frame)
+        if self._slots != before:
+            self._touch()
+
+    def _touch(self) -> None:
+        self.changed_at = datetime.now(UTC).isoformat(timespec="seconds")
+
+    def _apply(self, frame: TimeTaskFrame | None) -> None:
         if frame is None or not 0 <= frame.index < SLOTS:
             return
         if frame.timer is None:
@@ -63,10 +77,13 @@ class TimerState:
 
     def clear(self, slot: int) -> None:
         """The slot's DP clear was accepted by the device."""
+        if self._slots.get(slot) is not None:
+            self._touch()
         self._slots[slot] = None
 
-    def restore(self, data: dict[Any, Any]) -> None:
+    def restore(self, data: dict[Any, Any], changed_at: str | None = None) -> None:
         """Hydrate from the registry sensor's last state after a restart."""
+        self.changed_at = changed_at
         for i in range(SLOTS):
             held = data.get(str(i)) or data.get(i)
             self._slots[i] = held if isinstance(held, dict) else None

@@ -72,6 +72,21 @@ def test_restore_and_attribute_round_trip():
     assert state.attribute()["0"]["hour"] == 6 and state.attribute()["4"] is None
 
 
+def test_changed_at_moves_only_on_a_real_change():
+    state = ts.TimerState()
+    state.restore({"0": timer(0, 11, 0).as_attribute()}, "2026-09-01T00:00:00+00:00")
+    report(state, tt.encode_qt08w(timer(0, 11, 0)))  # boot re-report of the same slot
+    assert state.changed_at == "2026-09-01T00:00:00+00:00"
+    report(state, tt.encode_qt08w(timer(0, 12, 0)))  # moved 1 h
+    moved = state.changed_at
+    assert moved > "2026-09-01T00:00:00+00:00"
+    state.changed_at = None
+    state.clear(3)  # already empty
+    assert state.changed_at is None
+    state.clear(0)
+    assert state.changed_at is not None
+
+
 # --- resync (was tests/test_resync_guard.py) ---------------------------------------
 
 DEVICE = "bf01"

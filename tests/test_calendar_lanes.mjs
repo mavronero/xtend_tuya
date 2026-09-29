@@ -1,7 +1,7 @@
 // Lane packing + plan/run pairing for the irrigation calendar card.
 // Run: node --experimental-strip-types tests/test_calendar_lanes.mjs
 import assert from "node:assert/strict";
-import { packLanes, pairPlanRuns, offlineSpans } from "../frontend/src/calendar-lanes.ts";
+import { packLanes, pairPlanRuns, offlineSpans, scheduleChangedAt } from "../frontend/src/calendar-lanes.ts";
 
 const M = 60_000;
 const ev = (start, end, kind, name, key = name) => ({ start: start * M, end: end * M, kind, name, key });
@@ -43,6 +43,30 @@ assert.deepEqual(paired, [
 assert.equal(pairPlanRuns([ev(85, 95, "planned", "v9")], [], now)[0].kind, "planned");
 // An open run keeps "running" whether paired or not.
 assert.equal(pairPlanRuns([ev(10, 20, "planned", "v1")], [ev(11, 25, "running", "v1")], now)[0].kind, "running");
+
+// v1's timer moved at minute 40 (22.09: 1 h moves). The current slot expanded
+// over the time before is superseded (dropped, not missed) and a lone run
+// before it is plain "ran"; after the change, and for v2 (unchanged), the
+// usual missed/unplanned outcomes apply.
+{
+  const changedAt = (key) => (key === "v1" ? 40 * M : -Infinity);
+  const out = pairPlanRuns(
+    [ev(20, 30, "planned", "v1"), ev(70, 75, "planned", "v1"), ev(30, 35, "planned", "v2")],
+    [ev(0, 8, "ran", "v1"), ev(50, 52, "ran", "v1"), ev(0, 5, "ran", "v2")],
+    now,
+    changedAt
+  ).map((e) => [e.key, e.kind, e.start / M]);
+  assert.deepEqual(out, [
+    ["v2", "missed", 30],
+    ["v1", "missed", 70],
+    ["v1", "ran", 0],
+    ["v1", "unplanned", 50],
+    ["v2", "unplanned", 0],
+  ]);
+  assert.equal(scheduleChangedAt({ attributes: { schedule_changed_at: "2026-09-22T09:00:00+00:00" } }), Date.parse("2026-09-22T09:00:00Z"));
+  assert.equal(scheduleChangedAt({ attributes: { schedule_changed_at: null } }), -Infinity);
+  assert.equal(scheduleChangedAt(undefined), -Infinity);
+}
 
 // Offline stretches from registry-sensor history (Timeline view).
 {
