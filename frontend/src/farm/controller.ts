@@ -3,7 +3,7 @@
  * demand after an edit); the host renders from `summaries()`. */
 
 import type { ReactiveController, ReactiveControllerHost } from "lit";
-import { discoverValves, fetchLocations, type HomeAssistantLike, type ValveEntities } from "./discovery.ts";
+import { discoverValves, fetchLocations, invalidateLocations, type HomeAssistantLike, type ValveEntities } from "./discovery.ts";
 import { EMPTY_FARM_DATA, FARM_CHANGED_EVENT, invalidateFarmData, loadFarmData, type FarmData } from "./data.ts";
 import { summarize, type ValveSummary } from "./valve-summary.ts";
 import { syncFarmTimeZone } from "../components/farm-time.ts";
@@ -78,7 +78,10 @@ export class FarmController implements ReactiveController {
       if (changed) this.rerun = true;
       return;
     }
-    if (changed) invalidateFarmData();
+    if (changed) {
+      invalidateFarmData();
+      invalidateLocations();
+    }
     this.busy = true;
     window.clearTimeout(this.retry);
     try {

@@ -37,17 +37,23 @@ export interface HomeAssistantLike {
  * valve into "Unassigned" (ticket c802BqOn). */
 export type LocationMap = Record<string, { home?: string | null; room?: string | null }>;
 
-export async function fetchLocations(hass: HomeAssistantLike): Promise<LocationMap> {
-  if (!hass.callApi) return {};
-  try {
-    const r = await hass.callApi<{ locations?: LocationMap }>(
-      "GET",
-      "xtend_tuya/valve_locations"
-    );
-    return r?.locations ?? {};
-  } catch {
-    return {};
-  }
+// Every card on a page (header, log, …) asks at once: share one request.
+const LOCATIONS_TTL_MS = 2_000;
+let locations: { at: number; p: Promise<LocationMap> } | null = null;
+
+export function fetchLocations(hass: HomeAssistantLike): Promise<LocationMap> {
+  if (!hass.callApi) return Promise.resolve({});
+  if (locations && Date.now() - locations.at < LOCATIONS_TTL_MS) return locations.p;
+  const p = hass
+    .callApi<{ locations?: LocationMap }>("GET", "xtend_tuya/valve_locations")
+    .then((r) => r?.locations ?? {}, () => ({}));
+  locations = { at: Date.now(), p };
+  return p;
+}
+
+/** After an edit: the next fetch goes to the server. */
+export function invalidateLocations(): void {
+  locations = null;
 }
 
 
