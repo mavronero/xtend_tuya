@@ -36,6 +36,8 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-28 | 4.4.285 | 4.4.284 | ok (SMOKE OK; per-run cap 50 -> 250 L/min, backfill v4 filled 811's 4 blanked runs but also shifted 10 correct runs; all 18 changed runs then set to the valves' own counter_custom liters with core stopped (patch18). Backups: .storage/xtend_tuya.irrigation_runs.pre-4.4.285 and .pre-patch18. Rollback: HACS 4.4.284; the store keeps backfill_version 4, so the repair does not re-run) |
 | 2026-09-28 | 4.4.286 | 4.4.285 | ok (SMOKE OK; weekend feedback batch, frontend + 2 small backend changes: late close liters fire run_recorded, 30-day flow mean skips 0 L runs. Restart via homeassistant.restart service (`ssh farm-ha ha core restart` said unauthorized). Rollback: HACS 4.4.285 + restart, no store changes) |
 | 2026-09-29 | 4.4.287 | 4.4.286 | ok (SMOKE OK; valve log per metering point + header move, Timeline ?site=, Online chip, pump Flow chart via new /api/xtend_tuya/pump_flow: 24h 0.8 s, 7d 4.8 s, 30d 0.6 s cold on the Green, 60 s cache. Browser needed SW unregister to pick up the new bundle. Rollback: HACS 4.4.286 + restart, no store changes) |
+| 2026-09-29 | 4.4.288 | 4.4.287 | ok (SMOKE OK; hot-added devices prepared like setup + Find new devices button/service/6 h check; prod service run: both hubs "find new devices: none", no errors. Rollback: HACS 4.4.287 + restart) |
+| 2026-09-29 | 4.4.289 | 4.4.288 | ok (SMOKE OK; bootstrap heals a stale SW cache: 1-byte ranged GET vs loaded ?v=, purge + one reload per version; HEAD is 405 behind nabu.casa. Verified on dev with a simulated release. Rollback: HACS 4.4.288 + restart) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
