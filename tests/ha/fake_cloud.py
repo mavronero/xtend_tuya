@@ -86,6 +86,8 @@ class FakeAccount:
         self.paired: set[str] = set()
         self.listings = 0
         self.sent: list[tuple[str, dict]] = []
+        self.api_calls: list[tuple[str, str]] = []
+        self.timers: dict[str, list[dict] | None] = {}  # cloud /timers per device id
 
     # identity
     def get_type_name(self) -> str:
@@ -154,6 +156,18 @@ class FakeAccount:
         return True
 
     def call_api(self, method: str, url: str, payload: str | None):
+        self.api_calls.append((method, url))
+        # GET /v1.0/devices/{id}/timers: self.timers[id] is the flat timer
+        # list the cloud holds, or None for a failed read (1106).
+        parts = url.split("/")
+        if method == "GET" and len(parts) == 5 and parts[2] == "devices" and parts[4] == "timers":
+            if parts[3] not in self.timers:
+                return None
+            timers = self.timers[parts[3]]
+            if timers is None:
+                return {"success": False, "code": 1106, "msg": "permission deny"}
+            groups = [{"id": f"g{i}", "timers": [t]} for i, t in enumerate(timers)]
+            return {"success": True, "result": [{"groups": groups}] if groups else []}
         return None
 
     def query_scenes(self) -> list:

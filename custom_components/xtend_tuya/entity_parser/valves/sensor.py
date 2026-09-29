@@ -268,6 +268,7 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
             "slots": wrapper.timer_state.attribute(),
             "active_count": wrapper.timer_state.active_count,
             "schedule_changed_at": wrapper.timer_state.changed_at,
+            "cloud": wrapper.timer_state.cloud,
             "valve_name": self.device.name,
             "valve_home": location.get("home"),
             "valve_room": location.get("room"),
@@ -302,7 +303,9 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
             slots_data = last_state.attributes.get("slots")
             if isinstance(slots_data, dict):
                 wrapper.timer_state.restore(
-                    slots_data, last_state.attributes.get("schedule_changed_at")
+                    slots_data,
+                    last_state.attributes.get("schedule_changed_at"),
+                    last_state.attributes.get("cloud"),
                 )
                 _LOGGER.debug("Restored timer registry for %s: %s", self.entity_id, slots_data)
 

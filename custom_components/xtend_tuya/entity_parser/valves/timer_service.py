@@ -17,6 +17,7 @@ import logging
 from ...transport.port import CloudResult, TuyaPort
 from .codecs import time_task as tt
 from .driver import CommandResult, target
+from .timer_reconcile import fetch_cloud_timers
 from .timer_state import live_timers
 from .const import (
     TUYA_ERR_DEVICE_POOL_QUOTA,
@@ -322,31 +323,19 @@ async def set_timer(hass, data: dict) -> CommandResult:
     return CommandResult(device_id, "ok", cloud=posted.status, reason=posted.reason)
 
 
-async def _get_cloud_timer_keys(port: TuyaPort, device_id: str) -> set[tuple[str, str]] | None:
-    """GET the cloud timer registry and return the set of (time_str, loops)
-    keys it holds. Read-only — draws the 26k/mo API-call pool, NOT the
-    10-controllable-device cap. Returns None if the GET failed (so callers
-    don't mistake an API failure for an empty cloud registry and wipe every
-    HA slot as a ghost)."""
-    list_url = f"/v1.0/devices/{device_id}/timers"
-    listing = await port.cloud("GET", list_url)
-    if not listing.ok:
-        _LOGGER.warning("resync: cloud timer GET non-success for %s: %s", device_id, listing.reason)
-        return None
-    resp = listing.payload
+def _cloud_keys(timers: list[dict]) -> set[tuple[str, str]]:
+    """The (time_str, loops) keys of a cloud timer listing."""
     keys: set[tuple[str, str]] = set()
-    for category in resp.get("result", []):
-        for group in category.get("groups", []):
-            for timer in group.get("timers", []):
-                # Top-level time/loops first — T3 app timers report empty
-                # `functions`, so keying off the value dict alone would miss
-                # them and (in resync) flag every enabled slot as an orphan.
-                funcs = timer.get("functions") or []
-                v = funcs[0].get("value", {}) if funcs else {}
-                t = timer.get("time") or v.get("startTimeStr")
-                loops = timer.get("loops") or v.get("loops")
-                if t is not None and loops is not None:
-                    keys.add((t, loops))
+    for timer in timers:
+        # Top-level time/loops first — T3 app timers report empty
+        # `functions`, so keying off the value dict alone would miss
+        # them and (in resync) flag every enabled slot as an orphan.
+        funcs = timer.get("functions") or []
+        v = funcs[0].get("value", {}) if funcs else {}
+        t = timer.get("time") or v.get("startTimeStr")
+        loops = timer.get("loops") or v.get("loops")
+        if t is not None and loops is not None:
+            keys.add((t, loops))
     return keys
 
 
@@ -389,9 +378,13 @@ async def resync_from_cloud(hass, data: dict) -> dict:
         return {"success": False, "error": "no_registry_entity"}
     slots = {i: live.state.slot(i) for i in range(tt.SLOTS)}
 
-    cloud_keys = await _get_cloud_timer_keys(port, device_id)
-    if cloud_keys is None:
+    timers = await fetch_cloud_timers(port, device_id)
+    if timers is None:
         return {"success": False, "error": "cloud_get_failed"}
+    cloud_keys = _cloud_keys(timers)
+    # The same read labels the slots for the calendar (timer_reconcile.py);
+    # apply_cloud itself refuses the empty-registry shape below.
+    labelled = live.state.apply_cloud(timers, mirror_on=True)
 
     # A GET that succeeds but comes back empty is not proof that every timer
     # is an orphan: a degraded-but-successful response (device offline,
@@ -448,7 +441,7 @@ async def resync_from_cloud(hass, data: dict) -> dict:
         else:
             orphans_deferred += 1
 
-    if orphans_cleared:
+    if orphans_cleared or labelled:
         live.publish()
 
     result = {

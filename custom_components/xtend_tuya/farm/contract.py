@@ -27,6 +27,19 @@ CLOSE_TIME_TRANSLATION_KEY = "close_time"
 LAST_RUN_TRANSLATION_KEY = "last_watering_run"
 # Tuya room of the valve, on the registry sensor (filled by the home walk).
 ROOM_ATTR = "valve_room"
+# Cloud timer overlay on the registry sensor (entity_parser/valves/
+# timer_state.py, read daily by timer_reconcile.py):
+#   {"checked_at": ISO UTC,
+#    "slots": {"<slot>": "on" | "off" | "missing" | "unknown"},
+#    "cloud_only": [slot-shaped dicts: hour, minute, days_mask, days, mode,
+#                   value (0 = T3 app timer, duration unknown), enabled]}
+# "off": switched off in the app (old QT-08W only). "missing": enabled in HA,
+# no cloud timer, while the hub mirrors timers to the cloud. A slot without
+# an entry has no judgement (a DP report since the read resets it).
+CLOUD_ATTR = "cloud"
+CLOUD_NOT_PLANNED = ("off", "missing")
+# An overlay older than this is ignored (the sweep stopped, e.g. no account).
+CLOUD_MAX_AGE_DAYS = 3
 
 # Entity-id suffix fallbacks for installs whose entities pre-date the
 # translation_key bump in 4.4.150 (registry stores translation_key only

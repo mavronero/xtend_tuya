@@ -405,6 +405,15 @@ async def _async_load_entry_body(
     except Exception:  # noqa: BLE001
         LOGGER.debug("fdm5kw: location bootstrap scheduling failed", exc_info=True)
 
+    # Daily read-only cloud timer read that labels each valve's slots for the
+    # calendar (first run 15 min after load, bound to this entry).
+    try:
+        from .entity_parser.valves import timer_reconcile as _timer_reconcile
+
+        _timer_reconcile.async_ensure_scheduled(hass, entry, multi_manager.port)
+    except Exception:  # noqa: BLE001
+        LOGGER.debug("fdm5kw: cloud timer sweep scheduling failed", exc_info=True)
+
     # Devices paired in Tuya while HA runs: bindUser may never reach us, so
     # look for them ourselves (the timer is bound to this load).
     async def _find_new_devices(_now) -> None:

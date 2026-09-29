@@ -43,7 +43,13 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.http import HomeAssistantView
 
 from ..const import DOMAIN
-from .contract import VALVE_DEVICE_DOMAINS, discover_valves
+from .contract import (
+    CLOUD_ATTR,
+    CLOUD_MAX_AGE_DAYS,
+    CLOUD_NOT_PLANNED,
+    VALVE_DEVICE_DOMAINS,
+    discover_valves,
+)
 from .runs_store import BACKFILL_VERSION, pair_by_value
 from .water_math import sum_plausible_deltas
 
@@ -287,6 +293,19 @@ def _format_completed_title(
         f"{valve_name} · {duration_min} min · "
         f"{_format_lpm(l_per_min)} · {_format_volume(cycle_l)}"
     )
+
+
+def _fresh_cloud(cloud: Any, now: datetime | None = None) -> tuple[dict, list]:
+    """(slot overlay, cloud-only timers) of a registry sensor, or empty when
+    the cloud was never read or the read is older than CLOUD_MAX_AGE_DAYS."""
+    if not isinstance(cloud, dict):
+        return {}, []
+    checked = _parse_dt(cloud.get("checked_at"))
+    now = now or datetime.now(timezone.utc)
+    if checked is None or now - checked > timedelta(days=CLOUD_MAX_AGE_DAYS):
+        return {}, []
+    slots, only = cloud.get("slots"), cloud.get("cloud_only")
+    return (slots if isinstance(slots, dict) else {}), (only if isinstance(only, list) else [])
 
 
 def _format_planned_title(
@@ -897,11 +916,17 @@ class IrrigationPlannedCalendar(CalendarEntity):
                 if averages_by_device
                 else (None, None)
             )
-            for slot in slots.values():
-                if not isinstance(slot, dict):
-                    continue
-                if not slot.get("enabled"):
-                    continue
+            overlay, cloud_only = _fresh_cloud(d["registry_state"].attributes.get(CLOUD_ATTR))
+            planned = [
+                slot
+                for key, slot in slots.items()
+                if isinstance(slot, dict)
+                and slot.get("enabled")
+                and overlay.get(str(key)) not in CLOUD_NOT_PLANNED
+            ]
+            # App timers the valve never reported: own uid suffix per entry.
+            planned += [{**t, "slot": f"c{i}"} for i, t in enumerate(cloud_only) if isinstance(t, dict)]
+            for slot in planned:
                 events.extend(
                     self._expand_slot(
                         slot=slot,
