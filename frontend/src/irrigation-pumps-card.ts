@@ -18,7 +18,7 @@ import type { HassState, HomeAssistantLike } from "./farm/discovery.ts";
 import type { MeteringPoint, Pump } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { summarizeMp, type MpSummary } from "./farm/mp-summary.ts";
-import { balance, pumpFeeds, type StatSeries } from "./farm/pump-summary.ts";
+import { balance, flowLines, pumpFeeds, type FlowLines, type StatRow, type StatSeries } from "./farm/pump-summary.ts";
 import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
 import { volume } from "./components/format.ts";
 import { navigate } from "./components/navigate.ts";
@@ -27,6 +27,7 @@ import type { DeviceOption } from "./components/device-picker.ts";
 import "./components/mp-card.ts";
 import "./components/pump-list.ts";
 import "./components/pump-chart.ts";
+import "./components/pump-flow-chart.ts";
 import "./components/device-picker.ts";
 import "./components/valve-filter-bar.ts";
 import { farmTokens } from "./components/theme.ts";
@@ -90,6 +91,10 @@ export class IrrigationPumpsCard extends LitElement {
   /** HA device picked to connect (waits for role and meter). */
   @state() private _connecting: string | null = null;
   private _statsKey = "";
+  /** Flow line of the shown pump: render sets what it wants, updated() loads it. */
+  @state() private _flow: { key: string; lines: FlowLines; from: number; to: number } | null = null;
+  private _flowWanted: { entity: string; range: Range } | null = null;
+  private _flowKey = "";
   private _farm = new FarmController(this);
   private _balanceMemo: { key: string; data: unknown; stats: unknown; value: ReturnType<typeof balance> } | null = null;
   private _mpMemo: { valves: unknown; map: Map<string, MpSummary> } | null = null;
@@ -120,6 +125,25 @@ export class IrrigationPumpsCard extends LitElement {
     if (this.hass?.callApi && this._farm.loaded && key !== this._statsKey) {
       this._statsKey = key;
       void this._loadStats();
+    }
+    const w = this._flowWanted;
+    const fkey = w ? `${w.entity}|${w.range}` : "";
+    if (this.hass?.callApi && w && fkey !== this._flowKey) {
+      this._flowKey = fkey;
+      void this._loadFlow(w.entity, w.range, fkey);
+    }
+  }
+
+  private async _loadFlow(entity: string, range: Range, key: string): Promise<void> {
+    try {
+      const r = await this.hass!.callApi!<{ raw: boolean; rows: StatRow[] }>(
+        "GET",
+        `xtend_tuya/pump_flow?range=${range}&entity=${encodeURIComponent(entity)}`
+      );
+      const to = Date.now();
+      if (key === this._flowKey) this._flow = { key, lines: flowLines(r.rows ?? [], r.raw, to), from: to - RANGES[range].ms, to };
+    } catch (e) {
+      this._error = `Could not load pump flow: ${e instanceof Error ? e.message : String(e)}`;
     }
   }
 
@@ -360,7 +384,21 @@ export class IrrigationPumpsCard extends LitElement {
         </div>
         <xt-pump-chart .buckets=${b.buckets} period=${period}></xt-pump-chart>
       </div>
+      ${this._flowChart(p, period)}
     </section>`;
+  }
+
+  /** Flow rate line under the volume bars; none without a flow entity. */
+  private _flowChart(p: Pump, period: "hour" | "day") {
+    this._flowWanted = p.flow_entity ? { entity: p.flow_entity, range: this._range } : null;
+    if (!p.flow_entity) return nothing;
+    const f = this._flow?.key === `${p.flow_entity}|${this._range}` ? this._flow : null;
+    return html`<div class="panel flow">
+      <h4>Flow</h4>
+      ${f
+        ? html`<xt-pump-flow-chart .lines=${f.lines} .from=${f.from} .to=${f.to} period=${period}></xt-pump-flow-chart>`
+        : html`<div class="dim">Loading…</div>`}
+    </div>`;
   }
 
   private _feeds(p: Pump, mpSums: Map<string, MpSummary>) {
@@ -667,6 +705,10 @@ export class IrrigationPumpsCard extends LitElement {
       }
       .dim {
         color: var(--xt-dim);
+      }
+      .flow h4 {
+        margin: 0 0 8px;
+        font-weight: 500;
       }
       .dot {
         display: inline-block;

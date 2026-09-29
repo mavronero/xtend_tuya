@@ -169,6 +169,36 @@ export function balance(
   };
 }
 
+/** Flow chart lines (from /api/xtend_tuya/pump_flow): runs of [ms, L/min]
+ * points, broken at null values. Raw states hold until the next change
+ * (a step line, extended to `to`): the meter writes nothing while the flow
+ * stays at 0, so a straight line between changes would draw a fake ramp.
+ * Statistics rows are joined point to point. */
+export interface FlowLines {
+  mean: [number, number][][];
+  max: [number, number][][];
+  peak: number;
+}
+
+export function flowLines(rows: StatRow[], raw: boolean, to: number): FlowLines {
+  const runs = (key: "mean" | "max") => {
+    const out: [number, number][][] = [];
+    let cur: [number, number][] | null = null;
+    rows.forEach((r, i) => {
+      const v = r[key];
+      if (typeof v !== "number") return void (cur = null);
+      if (!cur) out.push((cur = []));
+      cur.push([r.start, v]);
+      if (raw) cur.push([rows[i + 1]?.start ?? to, v]);
+    });
+    return out;
+  };
+  const mean = runs("mean");
+  const max = raw ? [] : runs("max");
+  const peak = Math.max(0, ...[...mean, ...max].flat().map((p) => p[1]));
+  return { mean, max, peak };
+}
+
 /** Axis ticks from 0 to at least max, on a 1/2/5 step, about `target` steps. */
 export function niceTicks(max: number, target = 3): number[] {
   const raw = max / target;
