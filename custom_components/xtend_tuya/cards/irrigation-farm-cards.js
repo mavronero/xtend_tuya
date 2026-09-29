@@ -625,7 +625,16 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       ${t.badges.length?B`<div class="badges">
             ${t.badges.map(e=>{const[i,s,n]=He[e];return B`<span class="badge ${n}" title=${s}>${i}${"missed"===e&&t.missed>1?` ${t.missed}`:""}</span>`})}
           </div>`:G}
-    </ha-card>`}}Be.styles=[fe,r`
+    </ha-card>`}}function qe(t,e,i,s,n){const a=t=>{const e=t.target,s=i.find(t=>t.text===e.value);s&&(e.value="",n(s.key))};return B`<input
+      class="pick"
+      type="search"
+      list=${t}
+      placeholder=${e}
+      autocomplete="off"
+      ?disabled=${s}
+      @input=${t=>{t.inputType&&"insertReplacementText"!==t.inputType||a(t)}}
+      @change=${a}
+    /><datalist id=${t}>${i.map(t=>B`<option value=${t.text}></option>`)}</datalist>`}Be.styles=[fe,r`
     :host {
       display: block;
     }
@@ -783,10 +792,22 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .badge.bad {
       background: color-mix(in srgb, var(--xt-bad) 18%, transparent);
     }
-  `],t([ut({attribute:!1})],Be.prototype,"summary",void 0),t([ut({type:Boolean})],Be.prototype,"editable",void 0),t([ut({type:Boolean})],Be.prototype,"admin",void 0),customElements.get("xt-mp-card")||customElements.define("xt-mp-card",Be);const qe={watering:"Watering",idle:"Idle",offline:"Offline"};function Ve(t){return Yt(t,{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}class Ge extends dt{constructor(){super(...arguments),this.sites=[],this.valves=[],this.busy=!1,this.error=null}_fire(t,e){this.dispatchEvent(new CustomEvent(t,{detail:e,bubbles:!0,composed:!0}))}_save(t){t.preventDefault();const e=t.target,i=t=>e.elements.namedItem(t).value,s=i("expected_lpm").trim();this._fire("xt-mp-save",{name:i("name"),description:i("description"),expected_lpm:""===s?null:Number(s),site_id:i("site_id")||null})}_valveLine(t,e){return B`<div class="valve">
+  `],t([ut({attribute:!1})],Be.prototype,"summary",void 0),t([ut({type:Boolean})],Be.prototype,"editable",void 0),t([ut({type:Boolean})],Be.prototype,"admin",void 0),customElements.get("xt-mp-card")||customElements.define("xt-mp-card",Be);const Ve=r`
+  input.pick {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    padding: 6px 10px;
+    border: 1px solid var(--divider-color);
+    border-radius: 8px;
+    background: var(--card-background-color, transparent);
+    color: var(--primary-text-color);
+  }
+`,Ge={watering:"Watering",idle:"Idle",offline:"Offline"};function Ke(t){return Yt(t,{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}class Je extends dt{constructor(){super(...arguments),this.sites=[],this.valves=[],this.busy=!1,this.error=null}_fire(t,e){this.dispatchEvent(new CustomEvent(t,{detail:e,bubbles:!0,composed:!0}))}_save(t){t.preventDefault();const e=t.target,i=t=>e.elements.namedItem(t).value,s=i("expected_lpm").trim();this._fire("xt-mp-save",{name:i("name"),description:i("description"),expected_lpm:""===s?null:Number(s),site_id:i("site_id")||null})}_valveLine(t,e){return B`<div class="valve">
       <ha-icon icon="mdi:valve"></ha-icon>
       <span class="num">${t?.label??e}</span>
-      ${t?B`<i class=${t.status}></i><span>${qe[t.status]}</span>`:G}
+      ${t?B`<i class=${t.status}></i><span>${Ge[t.status]}</span>`:G}
       ${null!=t?.battery?B`<span class="dim"><ha-icon icon=${ke(t.battery)}></ha-icon>${Math.round(t.battery)} %</span>`:G}
       <button type="button" class="link danger" ?disabled=${this.busy} @click=${()=>this._fire("xt-mp-unassign",e)}>
         Remove
@@ -823,13 +844,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           ${t.valves.length?t.valves.map(t=>this._valveLine(e.get(t),t)):B`<div class="dim">No valve assigned.</div>`}
           <label
             >${t.valves.length?"Exchange for":"Assign"}
-            <select
-              ?disabled=${this.busy}
-              @change=${t=>{const e=t.target;e.value&&this._fire("xt-mp-assign",e.value),e.value=""}}
-            >
-              <option value="">Choose a valve…</option>
-              ${i.map(t=>B`<option value=${t.device_id}>${t.label}${t.at?` — now at ${t.at}`:" — free"}${"offline"===t.status?" (offline)":""}</option>`)}
-            </select>
+            ${qe("xt-mp-valves","Type a number or name…",i.map(t=>({key:t.device_id,text:`${t.label}${t.name&&t.name!==t.label?` · ${t.name}`:""}${t.at?` — now at ${t.at}`:" — free"}${"offline"===t.status?" (offline)":""}`})),this.busy,t=>this._fire("xt-mp-assign",t))}
           </label>
           <p class="hint dim">
             ${t.valves.length>1?"Both current valves' assignments end now (one valve per metering point).":t.valves.length?"The current valve's assignment ends now.":"The valve leaves the metering point it is at now."}
@@ -843,7 +858,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 ${s.map(t=>B`<li>
                     <span class="num">${e.get(t.device_id)?.label??t.device_id}</span>
                     <span class="dim"
-                      >${t.begin?Ve(t.begin):"from the start"} – ${t.end?Ve(t.end):"now"}</span
+                      >${t.begin?Ke(t.begin):"from the start"} – ${t.end?Ke(t.end):"now"}</span
                     >
                   </li>`)}
               </ul>
@@ -856,7 +871,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
             </section>`}
         ${this.error?B`<div class="error">${this.error}</div>`:G}
       </aside>
-    `}}Ge.styles=[fe,r`
+    `}}Je.styles=[Ve,fe,r`
       .backdrop {
         position: fixed;
         inset: 0;
@@ -1008,7 +1023,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       .error {
         color: var(--xt-bad);
       }
-    `],t([ut({attribute:!1})],Ge.prototype,"mp",void 0),t([ut({attribute:!1})],Ge.prototype,"sites",void 0),t([ut({attribute:!1})],Ge.prototype,"valves",void 0),t([ut({type:Boolean})],Ge.prototype,"busy",void 0),t([ut()],Ge.prototype,"error",void 0),customElements.get("xt-mp-editor")||customElements.define("xt-mp-editor",Ge);const Ke=r`
+    `],t([ut({attribute:!1})],Je.prototype,"mp",void 0),t([ut({attribute:!1})],Je.prototype,"sites",void 0),t([ut({attribute:!1})],Je.prototype,"valves",void 0),t([ut({type:Boolean})],Je.prototype,"busy",void 0),t([ut()],Je.prototype,"error",void 0),customElements.get("xt-mp-editor")||customElements.define("xt-mp-editor",Je);const Ye=r`
     :host {
       display: block;
     }
@@ -1165,7 +1180,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .err {
       color: var(--xt-bad);
     }
-`,Je="xtend_tuya/irrigation_locations";function Ye(){return new URLSearchParams(window.location.search).get("site")}class Ze extends dt{constructor(){super(...arguments),this._selected=Ye(),this._edit=!1,this._editing=null,this._busy=!1,this._error=null,this._farm=new oe(this),this._mpMemo=null,this._onLocation=()=>{this._selected=Ye()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("site",t):e.searchParams.delete("site"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null}async _post(t){if(!this.hass?.callApi)return!1;this._busy=!0,this._error=null;try{return await this.hass.callApi("POST",Je,t),At(),await this._farm.refresh(!0),!0}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),!1}finally{this._busy=!1}}async _createSite(t,e){const i=t.querySelector("input");i.value.trim()&&await this._post({action:"create_site",name:i.value,parent_id:e})&&(i.value="")}async _saveSite(t,e){const i=t.querySelector("input").value,s=t.querySelector("select").value||null;await this._post({action:"update_site",id:e.id,name:i,parent_id:s})}async _deleteSite(t){await this._post({action:"delete_site",id:t.id})&&this._open(t.parent_id)}_header(t,e){const i=[{id:null,name:"All sites"}];if(t&&t.id!==Pe){const e=new Map(this._farm.data.sites.map(t=>[t.id,t])),s=[];for(let i=e.get(t.id);i&&s.length<20;i=i.parent_id?e.get(i.parent_id):void 0)s.unshift(i);i.push(...s.map(t=>({id:t.id,name:t.name})))}else t&&i.push({id:Pe,name:"No site"});const s=i[i.length-1].name;return B`<div class="header">
+`,Ze="xtend_tuya/irrigation_locations";function Xe(){return new URLSearchParams(window.location.search).get("site")}class Qe extends dt{constructor(){super(...arguments),this._selected=Xe(),this._edit=!1,this._editing=null,this._busy=!1,this._error=null,this._farm=new oe(this),this._mpMemo=null,this._onLocation=()=>{this._selected=Xe()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("site",t):e.searchParams.delete("site"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null}async _post(t){if(!this.hass?.callApi)return!1;this._busy=!0,this._error=null;try{return await this.hass.callApi("POST",Ze,t),At(),await this._farm.refresh(!0),!0}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),!1}finally{this._busy=!1}}async _createSite(t,e){const i=t.querySelector("input");i.value.trim()&&await this._post({action:"create_site",name:i.value,parent_id:e})&&(i.value="")}async _saveSite(t,e){const i=t.querySelector("input").value,s=t.querySelector("select").value||null;await this._post({action:"update_site",id:e.id,name:i,parent_id:s})}async _deleteSite(t){await this._post({action:"delete_site",id:t.id})&&this._open(t.parent_id)}_header(t,e){const i=[{id:null,name:"All sites"}];if(t&&t.id!==Pe){const e=new Map(this._farm.data.sites.map(t=>[t.id,t])),s=[];for(let i=e.get(t.id);i&&s.length<20;i=i.parent_id?e.get(i.parent_id):void 0)s.unshift(i);i.push(...s.map(t=>({id:t.id,name:t.name})))}else t&&i.push({id:Pe,name:"No site"});const s=i[i.length-1].name;return B`<div class="header">
       <nav class="crumbs" aria-label="Site path">
         ${i.slice(0,-1).map(t=>B`<a href="#" @click=${e=>(e.preventDefault(),this._open(t.id))}>${t.name}</a><span>›</span>`)}
       </nav>
@@ -1213,7 +1228,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     </form>`}_addSite(t){return B`<form class="editor" @submit=${e=>(e.preventDefault(),this._createSite(e.target,t))}>
       <label>${t?"New sub-site":"New site"} <input placeholder="Name" /></label>
       <button type="submit" ?disabled=${this._busy}>Add</button>
-    </form>`}async _saveMp(t,e){await this._post({action:"update_location",id:t.id,name:e.name,description:e.description,expected_lpm:e.expected_lpm})&&e.site_id!==t.site_id&&await this._post({action:"set_location_site",location_id:t.id,site_id:e.site_id})}async _createMp(t,e){const i=t.querySelector("input");if(i.value.trim()&&this.hass?.callApi){this._busy=!0,this._error=null;try{const t=await this.hass.callApi("POST",Je,{action:"create_location",name:i.value});e&&await this.hass.callApi("POST",Je,{action:"set_location_site",location_id:t.location.id,site_id:e}),i.value="",await this._farm.refresh(!0),this._editing=t.location.id}catch(t){const e=t;this._error=e.body?.error??e.message??String(t)}finally{this._busy=!1}}}_editor(t,e){const i=this._farm.data,s=i.sites.map(t=>({id:t.id,path:he(i.sites,t.id)})).sort((t,e)=>t.path.localeCompare(e.path)),n=e.map(t=>({device_id:t.device_id,label:t.number?`#${t.number}`:t.name,status:t.status,battery:t.battery,at:i.locationOf[t.device_id]?.name??null}));return B`<xt-mp-editor
+    </form>`}async _saveMp(t,e){await this._post({action:"update_location",id:t.id,name:e.name,description:e.description,expected_lpm:e.expected_lpm})&&e.site_id!==t.site_id&&await this._post({action:"set_location_site",location_id:t.id,site_id:e.site_id})}async _createMp(t,e){const i=t.querySelector("input");if(i.value.trim()&&this.hass?.callApi){this._busy=!0,this._error=null;try{const t=await this.hass.callApi("POST",Ze,{action:"create_location",name:i.value});e&&await this.hass.callApi("POST",Ze,{action:"set_location_site",location_id:t.location.id,site_id:e}),i.value="",await this._farm.refresh(!0),this._editing=t.location.id}catch(t){const e=t;this._error=e.body?.error??e.message??String(t)}finally{this._busy=!1}}}_editor(t,e){const i=this._farm.data,s=i.sites.map(t=>({id:t.id,path:he(i.sites,t.id)})).sort((t,e)=>t.path.localeCompare(e.path)),n=e.map(t=>({device_id:t.device_id,label:t.number?`#${t.number}`:t.name,status:t.status,battery:t.battery,at:i.locationOf[t.device_id]?.name??null,name:t.name}));return B`<xt-mp-editor
       .mp=${t}
       .sites=${s}
       .valves=${n}
@@ -1258,19 +1273,19 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${a||t.sites.length?G:B`<div class="msg">No sites yet. Sites are created from the Tuya rooms once the valves report them, or by hand in Edit.</div>`}
       </main>
       ${m?this._editor(m,e):G}
-    </div>`}}Ze.styles=[fe,Ke,r`
+    </div>`}}Qe.styles=[fe,Ye,r`
       .panel > h3:first-child {
         margin-top: 0;
       }
-    `],t([ut({attribute:!1})],Ze.prototype,"hass",void 0),t([mt()],Ze.prototype,"_selected",void 0),t([mt()],Ze.prototype,"_edit",void 0),t([mt()],Ze.prototype,"_editing",void 0),t([mt()],Ze.prototype,"_busy",void 0),t([mt()],Ze.prototype,"_error",void 0),customElements.get("irrigation-sites-card")||customElements.define("irrigation-sites-card",Ze);const Xe=1e3;function Qe(t,e){return(null===t.begin||t.begin<=e)&&(null===t.end||e<t.end)}function ti(t,e,i){const s=(e,s)=>t.pumpAssignments.find(t=>t.target_kind===e&&t.target_id===s&&Qe(t,i))?.pump_id??null,n=s("location",e.id);if(n)return n;const a=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?a.get(e.site_id):void 0,i=0;t&&i<20;i++){const e=s("site",t.id);if(e)return e;t=t.parent_id?a.get(t.parent_id):void 0}return null}function ei(t,e,i){const s=t.pumpAssignments.filter(t=>t.pump_id===e&&"site"===t.target_kind&&Qe(t,i)).map(t=>t.target_id),n=[],a=[],r=e=>{const i=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?i.get(e.site_id):void 0,n=0;t&&n<20;n++){if(s.includes(t.id))return!0;t=t.parent_id?i.get(t.parent_id):void 0}return!1};for(const s of t.locations){const o=ti(t,s,i);o===e?n.push(s.id):o&&r(s)&&a.push({mp:s.id,pump:o})}return{sites:s,mps:n,overridden:a}}function ii(t,e){const i=Gt(t);return"day"===e?i:i+36e5*Math.floor(Jt(t))}function si(t,e,i,s,n,a,r){const o=new Map,l=t=>{const e=ii(t,a);let i=o.get(e);return i||o.set(e,i={start:e,pump:null,valves:0,consumers:0}),i},d="hour"===a?36e5:864e5;for(let t=ii(s,a);t<n;t+=d)l(t);let c=null;for(const t of i[e.meter_entity]??[]){if(t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0)continue;const e=l(t.start);e.pump=(e.pump??0)+t.change*Xe,c=(c??0)+t.change*Xe}let p=0;for(const i of t.runs){const a=Date.parse(i.end);if(a<s||a>=n||"number"!=typeof i.liters)continue;const o=zt(t,i.device_id,a);!o||ti(t,o,a)!==e.id||r&&!r(o)||(p+=i.liters,l(Date.parse(i.start)).valves+=i.liters)}let h=0;for(const a of function(t,e,i,s){return t.pumpConnections.filter(t=>t.pump_id===e&&(null===t.begin||t.begin<s)&&(null===t.end||t.end>i))}(t,e.id,s,n))if("consumer"===a.role&&a.meter_entity)for(const t of i[a.meter_entity]??[])t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0||!Qe(a,t.start)||(h+=t.change*Xe,l(t.start).consumers+=t.change*Xe);return{pump:c,valves:p,consumers:h,unaccounted:null===c?null:c-p-h,buckets:[...o.values()].sort((t,e)=>t.start-e.start)}}function ni(t,e,i){const s=s=>{const n=[];let a=null;return t.forEach((r,o)=>{const l=r[s];"number"==typeof l?(a||n.push(a=[]),a.push([r.start,l]),e&&a.push([t[o+1]?.start??i,l])):a=null}),n},n=s("mean"),a=e?[]:s("max"),r=Math.max(0,...[...n,...a].flat().map(t=>t[1]));return{mean:n,max:a,peak:r}}function ai(t,e=3){const i=t/e,s=10**Math.floor(Math.log10(i)),n=[1,2,5,10].find(t=>t*s>=i)*s,a=Math.ceil(t/n-1e-9);return Array.from({length:a+1},(t,e)=>Math.round(e*n*1e9)/1e9)}const ri="__no_pump__";class oi extends dt{constructor(){super(...arguments),this.items=[],this.selected=null}render(){return this.items.map(t=>B`<button
+    `],t([ut({attribute:!1})],Qe.prototype,"hass",void 0),t([mt()],Qe.prototype,"_selected",void 0),t([mt()],Qe.prototype,"_edit",void 0),t([mt()],Qe.prototype,"_editing",void 0),t([mt()],Qe.prototype,"_busy",void 0),t([mt()],Qe.prototype,"_error",void 0),customElements.get("irrigation-sites-card")||customElements.define("irrigation-sites-card",Qe);const ti=1e3;function ei(t,e){return(null===t.begin||t.begin<=e)&&(null===t.end||e<t.end)}function ii(t,e,i){const s=(e,s)=>t.pumpAssignments.find(t=>t.target_kind===e&&t.target_id===s&&ei(t,i))?.pump_id??null,n=s("location",e.id);if(n)return n;const a=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?a.get(e.site_id):void 0,i=0;t&&i<20;i++){const e=s("site",t.id);if(e)return e;t=t.parent_id?a.get(t.parent_id):void 0}return null}function si(t,e,i){const s=t.pumpAssignments.filter(t=>t.pump_id===e&&"site"===t.target_kind&&ei(t,i)).map(t=>t.target_id),n=[],a=[],r=e=>{const i=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?i.get(e.site_id):void 0,n=0;t&&n<20;n++){if(s.includes(t.id))return!0;t=t.parent_id?i.get(t.parent_id):void 0}return!1};for(const s of t.locations){const o=ii(t,s,i);o===e?n.push(s.id):o&&r(s)&&a.push({mp:s.id,pump:o})}return{sites:s,mps:n,overridden:a}}function ni(t,e){const i=Gt(t);return"day"===e?i:i+36e5*Math.floor(Jt(t))}function ai(t,e,i,s,n,a,r){const o=new Map,l=t=>{const e=ni(t,a);let i=o.get(e);return i||o.set(e,i={start:e,pump:null,valves:0,consumers:0}),i},d="hour"===a?36e5:864e5;for(let t=ni(s,a);t<n;t+=d)l(t);let c=null;for(const t of i[e.meter_entity]??[]){if(t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0)continue;const e=l(t.start);e.pump=(e.pump??0)+t.change*ti,c=(c??0)+t.change*ti}let p=0;for(const i of t.runs){const a=Date.parse(i.end);if(a<s||a>=n||"number"!=typeof i.liters)continue;const o=zt(t,i.device_id,a);!o||ii(t,o,a)!==e.id||r&&!r(o)||(p+=i.liters,l(Date.parse(i.start)).valves+=i.liters)}let h=0;for(const a of function(t,e,i,s){return t.pumpConnections.filter(t=>t.pump_id===e&&(null===t.begin||t.begin<s)&&(null===t.end||t.end>i))}(t,e.id,s,n))if("consumer"===a.role&&a.meter_entity)for(const t of i[a.meter_entity]??[])t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0||!ei(a,t.start)||(h+=t.change*ti,l(t.start).consumers+=t.change*ti);return{pump:c,valves:p,consumers:h,unaccounted:null===c?null:c-p-h,buckets:[...o.values()].sort((t,e)=>t.start-e.start)}}function ri(t,e,i){const s=s=>{const n=[];let a=null;return t.forEach((r,o)=>{const l=r[s];"number"==typeof l?(a||n.push(a=[]),a.push([r.start,l]),e&&a.push([t[o+1]?.start??i,l])):a=null}),n},n=s("mean"),a=e?[]:s("max"),r=Math.max(0,...[...n,...a].flat().map(t=>t[1]));return{mean:n,max:a,peak:r}}function oi(t,e=3){const i=t/e,s=10**Math.floor(Math.log10(i)),n=[1,2,5,10].find(t=>t*s>=i)*s,a=Math.ceil(t/n-1e-9);return Array.from({length:a+1},(t,e)=>Math.round(e*n*1e9)/1e9)}const li="__no_pump__";class di extends dt{constructor(){super(...arguments),this.items=[],this.selected=null}render(){return this.items.map(t=>B`<button
         class="node ${t.id===this.selected?"on":""}"
         aria-current=${t.id===this.selected?"page":"false"}
         @click=${()=>this.dispatchEvent(new CustomEvent("xt-pump-open",{detail:t.id,bubbles:!0,composed:!0}))}
       >
-        ${t.id===ri?B`<span class="dot none"></span>`:B`<span class="dot ${t.state}" title=${"unknown"===t.state?"No data from the pump":t.state}></span>`}
-        <span class="label ${t.id===ri?"dim":""}">${t.name}</span>
+        ${t.id===li?B`<span class="dot none"></span>`:B`<span class="dot ${t.state}" title=${"unknown"===t.state?"No data from the pump":t.state}></span>`}
+        <span class="label ${t.id===li?"dim":""}">${t.name}</span>
         <span class="count">${t.count}</span>
-      </button>`)}}oi.styles=[fe,r`
+      </button>`)}}di.styles=[fe,r`
       :host {
         display: flex;
         flex-direction: column;
@@ -1332,14 +1347,14 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         font-size: 0.8rem;
         font-variant-numeric: tabular-nums;
       }
-    `],t([ut({attribute:!1})],oi.prototype,"items",void 0),t([ut({attribute:!1})],oi.prototype,"selected",void 0),customElements.get("xt-pump-list")||customElements.define("xt-pump-list",oi);const li=160;class di extends dt{constructor(){super(...arguments),this.buckets=[],this.period="hour"}_label(t){return"hour"===this.period?Zt(t):Yt(t,{weekday:"short",day:"numeric"})}render(){const t=this.buckets.length;if(!t)return G;const e=Math.max(100,...this.buckets.map(t=>Math.max(t.pump??0,t.valves+t.consumers))),i=ai(e/1e3),s=1e3*i[i.length-1],n=i[1]<1?String(i[1]).split(".")[1].length:0,a=100/t,r=t=>t/s*142,o="hour"===this.period?4:t>10?5:1;return B`
+    `],t([ut({attribute:!1})],di.prototype,"items",void 0),t([ut({attribute:!1})],di.prototype,"selected",void 0),customElements.get("xt-pump-list")||customElements.define("xt-pump-list",di);const ci=160;class pi extends dt{constructor(){super(...arguments),this.buckets=[],this.period="hour"}_label(t){return"hour"===this.period?Zt(t):Yt(t,{weekday:"short",day:"numeric"})}render(){const t=this.buckets.length;if(!t)return G;const e=Math.max(100,...this.buckets.map(t=>Math.max(t.pump??0,t.valves+t.consumers))),i=oi(e/1e3),s=1e3*i[i.length-1],n=i[1]<1?String(i[1]).split(".")[1].length:0,a=100/t,r=t=>t/s*142,o="hour"===this.period?4:t>10?5:1;return B`
       <div class="unit">m³</div>
       <div class="plot">
         <div class="y">
           ${i.map(t=>B`<span style="top:${142-r(1e3*t)}px">${t.toFixed(n)}</span>`)}
         </div>
         <div>
-          <svg viewBox="0 0 100 ${li}" preserveAspectRatio="none" role="img" aria-label="Pump delivery against valve and consumer use">
+          <svg viewBox="0 0 100 ${ci}" preserveAspectRatio="none" role="img" aria-label="Pump delivery against valve and consumer use">
             ${i.map(t=>q`<line class="grid" x1="0" x2="100" y1=${142-r(1e3*t)} y2=${142-r(1e3*t)}></line>`)}
             ${this.buckets.map((t,e)=>{const i=e*a,s=t.valves+t.consumers,n=`${this._label(t.start)}: pump ${null===t.pump?"no data":Se(t.pump)}, valves ${Se(t.valves)}${t.consumers?`, consumers ${Se(t.consumers)}`:""}${null!==t.pump?`, unaccounted ${Se(t.pump-s)}`:""}`;return q`<g>
                 <title>${n}</title>
@@ -1358,14 +1373,14 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         <span><i class="pump"></i>Pump volume</span>
         <span><i class="valves"></i>Valve volume</span>
       </div>
-    `}}di.styles=[fe,r`
+    `}}pi.styles=[fe,r`
       :host {
         display: block;
         --xt-consumer: var(--teal-color, #009688);
       }
       svg {
         width: 100%;
-        height: ${li}px;
+        height: ${ci}px;
         display: block;
       }
       .unit {
@@ -1449,12 +1464,12 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       i.valves {
         background: var(--xt-water);
       }
-    `],t([ut({attribute:!1})],di.prototype,"buckets",void 0),t([ut()],di.prototype,"period",void 0),customElements.get("xt-pump-chart")||customElements.define("xt-pump-chart",di);const ci=120;class pi extends dt{constructor(){super(...arguments),this.lines=null,this.from=0,this.to=0,this.period="hour"}_label(t){return"hour"===this.period?Zt(t):Yt(t,{weekday:"short",day:"numeric"})}render(){const t=this.lines,e=this.to-this.from;if(!t||e<=0)return G;const i=ai(Math.max(10,t.peak)),s=i[i.length-1],n=t=>Math.min(100,Math.max(0,(t-this.from)/e*100)),a=t=>102-t/s*102,r=t=>t.map(([t,e])=>`${n(t)},${a(e)}`).join(" "),o="hour"===this.period?36e5:864e5,l="hour"===this.period?4:e>864e6?5:1,d=[];for(let t=ii(this.from,this.period),e=0;t<this.to;t+=o,e++)e%l===0&&t>=this.from&&d.push(t);return B`
+    `],t([ut({attribute:!1})],pi.prototype,"buckets",void 0),t([ut()],pi.prototype,"period",void 0),customElements.get("xt-pump-chart")||customElements.define("xt-pump-chart",pi);const hi=120;class ui extends dt{constructor(){super(...arguments),this.lines=null,this.from=0,this.to=0,this.period="hour"}_label(t){return"hour"===this.period?Zt(t):Yt(t,{weekday:"short",day:"numeric"})}render(){const t=this.lines,e=this.to-this.from;if(!t||e<=0)return G;const i=oi(Math.max(10,t.peak)),s=i[i.length-1],n=t=>Math.min(100,Math.max(0,(t-this.from)/e*100)),a=t=>102-t/s*102,r=t=>t.map(([t,e])=>`${n(t)},${a(e)}`).join(" "),o="hour"===this.period?36e5:864e5,l="hour"===this.period?4:e>864e6?5:1,d=[];for(let t=ni(this.from,this.period),e=0;t<this.to;t+=o,e++)e%l===0&&t>=this.from&&d.push(t);return B`
       <div class="unit">L/min</div>
       <div class="plot">
         <div class="y">${i.map(t=>B`<span style="top:${a(t)}px">${t}</span>`)}</div>
         <div>
-          <svg viewBox="0 0 100 ${ci}" preserveAspectRatio="none" role="img" aria-label="Pump flow rate">
+          <svg viewBox="0 0 100 ${hi}" preserveAspectRatio="none" role="img" aria-label="Pump flow rate">
             ${i.map(t=>q`<line class="grid" x1="0" x2="100" y1=${a(t)} y2=${a(t)}></line>`)}
             ${t.max.map(t=>q`<polyline class="max" points=${r(t)}></polyline>`)}
             ${t.mean.map(t=>q`<polyline class="flow" points=${r(t)}></polyline>`)}
@@ -1463,9 +1478,9 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         </div>
       </div>
       ${t.max.length?B`<div class="legend"><span><i class="flow"></i>Mean</span><span><i class="max"></i>Max</span></div>`:G}
-    `}}pi.styles=[di.styles,r`
+    `}}ui.styles=[pi.styles,r`
       svg {
-        height: ${ci}px;
+        height: ${hi}px;
       }
       polyline {
         fill: none;
@@ -1489,7 +1504,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       i.max {
         background: color-mix(in srgb, var(--xt-water) 35%, transparent);
       }
-    `],t([ut({attribute:!1})],pi.prototype,"lines",void 0),t([ut({attribute:!1})],pi.prototype,"from",void 0),t([ut({attribute:!1})],pi.prototype,"to",void 0),t([ut()],pi.prototype,"period",void 0),customElements.get("xt-pump-flow-chart")||customElements.define("xt-pump-flow-chart",pi);class hi extends dt{constructor(){super(...arguments),this.devices=[],this.exclude=[],this.placeholder="Search devices by name, area or model",this._q=""}render(){const t=this._q.trim().toLowerCase(),e=t?this.devices.filter(t=>!this.exclude.includes(t.id)).filter(e=>[e.name,e.area,e.model].some(e=>e?.toLowerCase().includes(t))).slice(0,30):[];return B`
+    `],t([ut({attribute:!1})],ui.prototype,"lines",void 0),t([ut({attribute:!1})],ui.prototype,"from",void 0),t([ut({attribute:!1})],ui.prototype,"to",void 0),t([ut()],ui.prototype,"period",void 0),customElements.get("xt-pump-flow-chart")||customElements.define("xt-pump-flow-chart",ui);class mi extends dt{constructor(){super(...arguments),this.devices=[],this.exclude=[],this.placeholder="Search devices by name, area or model",this._q=""}render(){const t=this._q.trim().toLowerCase(),e=t?this.devices.filter(t=>!this.exclude.includes(t.id)).filter(e=>[e.name,e.area,e.model].some(e=>e?.toLowerCase().includes(t))).slice(0,30):[];return B`
       <input type="search" placeholder=${this.placeholder} .value=${this._q} @input=${t=>this._q=t.target.value} />
       ${t?B`<ul role="listbox">
             ${e.length?e.map(t=>B`<li
@@ -1501,7 +1516,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                     <span>${t.name}</span><span class="dim">${[t.area,t.model].filter(Boolean).join(" · ")}</span>
                   </li>`):B`<li class="dim">No device matches.</li>`}
           </ul>`:G}
-    `}_pick(t){this._q="",this.dispatchEvent(new CustomEvent("xt-device-picked",{detail:t,bubbles:!0,composed:!0}))}}hi.styles=[fe,r`
+    `}_pick(t){this._q="",this.dispatchEvent(new CustomEvent("xt-device-picked",{detail:t,bubbles:!0,composed:!0}))}}mi.styles=[fe,r`
       :host {
         display: flex;
         flex-direction: column;
@@ -1542,7 +1557,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         color: var(--xt-dim);
         font-size: 0.85rem;
       }
-    `],t([ut({attribute:!1})],hi.prototype,"devices",void 0),t([ut({attribute:!1})],hi.prototype,"exclude",void 0),t([ut()],hi.prototype,"placeholder",void 0),t([mt()],hi.prototype,"_q",void 0),customElements.get("xt-device-picker")||customElements.define("xt-device-picker",hi);const ui={"24h":{ms:864e5,period:"hour"},"7d":{ms:6048e5,period:"day"},"30d":{ms:2592e6,period:"day"}},mi="xt-pumps-range",vi=["meter_entity","flow_entity","pressure_entity","status_entity"],fi={meter_entity:"Water meter (m³ total)",flow_entity:"Flow rate",pressure_entity:"Pressure",status_entity:"Status"},gi={meter_entity:/_fct_total_delivered_flow_mc$/,flow_entity:/_vf_flowliter$/,pressure_entity:/_vp_pressurebar$/,status_entity:/_pumpstatus$/};function _i(){return new URLSearchParams(window.location.search).get("pump")}class xi extends dt{constructor(){super(...arguments),this._selected=_i(),this._range=function(){try{const t=localStorage.getItem(mi);return t&&t in ui?t:"7d"}catch{return"7d"}}(),this._stats={},this._site=null,this._edit=!1,this._busy=!1,this._error=null,this._connecting=null,this._statsKey="",this._flow=null,this._flowWanted=null,this._flowKey="",this._farm=new oe(this),this._balanceMemo=null,this._mpMemo=null,this._onLocation=()=>{this._selected=_i()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}updated(){const t=`${this._range}|${this._farm.data.pumps.length}|${this._farm.data.pumpConnections.length}`;this.hass?.callApi&&this._farm.loaded&&t!==this._statsKey&&(this._statsKey=t,this._loadStats());const e=this._flowWanted,i=e?`${e.entity}|${e.range}`:"";this.hass?.callApi&&e&&i!==this._flowKey&&(this._flowKey=i,this._loadFlow(e.entity,e.range,i))}async _loadFlow(t,e,i){try{const s=await this.hass.callApi("GET",`xtend_tuya/pump_flow?range=${e}&entity=${encodeURIComponent(t)}`),n=Date.now();i===this._flowKey&&(this._flow={key:i,lines:ni(s.rows??[],s.raw,n),from:n-ui[e].ms,to:n})}catch(t){this._error=`Could not load pump flow: ${t instanceof Error?t.message:String(t)}`}}async _loadStats(){const{ms:t}=ui[this._range],e=new Date(Date.now()-t).toISOString();try{const t=await this.hass.callApi("GET",`xtend_tuya/pump_stats?period=hour&start=${encodeURIComponent(e)}`);this._stats=t.series??{}}catch(t){this._error=`Could not load pump statistics: ${t instanceof Error?t.message:String(t)}`}}_state(t){return t?this.hass?.states[t]:void 0}_num(t){const e=this._state(t),i=Number(e?.state);return e&&""!==e.state&&Number.isFinite(i)?i:null}_pumpState(t){const e=this._state(t.status_entity)?.state,i=this._num(t.flow_entity),s=this._state(t.meter_entity)?.state;return s&&"unknown"!==s&&"unavailable"!==s?"Go"===e||null!==i&&i>0?"running":"idle":"unknown"}_devices(){const t=this.hass?.areas??{};return Object.values(this.hass?.devices??{}).map(e=>({id:e.id,name:e.name_by_user||e.name||e.id,area:e.area_id?t[e.area_id]?.name??null:null,model:e.model??null}))}_deviceName(t){const e=this.hass?.devices[t];return e&&(e.name_by_user||e.name)||t}_sensorsOf(t){return t&&this.hass?Object.values(this.hass.entities).filter(e=>e.device_id===t&&e.entity_id.startsWith("sensor.")).map(t=>t.entity_id).sort():[]}_deviceOf(t){return t?this.hass?.entities[t]?.device_id??null:null}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("pump",t):e.searchParams.delete("pump"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null,this._connecting=null}_setRange(t){this._range=t;try{localStorage.setItem(mi,t)}catch{}}async _post(t){if(!this.hass?.callApi)return null;this._busy=!0,this._error=null;try{const e=await this.hass.callApi("POST","xtend_tuya/irrigation_locations",t);return await this._farm.refresh(!0),this._statsKey="",e}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),null}finally{this._busy=!1}}async _createPump(t){const e=this._sensorsOf(t),i=t=>e.find(e=>gi[t].test(e))??null,s=i("meter_entity");if(!s)return void(this._error=`${this._deviceName(t)} has no water meter sensor (…_fct_total_delivered_flow_mc). Create the pump from its meter's device.`);const n=await this._post({action:"create_pump",name:this._deviceName(t),meter_entity:s,flow_entity:i("flow_entity"),pressure_entity:i("pressure_entity"),status_entity:i("status_entity")}),a=n?.pump;a&&this._open(a.id)}_savePump(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value,n={action:"update_pump",id:e.id,name:s("name")};for(const t of vi)n[t]=s(t)||null;this._post(n)}_assign(t,e){t.preventDefault();const i=t.target.querySelector("select"),[s,n]=i.value.split(":");n&&this._post({action:"assign_pump",pump_id:e.id,target_kind:s,target_id:n})}_connect(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value;this._post({action:"connect_device",pump_id:e.id,device_id:this._connecting,role:s("role"),meter_entity:s("meter_entity")||null}).then(t=>{t&&(this._connecting=null)})}_figures(t,e){const i=this._num(t.flow_entity),s=this._num(t.pressure_entity),n=this._state(t.status_entity)?.state,a=this._pumpState(t);return B`<div class="figures">
+    `],t([ut({attribute:!1})],mi.prototype,"devices",void 0),t([ut({attribute:!1})],mi.prototype,"exclude",void 0),t([ut()],mi.prototype,"placeholder",void 0),t([mt()],mi.prototype,"_q",void 0),customElements.get("xt-device-picker")||customElements.define("xt-device-picker",mi);const vi={"24h":{ms:864e5,period:"hour"},"7d":{ms:6048e5,period:"day"},"30d":{ms:2592e6,period:"day"}},fi="xt-pumps-range",gi=["meter_entity","flow_entity","pressure_entity","status_entity"],_i={meter_entity:"Water meter (m³ total)",flow_entity:"Flow rate",pressure_entity:"Pressure",status_entity:"Status"},xi={meter_entity:/_fct_total_delivered_flow_mc$/,flow_entity:/_vf_flowliter$/,pressure_entity:/_vp_pressurebar$/,status_entity:/_pumpstatus$/};function bi(){return new URLSearchParams(window.location.search).get("pump")}class yi extends dt{constructor(){super(...arguments),this._selected=bi(),this._range=function(){try{const t=localStorage.getItem(fi);return t&&t in vi?t:"7d"}catch{return"7d"}}(),this._stats={},this._site=null,this._edit=!1,this._busy=!1,this._error=null,this._connecting=null,this._statsKey="",this._flow=null,this._flowWanted=null,this._flowKey="",this._farm=new oe(this),this._balanceMemo=null,this._mpMemo=null,this._onLocation=()=>{this._selected=bi()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}updated(){const t=`${this._range}|${this._farm.data.pumps.length}|${this._farm.data.pumpConnections.length}`;this.hass?.callApi&&this._farm.loaded&&t!==this._statsKey&&(this._statsKey=t,this._loadStats());const e=this._flowWanted,i=e?`${e.entity}|${e.range}`:"";this.hass?.callApi&&e&&i!==this._flowKey&&(this._flowKey=i,this._loadFlow(e.entity,e.range,i))}async _loadFlow(t,e,i){try{const s=await this.hass.callApi("GET",`xtend_tuya/pump_flow?range=${e}&entity=${encodeURIComponent(t)}`),n=Date.now();i===this._flowKey&&(this._flow={key:i,lines:ri(s.rows??[],s.raw,n),from:n-vi[e].ms,to:n})}catch(t){this._error=`Could not load pump flow: ${t instanceof Error?t.message:String(t)}`}}async _loadStats(){const{ms:t}=vi[this._range],e=new Date(Date.now()-t).toISOString();try{const t=await this.hass.callApi("GET",`xtend_tuya/pump_stats?period=hour&start=${encodeURIComponent(e)}`);this._stats=t.series??{}}catch(t){this._error=`Could not load pump statistics: ${t instanceof Error?t.message:String(t)}`}}_state(t){return t?this.hass?.states[t]:void 0}_num(t){const e=this._state(t),i=Number(e?.state);return e&&""!==e.state&&Number.isFinite(i)?i:null}_pumpState(t){const e=this._state(t.status_entity)?.state,i=this._num(t.flow_entity),s=this._state(t.meter_entity)?.state;return s&&"unknown"!==s&&"unavailable"!==s?"Go"===e||null!==i&&i>0?"running":"idle":"unknown"}_devices(){const t=this.hass?.areas??{};return Object.values(this.hass?.devices??{}).map(e=>({id:e.id,name:e.name_by_user||e.name||e.id,area:e.area_id?t[e.area_id]?.name??null:null,model:e.model??null}))}_deviceName(t){const e=this.hass?.devices[t];return e&&(e.name_by_user||e.name)||t}_sensorsOf(t){return t&&this.hass?Object.values(this.hass.entities).filter(e=>e.device_id===t&&e.entity_id.startsWith("sensor.")).map(t=>t.entity_id).sort():[]}_deviceOf(t){return t?this.hass?.entities[t]?.device_id??null:null}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("pump",t):e.searchParams.delete("pump"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null,this._connecting=null}_setRange(t){this._range=t;try{localStorage.setItem(fi,t)}catch{}}async _post(t){if(!this.hass?.callApi)return null;this._busy=!0,this._error=null;try{const e=await this.hass.callApi("POST","xtend_tuya/irrigation_locations",t);return await this._farm.refresh(!0),this._statsKey="",e}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),null}finally{this._busy=!1}}async _createPump(t){const e=this._sensorsOf(t),i=t=>e.find(e=>xi[t].test(e))??null,s=i("meter_entity");if(!s)return void(this._error=`${this._deviceName(t)} has no water meter sensor (…_fct_total_delivered_flow_mc). Create the pump from its meter's device.`);const n=await this._post({action:"create_pump",name:this._deviceName(t),meter_entity:s,flow_entity:i("flow_entity"),pressure_entity:i("pressure_entity"),status_entity:i("status_entity")}),a=n?.pump;a&&this._open(a.id)}_savePump(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value,n={action:"update_pump",id:e.id,name:s("name")};for(const t of gi)n[t]=s(t)||null;this._post(n)}_assign(t,e){t.preventDefault();const i=t.target.querySelector("select"),[s,n]=i.value.split(":");n&&this._post({action:"assign_pump",pump_id:e.id,target_kind:s,target_id:n})}_connect(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value;this._post({action:"connect_device",pump_id:e.id,device_id:this._connecting,role:s("role"),meter_entity:s("meter_entity")||null}).then(t=>{t&&(this._connecting=null)})}_figures(t,e){const i=this._num(t.flow_entity),s=this._num(t.pressure_entity),n=this._state(t.status_entity)?.state,a=this._pumpState(t);return B`<div class="figures">
       ${"unknown"===a?B`<span class="warn" title="The pump's meter reports no value">No data from the pump</span>`:B`<span title=${n?`Pump status: ${n}`:"Pump status"}
             ><i class="dot ${a}"></i>${"Go"===n?"Running":n??("running"===a?"Running":"Idle")}</span
           >`}
@@ -1551,11 +1566,11 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       <span title="Metering points and valves fed now"
         ><ha-icon icon="mdi:map-marker-multiple-outline"></ha-icon>${e.mps} metering points · ${e.valves} valves</span
       >
-    </div>`}_inSite(){if(!this._site)return;const t=pe(this._farm.data.sites,this._site);return e=>!!e.site_id&&t.has(e.site_id)}_balance(t){const{ms:e,period:i}=ui[this._range],s=`${t.id}|${this._range}|${this._site}|${Math.floor(Date.now()/6e4)}`,n=this._balanceMemo;if(!n||n.key!==s||n.data!==this._farm.data||n.stats!==this._stats){const n=Date.now();this._balanceMemo={key:s,data:this._farm.data,stats:this._stats,value:si(this._farm.data,t,this._stats,n-e,n,i,this._inSite())}}const a=this._balanceMemo.value,r=t=>a.pump?`${Math.round(t/a.pump*100)} %`:"",o=this._site?he(this._farm.data.sites,this._site):null;return B`<section>
+    </div>`}_inSite(){if(!this._site)return;const t=pe(this._farm.data.sites,this._site);return e=>!!e.site_id&&t.has(e.site_id)}_balance(t){const{ms:e,period:i}=vi[this._range],s=`${t.id}|${this._range}|${this._site}|${Math.floor(Date.now()/6e4)}`,n=this._balanceMemo;if(!n||n.key!==s||n.data!==this._farm.data||n.stats!==this._stats){const n=Date.now();this._balanceMemo={key:s,data:this._farm.data,stats:this._stats,value:ai(this._farm.data,t,this._stats,n-e,n,i,this._inSite())}}const a=this._balanceMemo.value,r=t=>a.pump?`${Math.round(t/a.pump*100)} %`:"",o=this._site?he(this._farm.data.sites,this._site):null;return B`<section>
       <div class="section-head">
         <h3>Water flow</h3>
         <div class="chips" role="group" aria-label="Range">
-          ${Object.keys(ui).map(t=>B`<button class=${t===this._range?"on":""} @click=${()=>this._setRange(t)}>${t}</button>`)}
+          ${Object.keys(vi).map(t=>B`<button class=${t===this._range?"on":""} @click=${()=>this._setRange(t)}>${t}</button>`)}
         </div>
       </div>
       <div class="panel">
@@ -1587,7 +1602,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     </section>`}_flowChart(t,e){if(this._flowWanted=t.flow_entity?{entity:t.flow_entity,range:this._range}:null,!t.flow_entity)return G;const i=this._flow?.key===`${t.flow_entity}|${this._range}`?this._flow:null;return B`<div class="panel flow">
       <h4>Flow</h4>
       ${i?B`<xt-pump-flow-chart .lines=${i.lines} .from=${i.from} .to=${i.to} period=${e}></xt-pump-flow-chart>`:B`<div class="dim">Loading…</div>`}
-    </div>`}_feeds(t,e){const i=this._farm.data,s=ei(i,t.id,Date.now()),n=this._inSite(),a=t=>{const e=i.locations.find(e=>e.id===t);return!n||!!e&&n(e)},r={...s,mps:s.mps.filter(a),overridden:s.overridden.filter(t=>a(t.mp))},o=t=>B`<xt-mp-card .summary=${e.get(t)}></xt-mp-card>`,l=new Set,d=r.sites.map(t=>{const e=pe(i.sites,t),s=r.mps.filter(t=>{const s=i.locations.find(e=>e.id===t);return s?.site_id&&e.has(s.site_id)});return s.forEach(t=>l.add(t)),{siteId:t,path:he(i.sites,t),mps:s}}).sort((t,e)=>t.path.localeCompare(e.path)),c=r.mps.filter(t=>!l.has(t));return B`<section>
+    </div>`}_feeds(t,e){const i=this._farm.data,s=si(i,t.id,Date.now()),n=this._inSite(),a=t=>{const e=i.locations.find(e=>e.id===t);return!n||!!e&&n(e)},r={...s,mps:s.mps.filter(a),overridden:s.overridden.filter(t=>a(t.mp))},o=t=>B`<xt-mp-card .summary=${e.get(t)}></xt-mp-card>`,l=new Set,d=r.sites.map(t=>{const e=pe(i.sites,t),s=r.mps.filter(t=>{const s=i.locations.find(e=>e.id===t);return s?.site_id&&e.has(s.site_id)});return s.forEach(t=>l.add(t)),{siteId:t,path:he(i.sites,t),mps:s}}).sort((t,e)=>t.path.localeCompare(e.path)),c=r.mps.filter(t=>!l.has(t));return B`<section>
       <h3>Assigned Valves <span class="count">· ${r.mps.length}</span></h3>
       <div class="panel">
         ${this._edit?this._assignForm(t):G}
@@ -1662,17 +1677,17 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       </label>
       <button type="submit" ?disabled=${this._busy}>Connect</button>
       <button type="button" @click=${()=>this._connecting=null}>Cancel</button>
-    </form>`}_valveDevices(){return this._farm.valves.map(t=>this.hass?.entities[t.registry_entity]?.device_id).filter(t=>!!t)}_pumpForm(t){const e=this._deviceOf(t.meter_entity),i=[...new Set([...this._sensorsOf(e),...vi.map(e=>t[e]).filter(t=>!!t)])].sort();return B`<form class="editor" @submit=${e=>this._savePump(e,t)}>
+    </form>`}_valveDevices(){return this._farm.valves.map(t=>this.hass?.entities[t.registry_entity]?.device_id).filter(t=>!!t)}_pumpForm(t){const e=this._deviceOf(t.meter_entity),i=[...new Set([...this._sensorsOf(e),...gi.map(e=>t[e]).filter(t=>!!t)])].sort();return B`<form class="editor" @submit=${e=>this._savePump(e,t)}>
       <label>Name <input name="name" .value=${t.name} required /></label>
-      ${vi.map(e=>B`<label
-          >${fi[e]}
+      ${gi.map(e=>B`<label
+          >${_i[e]}
           <select name=${e}>
             ${"meter_entity"===e?G:B`<option value="" ?selected=${!t[e]}>— none —</option>`}
             ${i.map(i=>B`<option value=${i} ?selected=${i===t[e]}>${i}</option>`)}
           </select>
         </label>`)}
       <button type="submit" ?disabled=${this._busy}>Save</button>
-    </form>`}render(){if(!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading pumps…</div></ha-card>`;const t=this._farm.data,e=Date.now(),i=this._farm.summaries();this._mpMemo?.valves!==i&&(this._mpMemo={valves:i,map:new Map(t.locations.map(s=>[s.id,Ue(s,t,i,e)]))});const s=this._mpMemo.map,n=t.locations.filter(t=>!t.pump),a=[...t.pumps].sort((t,e)=>t.name.localeCompare(e.name)).map(i=>({id:i.id,name:i.name,state:this._pumpState(i),count:ei(t,i.id,e).mps.length}));n.length&&a.push({id:ri,name:"No pump",state:"unknown",count:n.length});const r=this._selected&&a.some(t=>t.id===this._selected)?this._selected:a[0]?.id??null,o=r&&r!==ri?t.pumps.find(t=>t.id===r)??null:null,l=!!this.hass.user?.is_admin,d=o?ei(t,o.id,e).mps:[],c=d.reduce((t,e)=>t+(s.get(e)?.valves.length??0),0);return B`<div
+    </form>`}render(){if(!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading pumps…</div></ha-card>`;const t=this._farm.data,e=Date.now(),i=this._farm.summaries();this._mpMemo?.valves!==i&&(this._mpMemo={valves:i,map:new Map(t.locations.map(s=>[s.id,Ue(s,t,i,e)]))});const s=this._mpMemo.map,n=t.locations.filter(t=>!t.pump),a=[...t.pumps].sort((t,e)=>t.name.localeCompare(e.name)).map(i=>({id:i.id,name:i.name,state:this._pumpState(i),count:si(t,i.id,e).mps.length}));n.length&&a.push({id:li,name:"No pump",state:"unknown",count:n.length});const r=this._selected&&a.some(t=>t.id===this._selected)?this._selected:a[0]?.id??null,o=r&&r!==li?t.pumps.find(t=>t.id===r)??null:null,l=!!this.hass.user?.is_admin,d=o?si(t,o.id,e).mps:[],c=d.reduce((t,e)=>t+(s.get(e)?.valves.length??0),0);return B`<div
       class="layout"
       @xt-pump-open=${t=>this._open(t.detail)}
       @xt-valve-open=${t=>ve(t.detail)}
@@ -1691,7 +1706,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       </aside>
       <main>
         <div class="title-row">
-          <h2>${o?o.name:r===ri?"No pump":"Pumps"}</h2>
+          <h2>${o?o.name:r===li?"No pump":"Pumps"}</h2>
           ${l?B`<button class="edit ${this._edit?"on":""}" @click=${()=>(this._edit=!this._edit,this._connecting=null)}>
                 <ha-icon icon=${this._edit?"mdi:check":"mdi:pencil-outline"}></ha-icon>${this._edit?"Done":"Edit"}
               </button>`:G}
@@ -1709,10 +1724,10 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               ></xt-valve-filter-bar>
               ${this._edit?this._pumpForm(o):G} ${this._balance(o)} ${this._feeds(o,s)}
               ${this._connections(o,c)}`:G}
-        ${r===ri?B`<p class="dim">Metering points no pump feeds: set a pump on their site or on them.</p>
+        ${r===li?B`<p class="dim">Metering points no pump feeds: set a pump on their site or on them.</p>
               <div class="grid">${n.map(t=>B`<xt-mp-card .summary=${s.get(t.id)}></xt-mp-card>`)}</div>`:G}
       </main>
-    </div>`}}xi.styles=[fe,Ke,r`
+    </div>`}}yi.styles=[fe,Ye,r`
       section {
         margin-top: 24px;
       }
@@ -1856,7 +1871,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       aside .editor label {
         width: 100%;
       }
-    `],t([ut({attribute:!1})],xi.prototype,"hass",void 0),t([mt()],xi.prototype,"_selected",void 0),t([mt()],xi.prototype,"_range",void 0),t([mt()],xi.prototype,"_stats",void 0),t([mt()],xi.prototype,"_site",void 0),t([mt()],xi.prototype,"_edit",void 0),t([mt()],xi.prototype,"_busy",void 0),t([mt()],xi.prototype,"_error",void 0),t([mt()],xi.prototype,"_connecting",void 0),t([mt()],xi.prototype,"_flow",void 0),customElements.get("irrigation-pumps-card")||customElements.define("irrigation-pumps-card",xi);class bi extends dt{constructor(){super(...arguments),this.runs=[],this.metered=!0,this._shown=5}render(){const t=[...this.runs].sort((t,e)=>Date.parse(e.start)-Date.parse(t.start));return t.length?B`
+    `],t([ut({attribute:!1})],yi.prototype,"hass",void 0),t([mt()],yi.prototype,"_selected",void 0),t([mt()],yi.prototype,"_range",void 0),t([mt()],yi.prototype,"_stats",void 0),t([mt()],yi.prototype,"_site",void 0),t([mt()],yi.prototype,"_edit",void 0),t([mt()],yi.prototype,"_busy",void 0),t([mt()],yi.prototype,"_error",void 0),t([mt()],yi.prototype,"_connecting",void 0),t([mt()],yi.prototype,"_flow",void 0),customElements.get("irrigation-pumps-card")||customElements.define("irrigation-pumps-card",yi);class wi extends dt{constructor(){super(...arguments),this.runs=[],this.metered=!0,this._shown=5}render(){const t=[...this.runs].sort((t,e)=>Date.parse(e.start)-Date.parse(t.start));return t.length?B`
       <table>
         <thead>
           <tr>
@@ -1884,7 +1899,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         </tbody>
       </table>
       ${t.length>this._shown?B`<button @click=${()=>this._shown+=5}>Show more (${t.length-this._shown})</button>`:G}
-    `:B`<div class="empty">No runs recorded in the last 30 days.</div>`}}bi.styles=[fe,r`
+    `:B`<div class="empty">No runs recorded in the last 30 days.</div>`}}wi.styles=[fe,r`
       :host {
         display: block;
       }
@@ -1927,7 +1942,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         padding: 8px 6px 0;
         font-size: 0.9rem;
       }
-    `],t([ut({attribute:!1})],bi.prototype,"runs",void 0),t([ut({type:Boolean})],bi.prototype,"metered",void 0),t([ut({attribute:!1})],bi.prototype,"valveOf",void 0),t([mt()],bi.prototype,"_shown",void 0),customElements.get("xt-run-history")||customElements.define("xt-run-history",bi);const yi=/\(?(\d{3,4})\)?\s*$/;class wi extends dt{constructor(){super(...arguments),this._farm=new oe(this),this._valveOf=t=>{const e=this._farm.valves.find(e=>e.device_id===t)?.valve_name;if(!e)return"removed";const i=yi.exec(e)?.[1];return i?`#${i}`:e}}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 6}updated(){this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(t=>{const e=this._config?.device_id,i=this._farm.data,s=e?i.locationOf[e]:void 0;(t.data.device_id===e||s&&t.data.device_id&&i.locationOf[t.data.device_id]?.id===s.id)&&this._farm.refresh(!0)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{}))}disconnectedCallback(){super.disconnectedCallback(),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}render(){if(!this._config)return G;const{mp:t,runs:e}=function(t,e){const i=t.locationOf[e]??null,s=i?t.runs.filter(e=>zt(t,e.device_id,Date.parse(e.start))?.id===i.id):t.runs.filter(t=>t.device_id===e);return{mp:i,runs:s}}(this._farm.data,this._config.device_id);return B`<ha-card>
+    `],t([ut({attribute:!1})],wi.prototype,"runs",void 0),t([ut({type:Boolean})],wi.prototype,"metered",void 0),t([ut({attribute:!1})],wi.prototype,"valveOf",void 0),t([mt()],wi.prototype,"_shown",void 0),customElements.get("xt-run-history")||customElements.define("xt-run-history",wi);const $i=/\(?(\d{3,4})\)?\s*$/;class ki extends dt{constructor(){super(...arguments),this._farm=new oe(this),this._valveOf=t=>{const e=this._farm.valves.find(e=>e.device_id===t)?.valve_name;if(!e)return"removed";const i=$i.exec(e)?.[1];return i?`#${i}`:e}}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 6}updated(){this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(t=>{const e=this._config?.device_id,i=this._farm.data,s=e?i.locationOf[e]:void 0;(t.data.device_id===e||s&&t.data.device_id&&i.locationOf[t.data.device_id]?.id===s.id)&&this._farm.refresh(!0)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{}))}disconnectedCallback(){super.disconnectedCallback(),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}render(){if(!this._config)return G;const{mp:t,runs:e}=function(t,e){const i=t.locationOf[e]??null,s=i?t.runs.filter(e=>zt(t,e.device_id,Date.parse(e.start))?.id===i.id):t.runs.filter(t=>t.device_id===e);return{mp:i,runs:s}}(this._farm.data,this._config.device_id);return B`<ha-card>
       <div class="title">
         <ha-icon icon="mdi:format-list-bulleted"></ha-icon>${this._config.title??(t?`Watering log · ${t.name}`:"Watering log")}
       </div>
@@ -1938,7 +1953,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           ?metered=${!1!==this._config.metered}
         ></xt-run-history>
       </div>
-    </ha-card>`}}wi.styles=r`
+    </ha-card>`}}ki.styles=r`
     .title {
       display: flex;
       align-items: center;
@@ -1953,7 +1968,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .content {
       padding: 0 16px 12px;
     }
-  `,t([ut({attribute:!1})],wi.prototype,"hass",void 0),t([mt()],wi.prototype,"_config",void 0),customElements.get("irrigation-run-history-card")||customElements.define("irrigation-run-history-card",wi);class $i extends dt{connectedCallback(){super.connectedCallback(),this.setAttribute("role","progressbar"),this.setAttribute("aria-label","Loading")}}$i.styles=[fe,r`
+  `,t([ut({attribute:!1})],ki.prototype,"hass",void 0),t([mt()],ki.prototype,"_config",void 0),customElements.get("irrigation-run-history-card")||customElements.define("irrigation-run-history-card",ki);class Si extends dt{connectedCallback(){super.connectedCallback(),this.setAttribute("role","progressbar"),this.setAttribute("aria-label","Loading")}}Si.styles=[fe,r`
       :host {
         display: inline-block;
         width: 18px;
@@ -1969,7 +1984,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           transform: rotate(360deg);
         }
       }
-    `],customElements.get("xt-spinner")||customElements.define("xt-spinner",$i);const ki={low_battery:["Low battery","Battery below 20 %. Replace the valve's batteries soon.","warn"],stale:["No report 36 h","The valve has not reported for over 36 h. Check it is online in SmartLife and has battery. Clears on its next report.","warn"],missed:["Missed","A planned run in the last 24 h did not happen. Check the valve is online and has battery. Clears 24 h after the slot.","bad"],no_flow:["No water flow","The last run measured no water. Check the pump ran and the supply is open. Clears after a run that measures water.","bad"],flow_low:["Flow low","30-day mean flow is well below the expected L/min: check the filter, or set the expected L/min for this metering point.","bad"],flow_high:["Flow high","30-day mean flow is well above the expected L/min: check for a leak, or set the expected L/min for this metering point.","bad"]};class Si extends dt{constructor(){super(...arguments),this._help=null,this._moving=!1,this._busy=!1,this._moveError=null,this._farm=new oe(this)}async _move(t,e){if(this.hass?.callApi){this._busy=!0,this._moveError=null;try{await this.hass.callApi("POST","xtend_tuya/irrigation_locations",{action:"assign_device",device_id:t,location_id:e}),this._moving=!1,At()}catch(t){this._moveError=re(t)}finally{this._busy=!1}}}_moveControl(t,e){if(!this.hass?.user?.is_admin)return G;const i=e?"Move to…":"Assign to…";return B`<button
+    `],customElements.get("xt-spinner")||customElements.define("xt-spinner",Si);const Ei={low_battery:["Low battery","Battery below 20 %. Replace the valve's batteries soon.","warn"],stale:["No report 36 h","The valve has not reported for over 36 h. Check it is online in SmartLife and has battery. Clears on its next report.","warn"],missed:["Missed","A planned run in the last 24 h did not happen. Check the valve is online and has battery. Clears 24 h after the slot.","bad"],no_flow:["No water flow","The last run measured no water. Check the pump ran and the supply is open. Clears after a run that measures water.","bad"],flow_low:["Flow low","30-day mean flow is well below the expected L/min: check the filter, or set the expected L/min for this metering point.","bad"],flow_high:["Flow high","30-day mean flow is well above the expected L/min: check for a leak, or set the expected L/min for this metering point.","bad"]};class Ai extends dt{constructor(){super(...arguments),this._help=null,this._moving=!1,this._busy=!1,this._moveError=null,this._farm=new oe(this)}async _move(t,e){if(this.hass?.callApi){this._busy=!0,this._moveError=null;try{await this.hass.callApi("POST","xtend_tuya/irrigation_locations",{action:"assign_device",device_id:t,location_id:e}),this._moving=!1,At()}catch(t){this._moveError=re(t)}finally{this._busy=!1}}}_moveControl(t,e){if(!this.hass?.user?.is_admin)return G;const i=e?"Move to…":"Assign to…";return B`<button
         class="pencil"
         title=${e?"Move to another metering point":"Assign to a metering point"}
         aria-expanded=${this._moving?"true":"false"}
@@ -1977,13 +1992,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       >
         <ha-icon icon="mdi:pencil-outline"></ha-icon>
       </button>
-      ${this._moving?B`<select
-            ?disabled=${this._busy}
-            @change=${e=>{const i=e.target,s=i.value;i.value="",s&&this._move(t,s)}}
-          >
-            <option value="">${i}</option>
-            ${this._farm.data.locations.filter(t=>t.id!==e).map(t=>B`<option value=${t.id}>${t.name}</option>`)}
-          </select>`:G}
+      ${this._moving?B`<span class="move">${qe("xt-move-mp",i,this._farm.data.locations.filter(t=>t.id!==e).map(t=>({key:t.id,text:t.site_id?`${t.name} · ${he(this._farm.data.sites,t.site_id)}`:t.name})),this._busy,e=>{this._move(t,e)})}</span>`:G}
       ${this._moveError?B`<span class="err">${this._moveError}</span>`:G}`}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 3}render(){if(!this._config||!this.hass)return G;if(!this._farm.loaded)return B`<ha-card class="loading"><xt-spinner></xt-spinner></ha-card>`;const t=Date.now(),e=this._farm.summaryOf(this._config.device_id);if(!e)return B`<ha-card><div class="msg">Valve not found.</div></ha-card>`;const i=this._farm.data.locations.find(t=>t.valves.includes(e.device_id)),s=i?i.valves.map(t=>t===e.device_id?e:this._farm.summaryOf(t)).filter(t=>!!t):[],n=i?Ue(i,this._farm.data,s,t):null,a=n?.week??e.week,r=n?.last??e.last,o=[...new Set([...n?.badges.filter(t=>"no_valve"!==t)??[],...e.badges])],l=e.number?e.name.replace(/\s*\(\d+\)\s*$/,""):e.name,d="watering"===e.status?B`<span class="status watering"><i></i>Watering${e.since?` since ${be(e.since)}`:""}${null!==e.flow_lpm?` · ${e.flow_lpm.toFixed(1)} L/min`:""}</span>`:"offline"===e.status?B`<span class="status offline"><i></i>Offline${e.since?` for ${we(e.since)}`:""}</span>`:B`<span class="status"><i></i>Idle</span>`,c="L"===a.unit?Se(a.liters):`${Math.round(a.minutes)} min`;return B`<ha-card>
       <div class="top">
         <div class="who">
@@ -2006,7 +2015,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 >`:G}
           </div>
           ${o.length?B`<div class="badges">
-                ${o.map(t=>{const[e,i,s]=ki[t]??[t,t,"warn"];return B`<button
+                ${o.map(t=>{const[e,i,s]=Ei[t]??[t,t,"warn"];return B`<button
                     class="badge ${s} ${this._help===t?"open":""}"
                     title=${i}
                     aria-expanded=${this._help===t?"true":"false"}
@@ -2015,7 +2024,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                     ${e}
                   </button>`})}
               </div>
-              ${this._help&&o.includes(this._help)?B`<div class="help">${ki[this._help]?.[1]??this._help}</div>`:G}`:G}
+              ${this._help&&o.includes(this._help)?B`<div class="help">${Ei[this._help]?.[1]??this._help}</div>`:G}`:G}
         </div>
         <div class="tiles">
           <div title="Last run: when, how long, how much">
@@ -2040,7 +2049,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               </div>`:G}
         </div>
       </div>
-    </ha-card>`}}Si.styles=[fe,r`
+    </ha-card>`}}Ai.styles=[Ve,fe,r`
       ha-card {
         padding: 16px 18px;
       }
@@ -2216,7 +2225,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         padding: 16px;
         color: var(--xt-dim);
       }
-    `],t([ut({attribute:!1})],Si.prototype,"hass",void 0),t([mt()],Si.prototype,"_config",void 0),t([mt()],Si.prototype,"_help",void 0),t([mt()],Si.prototype,"_moving",void 0),t([mt()],Si.prototype,"_busy",void 0),t([mt()],Si.prototype,"_moveError",void 0),customElements.get("irrigation-valve-header-card")||customElements.define("irrigation-valve-header-card",Si);const Ei="No site",Ai="No metering point";function Mi(t){return t===Ai?2:t===Ei?1:0}const Ci=864e5,Li=36e5,Ni="xt-irrigation-calendar-mode",zi="xt-irrigation-calendar-range",Oi=t=>new Date(Gt(t.getTime())),Ti=t=>{return new Date(Kt(e=t.getTime(),-(Bt(e).weekday+6)%7));var e},Pi=(t,e)=>new Date(Kt(t.getTime(),e)),Di=t=>String(t).padStart(2,"0"),Ri=t=>{const e=Bt(t);return`${Di(e.hour)}:${Di(e.minute)}`},Ui=t=>t>0?String(Math.round(t/6e4)):"–";function Ii(t){const e=/·\s*~?([\d.,]+)\s*L\s*$/.exec(t);return e?Number(e[1].replace(",",".")):null}function Fi(t){return("ran"===t.kind||"unplanned"===t.kind)&&0===t.liters}const Hi="xt-irrigation-calendar-filter";function ji(){return new URLSearchParams(window.location.search).get("site")}function Wi(t,e){try{return localStorage.getItem(t)??e}catch{return e}}function Bi(t,e){try{localStorage.setItem(t,e)}catch{}}class qi extends dt{constructor(){super(...arguments),this._config=null,this._mode=["day","week","timeline"].includes(Wi(Ni,"day"))?Wi(Ni,"day"):"day",this._range=[1,3,7].includes(Number(Wi(zi,"7")))?Number(Wi(zi,"7")):7,this._anchor=Oi(new Date),this._events=[],this._problemsOnly=!1,this._filter=function(){let t=le;try{t={...le,...JSON.parse(localStorage.getItem(Hi)??"{}"),status:"all"}}catch{}const e=ji();return e?{...t,site:e}:t}(),this._farm=$t,this._farmLoaded=!1,this._farmReady=!1,this._eventsReady=!1,this._found=null,this._foundAt=0,this._offline=new Map,this._loading=!1,this._error=null,this._loadedKey="",this._onLocation=()=>{const t=ji();t&&t!==this._filter.site&&(this._filter={...this._filter,site:t})}}setConfig(t){this._config=t;const e=this._modes();e.includes(this._mode)||(this._mode=e[0])}_modes(){const t=(this._config?.modes??[]).filter(t=>["day","week","timeline"].includes(t));return t.length?t:["day","week","timeline"]}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation),this._timer=window.setInterval(()=>this._load(!0),3e5)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation),this._timer&&window.clearInterval(this._timer),window.clearTimeout(this._debounce),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}updated(){Ft(this.hass),this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(()=>{window.clearTimeout(this._debounce),this._debounce=window.setTimeout(()=>this._load(!0),2e3)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{})),!this._farmLoaded&&this.hass?.callApi&&(this._farmLoaded=!0,Mt(this.hass).then(t=>{this._farm=t,this._farmReady=!0},()=>this._farmReady=!0));const t=`${this._mode}|${this._range}|${this._anchor.getTime()}`;t!==this._loadedKey&&this.hass?.callApi&&(this._loadedKey=t,this._load())}_window(){if("week"===this._mode){const t=Ti(this._anchor);return[t,Pi(t,7)]}if("timeline"===this._mode){const t=Pi(Oi(this._anchor),1);return[Pi(t,-this._range),t]}const t=Oi(this._anchor);return[t,Pi(t,1)]}_valves(){if(this._config?.valves?.length)return this._config.valves;const t=this.hass;return t?.entities&&(!this._found||Date.now()-this._foundAt>6e4)&&(this._found=bt(t).map(t=>({device_id:t.device_id,registry_entity:t.registry_entity,valve_name:t.valve_name,view_path:t.view_path,home:t.valve_home,room:t.valve_room,battery:t.battery_level??null})),this._foundAt=Date.now()),this._found??[]}_valveByRegistry(){const t=new Map;for(const e of this._valves())t.set(e.registry_entity,e);return t}async _load(t=!1){if(!this.hass?.callApi)return;const[e,i]=this._window();"timeline"===this._mode&&this._loadOffline(e,i);const s=`?start=${encodeURIComponent(e.toISOString())}&end=${encodeURIComponent(i.toISOString())}`,n=this._config?.planned_entity??"calendar.irrigation_planned",a=this._config?.completed_entity??"calendar.irrigation_completed";t||(this._loading=!0),this._error=null;try{const[t,e]=await Promise.all([this.hass.callApi("GET",`calendars/${n}${s}`),this.hass.callApi("GET",`calendars/${a}${s}`)]),i=this._valveByRegistry(),r=(t,e)=>{const s=Date.parse(t.start.dateTime??t.start.date??"");let n=Date.parse(t.end.dateTime??t.end.date??"");if(!Number.isFinite(s))return null;(!Number.isFinite(n)||n<=s)&&(n=s+6e4);const a=(t.uid??"").split("#")[0],r=i.get(a);return{start:s,end:n,kind:e,key:a,name:r?.valve_name??t.summary.split(" · ")[0],summary:t.summary,liters:"planned"===e?null:Ii(t.summary),path:r?.view_path}},o=(e??[]).map(t=>r(t,/Type: In progress/.test(t.description??"")?"running":"ran")).filter(t=>!!t),l=(t??[]).map(t=>r(t,"planned")).filter(t=>!!t),d=this.hass.states,c=t=>Pt(d?.[t]);this._events=Tt(l,o,Date.now(),c)}catch(t){this._error=function(t){const e=t;return e?.body?.message??e?.message??String(t)}(t)}finally{this._loading=!1,this._eventsReady=!0,t||this.updateComplete.then(()=>this._scrollToFirst())}}async _loadOffline(t,e){const i=this._valves().map(t=>t.registry_entity),s=new Map;for(let n=0;n<i.length;n+=40){const a=i.slice(n,n+40);try{const i=await this.hass.callApi("GET",`history/period/${encodeURIComponent(t.toISOString())}?end_time=${encodeURIComponent(e.toISOString())}&filter_entity_id=${a.join(",")}&minimal_response&no_attributes`);for(const n of i??[]){const i=n[0]?.entity_id;i&&s.set(i,Rt(n,t.getTime(),Math.min(e.getTime(),Date.now())))}}catch{}}this._offline=s}_scrollToFirst(){if("timeline"===this._mode)return;const[t,e]=this._window();let i=null;for(const s of this._events){if(s.end<=t.getTime()||s.start>=e.getTime())continue;const n=Jt(Math.max(s.start,t.getTime()));(null===i||n<i)&&(i=n)}const s=this.renderRoot.querySelector(".scroll");s&&null!==i&&(s.scrollTop=Math.max(0,(i-1)*this._hourPx()))}_hourPx(){return this._config?.hour_height??Math.max(36,Math.round(.72*window.innerHeight/8))}_setMode(t){this._mode=t,Bi(Ni,t)}_setRange(t){this._range=t,Bi(zi,String(t)),this._anchor=Oi(new Date)}_shift(t){const e="week"===this._mode?7:"timeline"===this._mode?this._range:1;this._anchor=Pi(this._anchor,e*t)}_open(t){if(!t)return;const e=window.location.pathname.split("/")[1]||"lovelace";window.history.pushState(null,"",`/${e}/${t}`),this.dispatchEvent(new Event("location-changed",{bubbles:!0,composed:!0}))}_rangeLabel(){const[t,e]=this._window(),i={weekday:"short",day:"numeric",month:"short"};return e.getTime()-t.getTime()<=9e7?Yt(t.getTime(),i):`${Yt(t.getTime(),{day:"numeric",month:"short"})} – ${Yt(Pi(e,-1).getTime(),i)}`}_placeOf(t){const e=this._farm.locationOf[t.device_id],i=e?.site_id??null;return{site:i,siteName:i?he(this._farm.sites,i):null,mp:e?.name??null}}_visible(){const t=this._filter,e=t.site?pe(this._farm.sites,t.site):null,i=t.search.trim().toLowerCase();return this._valves().filter(t=>{const s=this._placeOf(t);return!!(!e||s.site&&e.has(s.site))&&(!i||[t.valve_name,s.mp,s.siteName].some(t=>t?.toLowerCase().includes(i)))})}_shownEvents(){if(!this._filter.site&&!this._filter.search.trim())return this._events;const t=new Set(this._visible().map(t=>t.registry_entity));return this._events.filter(e=>t.has(e.key))}_onFilter(t){if(t.detail.site!==this._filter.site){const e=new URL(window.location.href);t.detail.site?e.searchParams.set("site",t.detail.site):e.searchParams.delete("site"),window.history.replaceState(window.history.state,"",e.pathname+e.search+e.hash)}this._filter=t.detail;try{localStorage.setItem(Hi,JSON.stringify(t.detail))}catch{}}_legend(t){const e={planned:0,ran:0,missed:0,unplanned:0,running:0,dry:0};for(const i of t)e[i.kind]++,Fi(i)&&e.dry++;const i=(t,e,i,s)=>B`<span class="lg" title=${s}><i class="sw ${t}"></i><b>${e}</b> ${i}</span>`;return B`<div class="legend">
+    `],t([ut({attribute:!1})],Ai.prototype,"hass",void 0),t([mt()],Ai.prototype,"_config",void 0),t([mt()],Ai.prototype,"_help",void 0),t([mt()],Ai.prototype,"_moving",void 0),t([mt()],Ai.prototype,"_busy",void 0),t([mt()],Ai.prototype,"_moveError",void 0),customElements.get("irrigation-valve-header-card")||customElements.define("irrigation-valve-header-card",Ai);const Mi="No site",Ci="No metering point";function Li(t){return t===Ci?2:t===Mi?1:0}const Ni=864e5,zi=36e5,Oi="xt-irrigation-calendar-mode",Ti="xt-irrigation-calendar-range",Pi=t=>new Date(Gt(t.getTime())),Di=t=>{return new Date(Kt(e=t.getTime(),-(Bt(e).weekday+6)%7));var e},Ri=(t,e)=>new Date(Kt(t.getTime(),e)),Ui=t=>String(t).padStart(2,"0"),Ii=t=>{const e=Bt(t);return`${Ui(e.hour)}:${Ui(e.minute)}`},Fi=t=>t>0?String(Math.round(t/6e4)):"–";function Hi(t){const e=/·\s*~?([\d.,]+)\s*L\s*$/.exec(t);return e?Number(e[1].replace(",",".")):null}function ji(t){return("ran"===t.kind||"unplanned"===t.kind)&&0===t.liters}const Wi="xt-irrigation-calendar-filter";function Bi(){return new URLSearchParams(window.location.search).get("site")}function qi(t,e){try{return localStorage.getItem(t)??e}catch{return e}}function Vi(t,e){try{localStorage.setItem(t,e)}catch{}}class Gi extends dt{constructor(){super(...arguments),this._config=null,this._mode=["day","week","timeline"].includes(qi(Oi,"day"))?qi(Oi,"day"):"day",this._range=[1,3,7].includes(Number(qi(Ti,"7")))?Number(qi(Ti,"7")):7,this._anchor=Pi(new Date),this._events=[],this._problemsOnly=!1,this._filter=function(){let t=le;try{t={...le,...JSON.parse(localStorage.getItem(Wi)??"{}"),status:"all"}}catch{}const e=Bi();return e?{...t,site:e}:t}(),this._farm=$t,this._farmLoaded=!1,this._farmReady=!1,this._eventsReady=!1,this._found=null,this._foundAt=0,this._offline=new Map,this._loading=!1,this._error=null,this._loadedKey="",this._onLocation=()=>{const t=Bi();t&&t!==this._filter.site&&(this._filter={...this._filter,site:t})}}setConfig(t){this._config=t;const e=this._modes();e.includes(this._mode)||(this._mode=e[0])}_modes(){const t=(this._config?.modes??[]).filter(t=>["day","week","timeline"].includes(t));return t.length?t:["day","week","timeline"]}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation),this._timer=window.setInterval(()=>this._load(!0),3e5)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation),this._timer&&window.clearInterval(this._timer),window.clearTimeout(this._debounce),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}updated(){Ft(this.hass),this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(()=>{window.clearTimeout(this._debounce),this._debounce=window.setTimeout(()=>this._load(!0),2e3)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{})),!this._farmLoaded&&this.hass?.callApi&&(this._farmLoaded=!0,Mt(this.hass).then(t=>{this._farm=t,this._farmReady=!0},()=>this._farmReady=!0));const t=`${this._mode}|${this._range}|${this._anchor.getTime()}`;t!==this._loadedKey&&this.hass?.callApi&&(this._loadedKey=t,this._load())}_window(){if("week"===this._mode){const t=Di(this._anchor);return[t,Ri(t,7)]}if("timeline"===this._mode){const t=Ri(Pi(this._anchor),1);return[Ri(t,-this._range),t]}const t=Pi(this._anchor);return[t,Ri(t,1)]}_valves(){if(this._config?.valves?.length)return this._config.valves;const t=this.hass;return t?.entities&&(!this._found||Date.now()-this._foundAt>6e4)&&(this._found=bt(t).map(t=>({device_id:t.device_id,registry_entity:t.registry_entity,valve_name:t.valve_name,view_path:t.view_path,home:t.valve_home,room:t.valve_room,battery:t.battery_level??null})),this._foundAt=Date.now()),this._found??[]}_valveByRegistry(){const t=new Map;for(const e of this._valves())t.set(e.registry_entity,e);return t}async _load(t=!1){if(!this.hass?.callApi)return;const[e,i]=this._window();"timeline"===this._mode&&this._loadOffline(e,i);const s=`?start=${encodeURIComponent(e.toISOString())}&end=${encodeURIComponent(i.toISOString())}`,n=this._config?.planned_entity??"calendar.irrigation_planned",a=this._config?.completed_entity??"calendar.irrigation_completed";t||(this._loading=!0),this._error=null;try{const[t,e]=await Promise.all([this.hass.callApi("GET",`calendars/${n}${s}`),this.hass.callApi("GET",`calendars/${a}${s}`)]),i=this._valveByRegistry(),r=(t,e)=>{const s=Date.parse(t.start.dateTime??t.start.date??"");let n=Date.parse(t.end.dateTime??t.end.date??"");if(!Number.isFinite(s))return null;(!Number.isFinite(n)||n<=s)&&(n=s+6e4);const a=(t.uid??"").split("#")[0],r=i.get(a);return{start:s,end:n,kind:e,key:a,name:r?.valve_name??t.summary.split(" · ")[0],summary:t.summary,liters:"planned"===e?null:Hi(t.summary),path:r?.view_path}},o=(e??[]).map(t=>r(t,/Type: In progress/.test(t.description??"")?"running":"ran")).filter(t=>!!t),l=(t??[]).map(t=>r(t,"planned")).filter(t=>!!t),d=this.hass.states,c=t=>Pt(d?.[t]);this._events=Tt(l,o,Date.now(),c)}catch(t){this._error=function(t){const e=t;return e?.body?.message??e?.message??String(t)}(t)}finally{this._loading=!1,this._eventsReady=!0,t||this.updateComplete.then(()=>this._scrollToFirst())}}async _loadOffline(t,e){const i=this._valves().map(t=>t.registry_entity),s=new Map;for(let n=0;n<i.length;n+=40){const a=i.slice(n,n+40);try{const i=await this.hass.callApi("GET",`history/period/${encodeURIComponent(t.toISOString())}?end_time=${encodeURIComponent(e.toISOString())}&filter_entity_id=${a.join(",")}&minimal_response&no_attributes`);for(const n of i??[]){const i=n[0]?.entity_id;i&&s.set(i,Rt(n,t.getTime(),Math.min(e.getTime(),Date.now())))}}catch{}}this._offline=s}_scrollToFirst(){if("timeline"===this._mode)return;const[t,e]=this._window();let i=null;for(const s of this._events){if(s.end<=t.getTime()||s.start>=e.getTime())continue;const n=Jt(Math.max(s.start,t.getTime()));(null===i||n<i)&&(i=n)}const s=this.renderRoot.querySelector(".scroll");s&&null!==i&&(s.scrollTop=Math.max(0,(i-1)*this._hourPx()))}_hourPx(){return this._config?.hour_height??Math.max(36,Math.round(.72*window.innerHeight/8))}_setMode(t){this._mode=t,Vi(Oi,t)}_setRange(t){this._range=t,Vi(Ti,String(t)),this._anchor=Pi(new Date)}_shift(t){const e="week"===this._mode?7:"timeline"===this._mode?this._range:1;this._anchor=Ri(this._anchor,e*t)}_open(t){if(!t)return;const e=window.location.pathname.split("/")[1]||"lovelace";window.history.pushState(null,"",`/${e}/${t}`),this.dispatchEvent(new Event("location-changed",{bubbles:!0,composed:!0}))}_rangeLabel(){const[t,e]=this._window(),i={weekday:"short",day:"numeric",month:"short"};return e.getTime()-t.getTime()<=9e7?Yt(t.getTime(),i):`${Yt(t.getTime(),{day:"numeric",month:"short"})} – ${Yt(Ri(e,-1).getTime(),i)}`}_placeOf(t){const e=this._farm.locationOf[t.device_id],i=e?.site_id??null;return{site:i,siteName:i?he(this._farm.sites,i):null,mp:e?.name??null}}_visible(){const t=this._filter,e=t.site?pe(this._farm.sites,t.site):null,i=t.search.trim().toLowerCase();return this._valves().filter(t=>{const s=this._placeOf(t);return!!(!e||s.site&&e.has(s.site))&&(!i||[t.valve_name,s.mp,s.siteName].some(t=>t?.toLowerCase().includes(i)))})}_shownEvents(){if(!this._filter.site&&!this._filter.search.trim())return this._events;const t=new Set(this._visible().map(t=>t.registry_entity));return this._events.filter(e=>t.has(e.key))}_onFilter(t){if(t.detail.site!==this._filter.site){const e=new URL(window.location.href);t.detail.site?e.searchParams.set("site",t.detail.site):e.searchParams.delete("site"),window.history.replaceState(window.history.state,"",e.pathname+e.search+e.hash)}this._filter=t.detail;try{localStorage.setItem(Wi,JSON.stringify(t.detail))}catch{}}_legend(t){const e={planned:0,ran:0,missed:0,unplanned:0,running:0,dry:0};for(const i of t)e[i.kind]++,ji(i)&&e.dry++;const i=(t,e,i,s)=>B`<span class="lg" title=${s}><i class="sw ${t}"></i><b>${e}</b> ${i}</span>`;return B`<div class="legend">
       ${i("ran",e.ran,"ran","Planned runs that happened (filled blue)")}
       ${i("missed",e.missed,"missed","Planned runs that did not happen (red outline)")}
       ${i("planned",e.planned,"ahead","Planned runs still to come (outline)")}
@@ -2242,7 +2251,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               <button class="icon" @click=${()=>this._shift(-1)} aria-label="Previous"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
               <span class="range-label">${this._rangeLabel()}</span>
               <button class="icon" @click=${()=>this._shift(1)} aria-label="Next"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
-              ${s(!1,"Today",()=>this._anchor=Oi(new Date))}
+              ${s(!1,"Today",()=>this._anchor=Pi(new Date))}
             </div>
           </div>
           <xt-valve-filter-bar
@@ -2259,34 +2268,34 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${this._error?B`<div class="err">${this._error}</div>`:G}
         ${this._ready()?e?this._renderTimeline(e):this._renderGrid(i):B`<div class="empty">Loading…</div>`}
       </ha-card>
-    `}_renderGrid(t){const[e]=this._window(),i="day"===this._mode?1:7,s=this._hourPx(),n=Oi(new Date).getTime();return B`
+    `}_renderGrid(t){const[e]=this._window(),i="day"===this._mode?1:7,s=this._hourPx(),n=Pi(new Date).getTime();return B`
       <div class="scroll">
         <div class="grid" style="--hour:${s}px;--days:${i}">
           <div class="hours">
             ${i>1?B`<div class="colhead"></div>`:G}
-            ${Array.from({length:24},(t,e)=>B`<div class="hour">${Di(e)}:00</div>`)}
+            ${Array.from({length:24},(t,e)=>B`<div class="hour">${Ui(e)}:00</div>`)}
           </div>
-          ${Array.from({length:i},(a,r)=>{const o=Pi(e,r).getTime(),l=o+Ci,d=t.filter(t=>t.start<l&&t.end>o).map(t=>({...t,start:Math.max(t.start,o),end:Math.min(Math.max(t.end,t.start+9e5),l)})),c=function(t){const e=[...t].sort((t,e)=>t.start-e.start||Ot[t.kind]-Ot[e.kind]||t.name.localeCompare(e.name)),i=[];let s=[],n=[],a=-1/0;const r=()=>{const t=s.length;for(const e of n)e.lanes=t;n=[],s=[]};for(const t of e){t.start>=a&&r();let e=s.findIndex(e=>e<=t.start);-1===e?(e=s.length,s.push(t.end)):s[e]=t.end;const o={ev:t,lane:e,lanes:0};n.push(o),i.push(o),a=Math.max(a,t.end)}return r(),i}(d),p=c.reduce((t,e)=>Math.max(t,e.lanes),1),h=i>1?40:72;return B`
+          ${Array.from({length:i},(a,r)=>{const o=Ri(e,r).getTime(),l=o+Ni,d=t.filter(t=>t.start<l&&t.end>o).map(t=>({...t,start:Math.max(t.start,o),end:Math.min(Math.max(t.end,t.start+9e5),l)})),c=function(t){const e=[...t].sort((t,e)=>t.start-e.start||Ot[t.kind]-Ot[e.kind]||t.name.localeCompare(e.name)),i=[];let s=[],n=[],a=-1/0;const r=()=>{const t=s.length;for(const e of n)e.lanes=t;n=[],s=[]};for(const t of e){t.start>=a&&r();let e=s.findIndex(e=>e<=t.start);-1===e?(e=s.length,s.push(t.end)):s[e]=t.end;const o={ev:t,lane:e,lanes:0};n.push(o),i.push(o),a=Math.max(a,t.end)}return r(),i}(d),p=c.reduce((t,e)=>Math.max(t,e.lanes),1),h=i>1?40:72;return B`
               <div
                 class="col ${o===n?"today":""}"
                 style="min-width:${Math.max(110,p*h)}px"
               >
                 ${i>1?B`<div class="colhead"><span>${Yt(o,{weekday:"long",day:"numeric"})}</span></div>`:G}
                 <div class="lines"></div>
-                ${c.map(({ev:t,lane:e,lanes:i})=>{const n=(t.start-o)/Li*s,a=Math.max((t.end-t.start)/Li*s,s/4),r=100/i;return B`<div
-                    class="ev ${t.kind} ${Fi(t)?"dry":""} ${t.path?"link":""}"
+                ${c.map(({ev:t,lane:e,lanes:i})=>{const n=(t.start-o)/zi*s,a=Math.max((t.end-t.start)/zi*s,s/4),r=100/i;return B`<div
+                    class="ev ${t.kind} ${ji(t)?"dry":""} ${t.path?"link":""}"
                     style="top:${n}px;height:${a}px;left:${e*r}%;width:calc(${r}% - 2px)"
                     title=${t.summary}
                     @click=${()=>this._open(t.path)}
                   >
                     <b>${t.name}</b>
-                    <span>${Ri(t.start)}–${Ri(t.end)}${null!=t.liters?` · ${Math.round(t.liters)} L`:""}</span>
+                    <span>${Ii(t.start)}–${Ii(t.end)}${null!=t.liters?` · ${Math.round(t.liters)} L`:""}</span>
                   </div>`})}
               </div>
             `})}
         </div>
       </div>
-    `}_online(t){const e=this.hass?.states?.[t.registry_entity]?.state;return!!e&&"unavailable"!==e&&"unknown"!==e}_battery(t){const e=t.battery?this.hass?.states?.[t.battery]?.state:void 0,i=Number(e);return e&&""!==e&&Number.isFinite(i)?Math.round(i):null}_timelineRows(){const[t,e]=this._window();return function(t,e,i,s,n,a){const r=new Map(t.map(t=>[t.registry_entity,t])),o=new Set(t.map(t=>t.device_id)),l=new Map,d=e=>{const s=`mp:${e.id}`;let n=l.get(s);return n||(n={key:s,group:e.site_id?he(i.sites,e.site_id):Ei,name:e.name,mp:e,valve:t.find(t=>e.valves.includes(t.device_id))??null,evs:[]},l.set(s,n)),n},c=t=>{const e=`valve:${t.registry_entity}`;let i=l.get(e);return i||l.set(e,i={key:e,group:Ai,name:t.valve_name,mp:null,valve:t,evs:[]}),i};for(const t of i.locations)d(t);for(const e of t)i.locationOf[e.device_id]||c(e);for(const t of e){const e=r.get(t.key);if(!e)continue;const s=zt(i,e.device_id,t.start);(s?d(s):c(e)).evs.push(t)}const[p,h]=n;for(const t of i.runs){if(o.has(t.device_id))continue;const e=Date.parse(t.start);if(!(e<h&&Date.parse(t.end)>p))continue;const n=zt(i,t.device_id,e);n&&d(n).evs.push(s(t,n))}const u=a.site?pe(i.sites,a.site):null,m=a.search.trim().toLowerCase();return[...l.values()].filter(t=>!u||null!=t.mp?.site_id&&u.has(t.mp.site_id)).filter(t=>!m||[t.name,t.valve?.valve_name,t.group].some(t=>t?.toLowerCase().includes(m))).sort((t,e)=>Mi(t.group)-Mi(e.group)||t.group.localeCompare(e.group)||t.name.localeCompare(e.name))}(this._valves(),this._events,this._farm,(t,e)=>{const i=Date.parse(t.start),s=t.liters??null,n=Math.round(t.duration_seconds/60);return{start:i,end:Math.max(Date.parse(t.end),i+6e4),kind:"ran",key:`retired:${t.device_id}`,name:e.name,summary:`${e.name} · removed valve · ${n} min${null!=s?` · ${s} L`:""}`,liters:s}},[t.getTime(),e.getTime()],this._filter)}_renderTimeline(t){const[e,i]=this._window(),s=e.getTime(),n=i.getTime()-s,a=t=>(t-s)/n*100,r=Date.now(),o=new Map;for(const e of t)(o.get(e.group)??o.set(e.group,[]).get(e.group)).push(e);const l=[...o.keys()],d=1===this._range?3:3===this._range?12:24,c=[];for(let t=s;t<i.getTime();t+=d*Li){const e=Bt(t).hour;c.push({left:a(t),label:d>=24||0===e&&this._range>1?Yt(t,{weekday:"short"}):`${Di(e)}`})}const p=Array.from({length:this._range-1},(t,e)=>a(s+(e+1)*Ci)),h=r>s&&r<i.getTime()?a(r):null;let u=0;const m=l.map(t=>{const e=o.get(t).map(t=>{const{evs:e,valve:i}=t,s=e.some(t=>"missed"===t.kind||"unplanned"===t.kind||Fi(t)||t.end-t.start>144e5);return{row:t,v:i,evs:e,problem:s}}).filter(t=>!this._problemsOnly||t.problem);return e.length?(u+=e.length,B`
+    `}_online(t){const e=this.hass?.states?.[t.registry_entity]?.state;return!!e&&"unavailable"!==e&&"unknown"!==e}_battery(t){const e=t.battery?this.hass?.states?.[t.battery]?.state:void 0,i=Number(e);return e&&""!==e&&Number.isFinite(i)?Math.round(i):null}_timelineRows(){const[t,e]=this._window();return function(t,e,i,s,n,a){const r=new Map(t.map(t=>[t.registry_entity,t])),o=new Set(t.map(t=>t.device_id)),l=new Map,d=e=>{const s=`mp:${e.id}`;let n=l.get(s);return n||(n={key:s,group:e.site_id?he(i.sites,e.site_id):Mi,name:e.name,mp:e,valve:t.find(t=>e.valves.includes(t.device_id))??null,evs:[]},l.set(s,n)),n},c=t=>{const e=`valve:${t.registry_entity}`;let i=l.get(e);return i||l.set(e,i={key:e,group:Ci,name:t.valve_name,mp:null,valve:t,evs:[]}),i};for(const t of i.locations)d(t);for(const e of t)i.locationOf[e.device_id]||c(e);for(const t of e){const e=r.get(t.key);if(!e)continue;const s=zt(i,e.device_id,t.start);(s?d(s):c(e)).evs.push(t)}const[p,h]=n;for(const t of i.runs){if(o.has(t.device_id))continue;const e=Date.parse(t.start);if(!(e<h&&Date.parse(t.end)>p))continue;const n=zt(i,t.device_id,e);n&&d(n).evs.push(s(t,n))}const u=a.site?pe(i.sites,a.site):null,m=a.search.trim().toLowerCase();return[...l.values()].filter(t=>!u||null!=t.mp?.site_id&&u.has(t.mp.site_id)).filter(t=>!m||[t.name,t.valve?.valve_name,t.group].some(t=>t?.toLowerCase().includes(m))).sort((t,e)=>Li(t.group)-Li(e.group)||t.group.localeCompare(e.group)||t.name.localeCompare(e.name))}(this._valves(),this._events,this._farm,(t,e)=>{const i=Date.parse(t.start),s=t.liters??null,n=Math.round(t.duration_seconds/60);return{start:i,end:Math.max(Date.parse(t.end),i+6e4),kind:"ran",key:`retired:${t.device_id}`,name:e.name,summary:`${e.name} · removed valve · ${n} min${null!=s?` · ${s} L`:""}`,liters:s}},[t.getTime(),e.getTime()],this._filter)}_renderTimeline(t){const[e,i]=this._window(),s=e.getTime(),n=i.getTime()-s,a=t=>(t-s)/n*100,r=Date.now(),o=new Map;for(const e of t)(o.get(e.group)??o.set(e.group,[]).get(e.group)).push(e);const l=[...o.keys()],d=1===this._range?3:3===this._range?12:24,c=[];for(let t=s;t<i.getTime();t+=d*zi){const e=Bt(t).hour;c.push({left:a(t),label:d>=24||0===e&&this._range>1?Yt(t,{weekday:"short"}):`${Ui(e)}`})}const p=Array.from({length:this._range-1},(t,e)=>a(s+(e+1)*Ni)),h=r>s&&r<i.getTime()?a(r):null;let u=0;const m=l.map(t=>{const e=o.get(t).map(t=>{const{evs:e,valve:i}=t,s=e.some(t=>"missed"===t.kind||"unplanned"===t.kind||ji(t)||t.end-t.start>144e5);return{row:t,v:i,evs:e,problem:s}}).filter(t=>!this._problemsOnly||t.problem);return e.length?(u+=e.length,B`
         <div class="grouphdr">${t}</div>
         ${e.map(({row:t,v:e,evs:i,problem:s})=>{const n=i.reduce((t,e)=>"planned"===e.kind||"missed"===e.kind?t+(e.end-e.start):null!=e.planStart&&null!=e.planEnd?t+(e.planEnd-e.planStart):t,0),r=i.filter(t=>"ran"===t.kind||"unplanned"===t.kind||"running"===t.kind),o=r.reduce((t,e)=>t+(e.end-e.start),0),l=r.reduce((t,e)=>null==e.liters?t:(t??0)+e.liters,null);return B`
             <div class="row ${e?"clickable":""} ${s?"problem":""}" @click=${()=>e&&this._open(e.view_path)}>
@@ -2300,18 +2309,18 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 ${(e?this._offline.get(e.registry_entity)??[]:[]).map(([t,e])=>B`<i
                     class="offline"
                     style="left:${a(t)}%;width:${Math.max(a(e)-a(t),.3)}%"
-                    title="Offline ${Ri(t)}–${Ri(e)}"
+                    title="Offline ${Ii(t)}–${Ii(e)}"
                   ></i>`)}
                 ${p.map(t=>B`<i class="dayline" style="left:${t}%"></i>`)}
                 ${i.map(t=>B`<i
-                    class="bar ${t.kind} ${Fi(t)?"dry":""}"
+                    class="bar ${t.kind} ${ji(t)?"dry":""}"
                     style="left:${a(t.start)}%;width:${Math.max(a(t.end)-a(t.start),.4)}%"
                     title=${t.summary}
                   ></i>`)}
                 ${null!==h?B`<i class="now" style="left:${h}%"></i>`:G}
               </div>
-              <div class="metric ${n?"":"muted"}">${Ui(n)}</div>
-              <div class="metric ${o?"":"muted"}">${Ui(o)}</div>
+              <div class="metric ${n?"":"muted"}">${Fi(n)}</div>
+              <div class="metric ${o?"":"muted"}">${Fi(o)}</div>
               <div class="metric ${null==l?"muted":""}">${(t=>null==t?"–":String(Math.round(t)))(l)}</div>
               <div class="metric ${e&&null!=this._battery(e)?"":"muted"}" title="Battery now">
                 ${e&&null!=this._battery(e)?`${this._battery(e)} %`:"–"}
@@ -2333,7 +2342,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${m}
         ${t.length?this._problemsOnly&&0===u?B`<div class="empty">No missed or unplanned runs in this range.</div>`:G:B`<div class="empty">No metering points or valves match.</div>`}
       </div>
-    `}}if(qi.styles=[fe,r`
+    `}}if(Gi.styles=[fe,r`
     :host {
       --cc-text: var(--primary-text-color, #212121);
       --cc-dim: var(--xt-dim);
@@ -2813,7 +2822,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         }
       }
     }
-  `],t([ut({attribute:!1})],qi.prototype,"hass",void 0),t([mt()],qi.prototype,"_config",void 0),t([mt()],qi.prototype,"_mode",void 0),t([mt()],qi.prototype,"_range",void 0),t([mt()],qi.prototype,"_anchor",void 0),t([mt()],qi.prototype,"_events",void 0),t([mt()],qi.prototype,"_problemsOnly",void 0),t([mt()],qi.prototype,"_filter",void 0),t([mt()],qi.prototype,"_farm",void 0),t([mt()],qi.prototype,"_farmReady",void 0),t([mt()],qi.prototype,"_eventsReady",void 0),t([mt()],qi.prototype,"_offline",void 0),t([mt()],qi.prototype,"_loading",void 0),t([mt()],qi.prototype,"_error",void 0),!customElements.get("irrigation-calendar-card")){customElements.define("irrigation-calendar-card",qi);const t=window;t.customCards=t.customCards||[],t.customCards.some(t=>"irrigation-calendar-card"===t.type)||t.customCards.push({type:"irrigation-calendar-card",name:"Irrigation Calendar",description:"Planned, ran, missed and unplanned irrigation runs as a day grid, week grid or per-valve timeline."})}const Vi=r`
+  `],t([ut({attribute:!1})],Gi.prototype,"hass",void 0),t([mt()],Gi.prototype,"_config",void 0),t([mt()],Gi.prototype,"_mode",void 0),t([mt()],Gi.prototype,"_range",void 0),t([mt()],Gi.prototype,"_anchor",void 0),t([mt()],Gi.prototype,"_events",void 0),t([mt()],Gi.prototype,"_problemsOnly",void 0),t([mt()],Gi.prototype,"_filter",void 0),t([mt()],Gi.prototype,"_farm",void 0),t([mt()],Gi.prototype,"_farmReady",void 0),t([mt()],Gi.prototype,"_eventsReady",void 0),t([mt()],Gi.prototype,"_offline",void 0),t([mt()],Gi.prototype,"_loading",void 0),t([mt()],Gi.prototype,"_error",void 0),!customElements.get("irrigation-calendar-card")){customElements.define("irrigation-calendar-card",Gi);const t=window;t.customCards=t.customCards||[],t.customCards.some(t=>"irrigation-calendar-card"===t.type)||t.customCards.push({type:"irrigation-calendar-card",name:"Irrigation Calendar",description:"Planned, ran, missed and unplanned irrigation runs as a day grid, week grid or per-valve timeline."})}const Ki=r`
   .titlebar {
     display: flex;
     align-items: center;
@@ -2989,7 +2998,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
   .dim {
     color: var(--xt-dim);
   }
-`;class Gi extends dt{setConfig(t){this._config=t}getCardSize(){return 3}_delay(t){const e=this._config?.rain_snow_delay,i=e?this.hass?.states[e]:void 0;if(!e||!i)return;const s=i.attributes,n=Number(s.min??0),a=Number(s.max??7),r=Math.min(a,Math.max(n,Number(i.state)+t*Number(s.step??1)));this.hass.callService("number","set_value",{entity_id:e,value:r})}render(){if(!this._config||!this.hass)return G;const t=this._config.sleep_mode?this.hass.states[this._config.sleep_mode]:void 0,e=this._config.rain_snow_delay?this.hass.states[this._config.rain_snow_delay]:void 0,i=e?Number(e.state):NaN,s=t=>!t||"unavailable"===t.state||"unknown"===t.state;return B`<ha-card>
+`;class Ji extends dt{setConfig(t){this._config=t}getCardSize(){return 3}_delay(t){const e=this._config?.rain_snow_delay,i=e?this.hass?.states[e]:void 0;if(!e||!i)return;const s=i.attributes,n=Number(s.min??0),a=Number(s.max??7),r=Math.min(a,Math.max(n,Number(i.state)+t*Number(s.step??1)));this.hass.callService("number","set_value",{entity_id:e,value:r})}render(){if(!this._config||!this.hass)return G;const t=this._config.sleep_mode?this.hass.states[this._config.sleep_mode]:void 0,e=this._config.rain_snow_delay?this.hass.states[this._config.rain_snow_delay]:void 0,i=e?Number(e.state):NaN,s=t=>!t||"unavailable"===t.state||"unknown"===t.state;return B`<ha-card>
       <div class="titlebar">
         <ha-icon icon="mdi:cog-outline"></ha-icon>
         <div class="title"><b>Settings</b></div>
@@ -3027,7 +3036,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               </div>
             </div>`:G}
       </div>
-    </ha-card>`}}Gi.styles=[fe,Vi,r`
+    </ha-card>`}}Ji.styles=[fe,Ki,r`
       .setting {
         display: flex;
         align-items: center;
@@ -3059,4 +3068,4 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         text-align: center;
         font-weight: 500;
       }
-    `],t([ut({attribute:!1})],Gi.prototype,"hass",void 0),t([mt()],Gi.prototype,"_config",void 0),customElements.get("irrigation-valve-settings-card")||customElements.define("irrigation-valve-settings-card",Gi);
+    `],t([ut({attribute:!1})],Ji.prototype,"hass",void 0),t([mt()],Ji.prototype,"_config",void 0),customElements.get("irrigation-valve-settings-card")||customElements.define("irrigation-valve-settings-card",Ji);

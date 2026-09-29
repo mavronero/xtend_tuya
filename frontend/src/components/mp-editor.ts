@@ -16,6 +16,7 @@ import type { ValveStatus } from "../farm/valve-summary.ts";
 import { batteryIcon } from "./format.ts";
 import { farmTokens } from "./theme.ts";
 import { farmDate } from "./farm-time.ts";
+import { pickList, pickStyles } from "./pick.ts";
 
 /** A valve the metering point can take, with where it is now. */
 export interface ValveOption {
@@ -25,6 +26,8 @@ export interface ValveOption {
   battery: number | null;
   /** Name of the metering point holding it now, if any. */
   at: string | null;
+  /** SmartLife name, searchable next to the number. */
+  name?: string;
 }
 
 export interface SiteOption {
@@ -126,19 +129,16 @@ export class XtMpEditor extends LitElement {
             : html`<div class="dim">No valve assigned.</div>`}
           <label
             >${mp.valves.length ? "Exchange for" : "Assign"}
-            <select
-              ?disabled=${this.busy}
-              @change=${(e: Event) => {
-                const sel = e.target as HTMLSelectElement;
-                if (sel.value) this._fire("xt-mp-assign", sel.value);
-                sel.value = "";
-              }}
-            >
-              <option value="">Choose a valve…</option>
-              ${candidates.map(
-                (v) => html`<option value=${v.device_id}>${v.label}${v.at ? ` — now at ${v.at}` : " — free"}${v.status === "offline" ? " (offline)" : ""}</option>`
-              )}
-            </select>
+            ${pickList(
+              "xt-mp-valves",
+              "Type a number or name…",
+              candidates.map((v) => ({
+                key: v.device_id,
+                text: `${v.label}${v.name && v.name !== v.label ? ` · ${v.name}` : ""}${v.at ? ` — now at ${v.at}` : " — free"}${v.status === "offline" ? " (offline)" : ""}`,
+              })),
+              this.busy,
+              (id) => this._fire("xt-mp-assign", id)
+            )}
           </label>
           <p class="hint dim">
             ${mp.valves.length > 1
@@ -179,6 +179,7 @@ export class XtMpEditor extends LitElement {
   }
 
   static styles = [
+    pickStyles,
     farmTokens,
     css`
       .backdrop {

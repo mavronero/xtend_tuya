@@ -253,6 +253,7 @@ export class IrrigationSitesCard extends LitElement {
       status: v.status,
       battery: v.battery,
       at: data.locationOf[v.device_id]?.name ?? null,
+      name: v.name,
     }));
     return html`<xt-mp-editor
       .mp=${mp}

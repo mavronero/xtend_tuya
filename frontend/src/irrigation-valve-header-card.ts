@@ -17,6 +17,8 @@ import { batteryIcon, since, time, volume, when } from "./components/format.ts";
 import { farmTokens } from "./components/theme.ts";
 import "./components/week-bars.ts";
 import "./components/spinner.ts";
+import { pickList, pickStyles } from "./components/pick.ts";
+import { sitePath } from "./farm/valve-filter.ts";
 
 interface CardConfig {
   type: string;
@@ -106,20 +108,18 @@ export class IrrigationValveHeaderCard extends LitElement {
         <ha-icon icon="mdi:pencil-outline"></ha-icon>
       </button>
       ${this._moving
-        ? html`<select
-            ?disabled=${this._busy}
-            @change=${(e: Event) => {
-              const sel = e.target as HTMLSelectElement;
-              const v = sel.value;
-              sel.value = "";
-              if (v) void this._move(deviceId, v);
-            }}
-          >
-            <option value="">${label}</option>
-            ${this._farm.data.locations
+        ? html`<span class="move">${pickList(
+            "xt-move-mp",
+            label,
+            this._farm.data.locations
               .filter((l) => l.id !== currentId)
-              .map((l) => html`<option value=${l.id}>${l.name}</option>`)}
-          </select>`
+              .map((l) => ({
+                key: l.id,
+                text: l.site_id ? `${l.name} · ${sitePath(this._farm.data.sites, l.site_id)}` : l.name,
+              })),
+            this._busy,
+            (id) => void this._move(deviceId, id)
+          )}</span>`
         : nothing}
       ${this._moveError ? html`<span class="err">${this._moveError}</span>` : nothing}`;
   }
@@ -234,6 +234,7 @@ export class IrrigationValveHeaderCard extends LitElement {
   }
 
   static styles = [
+    pickStyles,
     farmTokens,
     css`
       ha-card {
