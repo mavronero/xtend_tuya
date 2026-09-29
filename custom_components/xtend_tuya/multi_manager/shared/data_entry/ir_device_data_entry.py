@@ -227,7 +227,8 @@ class XTDataEntryAddIRDevice(XTDataEntryManager):
                     dispatcher_send(
                         self.hass,
                         TUYA_DISCOVERY_NEW,
-                        [new_device_id, self.flow_data.hub.device_id],
+                        # new_device_id got its discovery from add_device_by_id
+                        [self.flow_data.hub.device_id],
                     )
                     return self.finish_flow(
                         config_flow=config_flow, reason="ir_add_device_success"

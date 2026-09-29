@@ -73,12 +73,14 @@ def build_device(d: dict, keep: set[str] | None = None):
 class FakeAccount:
     """Stands in for the tuya_iot / tuya_sharing plugin: no cloud, fixed devices."""
 
-    def __init__(self, type_name: str, devices: list, priority) -> None:
+    def __init__(self, type_name: str, devices: list, priority, unbound: list = ()) -> None:
         from custom_components.xtend_tuya.multi_manager.shared.shared_classes import XTDeviceMap
 
         self.type_name = type_name
         self.multi_manager = None
         self.device_map = XTDeviceMap({d.id: d for d in devices}, priority)
+        # In the cloud but not yet bound: bind() delivers one like a bindUser frame.
+        self.unbound = {d.id: d for d in unbound}
         self.sent: list[tuple[str, dict]] = []
 
     # identity
@@ -117,10 +119,18 @@ class FakeAccount:
         return None
 
     def get_add_device_signal_list(self, device_id: str):
-        return None
+        from custom_components.xtend_tuya.const import TUYA_DISCOVERY_NEW
+
+        return [TUYA_DISCOVERY_NEW] if device_id in self.device_map else None
 
     def add_device_by_id(self, device_id: str):
-        return None
+        if device := self.unbound.pop(device_id, None):
+            device.device_source_priority = self.device_map.device_source_priority
+            self.device_map[device_id] = device
+
+    def bind(self, device_id: str) -> None:
+        """What the plugins do on a bindUser MQ frame (off the event loop)."""
+        self.multi_manager.add_device_by_id(device_id)
 
     # descriptors
     def get_platform_descriptors_to_merge(self, platform):

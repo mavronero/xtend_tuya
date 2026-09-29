@@ -379,11 +379,8 @@ class XTIOTDeviceManager(TuyaDeviceManager):
         self._update_device_list_status_cache(device_ids)
 
         self.update_device_function_cache(device_ids)
-
-        if device_id in self.device_map.keys():
-            device = self.device_map.get(device_id)
-            for listener in self.device_listeners:
-                listener.add_device(device)
+        # Discovery is MultiManager.add_device_by_id's job, after it has
+        # prepared the device like at setup.
 
     def _on_device_report(self, device_id: str, status: list[dict[str, Any]]):
         self.multi_manager.device_watcher.report_message(
