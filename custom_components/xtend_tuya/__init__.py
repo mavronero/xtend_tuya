@@ -8,11 +8,11 @@ import asyncio
 # rebinds this package's `time` attribute to that submodule, clobbering a
 # plain `import time`. Bind the function itself so the rebind cannot break it.
 from time import monotonic as _monotonic
-from datetime import datetime
+from datetime import datetime, timedelta
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import (
     DeviceEntryDisabler,
@@ -170,6 +170,29 @@ _LOAD_TASKS: dict[str, asyncio.Task] = {}
 # before the device map exists; the registry cleanups below must not treat a
 # still-loading hub's devices as orphans (they would delete them).
 _LOAD_DONE: set[str] = set()
+
+
+FIND_NEW_DEVICES_INTERVAL = timedelta(hours=6)
+
+
+async def async_find_new_devices(
+    hass: HomeAssistant, entry_id: str | None = None
+) -> list[str]:
+    """Hot-add cloud devices the hubs don't serve yet (Trello qYyTmusI).
+
+    Hubs that are loading or reloading are skipped; each listing and fetch
+    runs in the executor.
+    """
+    added: list[str] = []
+    for entry in hass.config_entries.async_entries(DOMAIN, False, False):
+        if entry_id is not None and entry.entry_id != entry_id:
+            continue
+        if entry.state != ConfigEntryState.LOADED or entry.entry_id not in _LOAD_DONE:
+            continue
+        added += await hass.async_add_executor_job(
+            entry.runtime_data.multi_manager.find_new_devices
+        )
+    return added
 
 
 def _load_failure_action(err: BaseException) -> str:
@@ -381,6 +404,15 @@ async def _async_load_entry_body(
         )
     except Exception:  # noqa: BLE001
         LOGGER.debug("fdm5kw: location bootstrap scheduling failed", exc_info=True)
+
+    # Devices paired in Tuya while HA runs: bindUser may never reach us, so
+    # look for them ourselves (the timer is bound to this load).
+    async def _find_new_devices(_now) -> None:
+        await async_find_new_devices(hass, entry.entry_id)
+
+    entry.async_on_unload(
+        async_track_time_interval(hass, _find_new_devices, FIND_NEW_DEVICES_INTERVAL)
+    )
 
     multi_manager.device_watcher.report_message(
         XTDeviceWatcherSpecialDevice.NOT_LINKED_TO_A_DEVICE,

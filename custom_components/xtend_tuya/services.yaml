@@ -136,6 +136,19 @@ fdm5kw_clear_quota_lockout:
     so the next timer mutation retries the cloud write. DP-only writes
     were not affected by the lockout.
 
+find_new_devices:
+  name: Find new devices
+  description: >-
+    Look for devices paired in Tuya since the hub loaded and add them
+    without a reload (read-only cloud listing; also runs every 6 h).
+    Known devices are left alone. Returns the added device ids.
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: xtend_tuya
+
 fdm5kw_resync_timers:
   name: Resync fdm5kw timers from cloud
   description: >-

@@ -81,6 +81,10 @@ class FakeAccount:
         self.device_map = XTDeviceMap({d.id: d for d in devices}, priority)
         # In the cloud but not yet bound: bind() delivers one like a bindUser frame.
         self.unbound = {d.id: d for d in unbound}
+        # Unbound ids the cloud listing already shows (paired in SmartLife,
+        # no bindUser frame delivered).
+        self.paired: set[str] = set()
+        self.listings = 0
         self.sent: list[tuple[str, dict]] = []
 
     # identity
@@ -127,6 +131,11 @@ class FakeAccount:
         if device := self.unbound.pop(device_id, None):
             device.device_source_priority = self.device_map.device_source_priority
             self.device_map[device_id] = device
+
+    def list_device_ids(self) -> list[str]:
+        """The cloud listing: bound devices plus unbound ones already paired."""
+        self.listings += 1
+        return [*self.device_map, *(i for i in self.unbound if i in self.paired)]
 
     def bind(self, device_id: str) -> None:
         """What the plugins do on a bindUser MQ frame (off the event loop)."""

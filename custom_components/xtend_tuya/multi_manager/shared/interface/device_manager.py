@@ -208,6 +208,10 @@ class XTDeviceManagerDeviceManagementInterface(ABC):
     def add_device_by_id(self, device_id: str):
         return None
 
+    def list_device_ids(self) -> list[str] | None:
+        """The account's current cloud device ids (blocking); None if it can't list."""
+        return None
+
 
 class XTDeviceManagerMQTTManagementInterface(ABC):
     def on_mqtt_stop(self):

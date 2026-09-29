@@ -342,6 +342,16 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
         ):
             self.iot_account.device_ids.append(device_id)
 
+    def list_device_ids(self) -> list[str] | None:
+        if self.iot_account is None:
+            return None
+        # Same listing as setup (1 call + 1 per 100 devices), ids only.
+        return [
+            item["id"]
+            for item in self.iot_account.device_manager._fetch_smart_home_device_list()
+            if "id" in item
+        ]
+
     def on_mqtt_stop(self):
         if self.iot_account is None:
             return None

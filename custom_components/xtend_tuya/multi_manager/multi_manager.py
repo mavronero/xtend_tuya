@@ -1,6 +1,7 @@
 from __future__ import annotations
 import copy
 import re
+import threading
 import time
 import importlib
 import os
@@ -123,6 +124,7 @@ class MultiManager(TuyaManager):
         self.device_watcher = DeviceWatcher(self)
         self.storage_manager = XTStorageManager(hass, config_entry, self)
         self.accounts: dict[str, XTDeviceManagerInterface] = {}
+        self._find_new_devices_lock = threading.Lock()
         # Per-hub OpenAPI controllable-device quota tracker (created in
         # setup_entry only for hubs that have a tuya_iot account).
         self.controllable_quota: ControllableQuotaTracker | None = None
@@ -696,6 +698,46 @@ class MultiManager(TuyaManager):
         self._prepare_device(device, time.time())
         self._align_multi_map_devices([device])
         self.multi_device_listener.add_device_by_id(device_id)
+
+    def find_new_devices(self) -> list[str]:
+        """Add cloud devices this hub doesn't serve yet, without bindUser.
+
+        Blocking (run in the executor). Lists each account's device ids and
+        hot-adds the ids missing from the master map; never touches or
+        removes a known device. Returns the ids that got added.
+        """
+        if not self._find_new_devices_lock.acquire(blocking=False):
+            return []  # a run is already in flight (button + timer)
+        try:
+            added: list[str] = []
+            for account in list(self.accounts.values()):
+                try:
+                    device_ids = account.list_device_ids() or []
+                except Exception as err:  # noqa: BLE001 - a failed listing adds nothing
+                    LOGGER.warning(
+                        "%s: %s device listing failed: %s",
+                        self.config_entry.title,
+                        account.get_type_name(),
+                        err,
+                    )
+                    continue
+                for device_id in device_ids:
+                    if device_id in self.device_map:
+                        continue
+                    # ponytail: a device another hub owns returns early in
+                    # add_device_by_id without a fetch; one only the registry
+                    # tie-break drops is re-fetched each run (none seen).
+                    self.add_device_by_id(device_id)
+                    if device_id in self.device_map:
+                        added.append(device_id)
+            LOGGER.info(
+                "%s: find new devices: %s",
+                self.config_entry.title,
+                f"added {', '.join(added)}" if added else "none",
+            )
+            return added
+        finally:
+            self._find_new_devices_lock.release()
 
     def _get_device_id_from_message(self, msg: dict) -> str | None:
         protocol = msg.get("protocol", 0)
