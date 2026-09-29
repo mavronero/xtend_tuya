@@ -121,7 +121,7 @@ assert.deepEqual(c.badges, []); // offline is its own section, not a badge
 
 // A T3-like valve: no flow meter -> week in minutes, no no_flow badge.
 const d = summarize(valve("d", "965", { volume_sensor: undefined }), states, data, now);
-assert.equal(d.number, null);
+assert.equal(d.number, "965"); // bare name = valve number
 assert.equal(d.week.unit, "min");
 assert.equal(d.location, null);
 
