@@ -329,6 +329,31 @@ class XTTuyaSharingDeviceManagerInterface(XTDeviceManagerInterface):
         if self.sharing_account is None:
             return None
         self.sharing_account.device_manager.add_device_by_id(device_id)
+        # device_ids gates the discovery/update signals; setup is the only
+        # other place that fills it.
+        if (
+            device_id in self.sharing_account.device_manager.device_map
+            and device_id not in self.sharing_account.device_ids
+        ):
+            self.sharing_account.device_ids.append(device_id)
+
+    def list_device_ids(self) -> list[str] | None:
+        if self.sharing_account is None:
+            return None
+        manager = self.sharing_account.device_manager
+        if manager.home_repository is None or manager.device_repository is None:
+            return None
+        # Same listing as setup (1 call + 1 per home), ids only. Straight to
+        # the API: the repository's query_devices_by_home drops a home from
+        # user_homes on an error, and this must not change live state.
+        device_ids: list[str] = []
+        for home in manager.home_repository.query_homes():
+            response = manager.device_repository.api.get(
+                "/v1.0/m/life/ha/home/devices", {"homeId": home.id}
+            )
+            if response.get("success"):
+                device_ids.extend(item["id"] for item in response["result"] if "id" in item)
+        return device_ids
 
     def on_mqtt_stop(self):
         if (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 from typing import cast, Any, Self
 from dataclasses import dataclass
+from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -614,6 +615,24 @@ async def async_setup_entry(
     entry.async_on_unload(
         async_dispatcher_connect(hass, TUYA_DISCOVERY_NEW, async_discover_device)
     )
+    async_add_entities([XTFindNewDevicesButton(entry)])
+
+
+class XTFindNewDevicesButton(ButtonEntity):
+    """Per hub: add devices paired in Tuya since the last load (qYyTmusI)."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:magnify-plus-outline"
+
+    def __init__(self, entry: XTConfigEntry) -> None:
+        self._entry_id = entry.entry_id
+        self._attr_name = f"{entry.title} Find new devices"
+        self._attr_unique_id = f"{entry.entry_id}_find_new_devices"
+
+    async def async_press(self) -> None:
+        from . import async_find_new_devices
+
+        await async_find_new_devices(self.hass, self._entry_id)
 
 
 class XTButtonEntity(XTEntity, TuyaButtonEntity):

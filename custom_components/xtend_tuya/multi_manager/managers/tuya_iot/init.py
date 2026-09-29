@@ -334,6 +334,23 @@ class XTTuyaIOTDeviceManagerInterface(XTDeviceManagerInterface):
         if self.iot_account is None:
             return None
         self.iot_account.device_manager.add_device_by_id(device_id)
+        # device_ids gates the discovery/update signals; setup is the only
+        # other place that fills it.
+        if (
+            device_id in self.iot_account.device_manager.device_map
+            and device_id not in self.iot_account.device_ids
+        ):
+            self.iot_account.device_ids.append(device_id)
+
+    def list_device_ids(self) -> list[str] | None:
+        if self.iot_account is None:
+            return None
+        # Same listing as setup (1 call + 1 per 100 devices), ids only.
+        return [
+            item["id"]
+            for item in self.iot_account.device_manager._fetch_smart_home_device_list()
+            if "id" in item
+        ]
 
     def on_mqtt_stop(self):
         if self.iot_account is None:

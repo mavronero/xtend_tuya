@@ -21,6 +21,7 @@ from ....util import (
     get_all_multi_managers,
 )
 from homeassistant.const import (
+    ATTR_CONFIG_ENTRY_ID,
     CONF_DEVICE_ID,
 )
 from homeassistant.core import SupportsResponse
@@ -84,6 +85,11 @@ SERVICE_WEBRTC_DEBUG_SCHEMA = vol.Schema(
 SERVICE_FDM5KW_CLEAR_QUOTA_LOCKOUT = "fdm5kw_clear_quota_lockout"
 SERVICE_FDM5KW_CLEAR_QUOTA_LOCKOUT_SCHEMA = vol.Schema({})
 
+SERVICE_FIND_NEW_DEVICES = "find_new_devices"
+SERVICE_FIND_NEW_DEVICES_SCHEMA = vol.Schema(
+    {vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string}
+)
+
 
 class ServiceManager:
     def __init__(self, multi_manager: mm.MultiManager) -> None:
@@ -144,6 +150,16 @@ class ServiceManager:
             True,
             True,
             False,
+        )
+        self._register_service(
+            DOMAIN,
+            SERVICE_FIND_NEW_DEVICES,
+            self._handle_find_new_devices,
+            SERVICE_FIND_NEW_DEVICES_SCHEMA,
+            True,
+            True,
+            False,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         self.register_plugin_services()
 
@@ -358,3 +374,12 @@ class ServiceManager:
         LOGGER.warning("fdm5kw cloud-timer lockout cleared on all hubs")
         return {"success": True}
 
+
+    async def _handle_find_new_devices(self, event: XTEventData) -> dict[str, Any]:
+        from .... import async_find_new_devices
+
+        return {
+            "added": await async_find_new_devices(
+                self.hass, event.data.get(ATTR_CONFIG_ENTRY_ID)
+            )
+        }
