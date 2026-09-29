@@ -1,10 +1,12 @@
-/** <xt-run-history .runs=${Run[]} ?metered>: completed runs as a table,
- * newest first, like SmartLife's history (Trello Sijuj2Dd): date, start,
- * end, duration, liters. Shows a page and a "Show more" button. */
+/** <xt-run-history .runs=${Run[]} ?metered .valveOf=${fn}>: completed runs as
+ * a table, newest first, like SmartLife's history (Trello Sijuj2Dd): date,
+ * start, end, duration, liters, L/min; `valveOf` adds a Valve column (a
+ * metering point's log spans valve swaps). Shows a page and "Show more". */
 
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { Run } from "../farm/data.ts";
+import { runLpm } from "../farm/run-log.ts";
 import { dayLabel, time } from "./format.ts";
 import { farmTokens } from "./theme.ts";
 
@@ -19,6 +21,8 @@ export class XtRunHistory extends LitElement {
   @property({ attribute: false }) runs: Run[] = [];
   /** The valve has a flow meter: show liters (else "–"). */
   @property({ type: Boolean }) metered = true;
+  /** Label of the valve that made a run ("#712"); set = show a Valve column. */
+  @property({ attribute: false }) valveOf?: (device_id: string) => string;
   @state() private _shown = PAGE;
 
   render() {
@@ -28,25 +32,31 @@ export class XtRunHistory extends LitElement {
       <table>
         <thead>
           <tr>
+            ${this.valveOf ? html`<th>Valve</th>` : nothing}
             <th>Date</th>
             <th>Start</th>
             <th>End</th>
             <th class="num">Duration</th>
             <th class="num">Liters</th>
+            <th class="num" title="Mean flow: liters per minute of the run">L/min</th>
           </tr>
         </thead>
         <tbody>
           ${rows.slice(0, this._shown).map((r) => {
             const start = Date.parse(r.start);
             const liters = typeof r.liters === "number" ? `${Math.round(r.liters)} L` : "–";
-            return html`<tr class=${this.metered && r.liters === 0 ? "dry" : ""}>
+            const dry = this.metered && r.liters === 0;
+            const lpm = this.metered ? runLpm(r) : null;
+            return html`<tr>
+              ${this.valveOf ? html`<td class="valve">${this.valveOf(r.device_id)}</td>` : nothing}
               <td>${dayLabel(start)}</td>
               <td>${time(start)}</td>
               <td>${time(Date.parse(r.end))}</td>
               <td class="num">${duration(r.duration_seconds ?? 0)}</td>
-              <td class="num" title=${this.metered && r.liters === 0 ? "No water measured" : ""}>
+              <td class="num ${dry ? "dry" : ""}" title=${dry ? "No water measured" : ""}>
                 ${this.metered ? liters : "–"}
               </td>
+              <td class="num">${lpm !== null ? lpm.toFixed(1) : ""}</td>
             </tr>`;
           })}
         </tbody>
@@ -85,7 +95,10 @@ export class XtRunHistory extends LitElement {
       .num {
         text-align: right;
       }
-      tr.dry td:last-child {
+      td.valve {
+        color: var(--primary-color);
+      }
+      td.dry {
         color: var(--xt-bad);
       }
       .empty {

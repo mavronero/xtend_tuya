@@ -286,8 +286,7 @@ function valveDetailView(hours: number): DashboardView {
 function buildValveView(v: ValveEntities, hours: number): DashboardView {
   // 3 fixed columns organised by domain (Simon 2026-06-04):
   //   LEFT   = Watering control & timers (switch + timer)
-  //   MIDDLE = Watering history — Last Watering pinned to the TOP, then the
-  //            flow-rate history graph below it
+  //   MIDDLE = Watering log (runs of the valve's metering point)
   //   RIGHT  = Battery monitoring (tile + history) + Other settings
   //            (sleep / rain-snow delay) at the bottom
   // Lifetime/Hourly water cards dropped — duplicate the Watering History
@@ -299,9 +298,7 @@ function buildValveView(v: ValveEntities, hours: number): DashboardView {
   const control = buildControlCard(v);
   if (control) leftCards.push(control);
   leftCards.push(buildTimerCard(v));
-  // Where the valve is installed + assign/move, under the timers (Trello
-  // Sijuj2Dd).
-  leftCards.push({ type: "custom:irrigation-locations-card", device_id: v.device_id });
+  // Where the valve is installed + move: the header card (Trello 20e9z7Ga).
 
   // The header card (irrigation-valve-header-card) shows the last run and
   // the battery, so the Last Watering card and the battery tile are gone.
@@ -311,8 +308,8 @@ function buildValveView(v: ValveEntities, hours: number): DashboardView {
     device_id: v.device_id,
     metered: !!v.volume_sensor,
   });
-  const watering = buildWateringHistoryCard(v, hours);
-  if (watering) middleCards.push(watering);
+  // The Watering History graph (valve on/off + flow rate) is gone: the flow
+  // line was all spikes (Trello 8BibGJI0); the log has an L/min column.
 
   if (v.battery_level) rightCards.push(buildBatteryHistoryCard(v, hours));
   // Other settings (sleep / rain-snow delay) stays in the right column,
@@ -367,34 +364,6 @@ function buildTimerCard(v: ValveEntities): unknown {
     type: "custom:irrigation-timer-card",
     entity: v.registry_entity,
     device_id: v.device_id,
-    layout_options: { grid_columns: 4, grid_rows: "auto" },
-  };
-}
-
-function buildWateringHistoryCard(v: ValveEntities, hours: number): unknown | null {
-  // Per-Simon spec (2026-05-12): graph should show flow rate while the
-  // valve is open so the area under the curve equals total liters.
-  // FDM5KW has no flow meter; the integration derives l/min from
-  // cur_cap and elapsed-since-start, publishing fresh state every 10 s
-  // while a run is active.
-  //
-  // grid_columns=12: span the full row. The 10 s sample spacing is
-  // narrow, and at 1/3-width on a 24h window the on-pulse rectangle
-  // collapses to a single hairline; full-width gives Simon's team a
-  // legible flow curve.
-  // The "Watered (cycle)" volume_sensor line (2026-06-03) was dropped
-  // 2026-09 (Trello 8BibGJI0): Simon found it confusing; the watering log
-  // below lists liters per run.
-  const entities: unknown[] = [];
-  if (v.switch) entities.push({ entity: v.switch, name: "Valve" });
-  if (v.flow_rate_sensor)
-    entities.push({ entity: v.flow_rate_sensor, name: "Flow rate" });
-  if (entities.length === 0) return null;
-  return {
-    type: "history-graph",
-    title: "Watering History",
-    hours_to_show: hours,
-    entities,
     layout_options: { grid_columns: 4, grid_rows: "auto" },
   };
 }
