@@ -9,6 +9,7 @@ import { farmTokens } from "./theme.ts";
 
 const STATUSES: [StatusFilter, string][] = [
   ["all", "All"],
+  ["online", "Online"],
   ["watering", "Watering"],
   ["attention", "Attention"],
   ["offline", "Offline"],

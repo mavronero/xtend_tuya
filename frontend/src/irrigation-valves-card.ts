@@ -3,7 +3,7 @@
  *   type: custom:irrigation-valves-card
  *   filter: true              # show the filter bar (default true)
  *   site: <site id>           # fixed site (subtree), e.g. on a site's view
- *   sections: [watering, attention, sites, offline, unassigned]
+ *   sections: [watering, attention, sites, offline]  # opt-in: unassigned
  *   collapsed: [offline]      # sections that start collapsed
  *
  * Composes the pure farm modules (discovery, data, summary, filter) with the
@@ -86,7 +86,7 @@ export class IrrigationValvesCard extends LitElement {
     const base: ValveFilter = { ...this._filter, site: fixedSite ?? this._filter.site };
     const scoped = applyFilter(all, { ...base, status: "all" }, data.sites);
     const counts: Partial<Record<StatusFilter, number>> = {};
-    for (const s of ["all", "watering", "attention", "offline"] as StatusFilter[]) {
+    for (const s of ["all", "online", "watering", "attention", "offline"] as StatusFilter[]) {
       counts[s] = s === "all" ? scoped.length : applyFilter(scoped, { ...NO_FILTER, status: s }, data.sites).length;
     }
     const shown = applyFilter(scoped, { ...NO_FILTER, status: base.status }, data.sites);

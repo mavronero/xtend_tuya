@@ -122,6 +122,9 @@ const names = (list) => list.map((v) => v.number ?? v.name);
 assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, site: "farm" }, sites)), ["907"]);
 assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, status: "attention" }, sites)), ["703"]);
 assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, status: "offline" }, sites)), ["801"]);
+// Online = not offline, whatever the location or badges (d has no location).
+assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, status: "online" }, sites)), ["907", "703", d.name]);
+assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, status: "online", site: "farm" }, sites)), ["907"]);
 assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, search: "olive" }, sites)), ["703"]);
 
 const sections = sectionize(all, sites);

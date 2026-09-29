@@ -107,12 +107,20 @@ function errText(e: unknown): string {
 
 const FILTER_KEY = "xt-irrigation-calendar-filter";
 
+function siteFromUrl(): string | null {
+  return new URLSearchParams(window.location.search).get("site");
+}
+
+/** Saved filter; a ?site= in the URL wins over the saved site. */
 function loadFilter(): ValveFilter {
+  let f: ValveFilter = NO_FILTER;
   try {
-    return { ...NO_FILTER, ...JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}"), status: "all" };
+    f = { ...NO_FILTER, ...JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}"), status: "all" };
   } catch {
-    return NO_FILTER;
+    /* private mode */
   }
+  const site = siteFromUrl();
+  return site ? { ...f, site } : f;
 }
 
 /** Default hour height: 8 hours fill the visible grid (Trello Sijuj2Dd). */
@@ -150,6 +158,10 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _filter: ValveFilter = loadFilter();
   @state() private _farm: FarmData = EMPTY_FARM_DATA;
   private _farmLoaded = false;
+  /** Farm data and the first events are in: until then rows would group
+   * every valve under "No metering point" and regroup later. */
+  @state() private _farmReady = false;
+  @state() private _eventsReady = false;
   /** Valves found at runtime when the config carries none (then a new or
    * renamed valve shows without re-syncing the dashboard). */
   private _found: Valve[] | null = null;
@@ -180,6 +192,8 @@ export class IrrigationCalendarCard extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
+    window.addEventListener("location-changed", this._onLocation);
+    window.addEventListener("popstate", this._onLocation);
     // ponytail: plain 5-min poll; runs land in the store on valve close,
     // the calendar is not a live monitor.
     this._timer = window.setInterval(() => this._load(true), 5 * 60_000);
@@ -187,6 +201,8 @@ export class IrrigationCalendarCard extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    window.removeEventListener("location-changed", this._onLocation);
+    window.removeEventListener("popstate", this._onLocation);
     if (this._timer) window.clearInterval(this._timer);
     window.clearTimeout(this._debounce);
     this._unsub?.then((unsub) => unsub(), () => undefined);
@@ -208,8 +224,11 @@ export class IrrigationCalendarCard extends LitElement {
     if (!this._farmLoaded && this.hass?.callApi) {
       this._farmLoaded = true;
       loadFarmData(this.hass as Parameters<typeof loadFarmData>[0]).then(
-        (d) => (this._farm = d),
-        () => undefined
+        (d) => {
+          this._farm = d;
+          this._farmReady = true;
+        },
+        () => (this._farmReady = true)
       );
     }
     const key = `${this._mode}|${this._range}|${this._anchor.getTime()}`;
@@ -305,6 +324,7 @@ export class IrrigationCalendarCard extends LitElement {
       this._error = errText(e);
     } finally {
       this._loading = false;
+      this._eventsReady = true;
       if (!silent) this.updateComplete.then(() => this._scrollToFirst());
     }
   }
@@ -416,7 +436,20 @@ export class IrrigationCalendarCard extends LitElement {
     return this._events.filter((e) => keys.has(e.key));
   }
 
+  /** Back/forward or a link changed ?site=: follow it (no param = keep). */
+  private _onLocation = (): void => {
+    const site = siteFromUrl();
+    if (site && site !== this._filter.site) this._filter = { ...this._filter, site };
+  };
+
   private _onFilter(e: CustomEvent<ValveFilter>): void {
+    if (e.detail.site !== this._filter.site) {
+      // replaceState: a filter change is not a navigation step
+      const url = new URL(window.location.href);
+      if (e.detail.site) url.searchParams.set("site", e.detail.site);
+      else url.searchParams.delete("site");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    }
     this._filter = e.detail;
     try {
       localStorage.setItem(FILTER_KEY, JSON.stringify(e.detail));
@@ -445,6 +478,13 @@ export class IrrigationCalendarCard extends LitElement {
         ? html`<span class="lg" title="Periods the valve was not reachable (grey hatching)"><i class="sw offline"></i>offline</span>`
         : nothing}
     </div>`;
+  }
+
+  /** Timeline rows and the site/search filter need the farm data; every
+   * mode needs the first events. A failed load counts as in (error shows). */
+  private _ready(): boolean {
+    const needFarm = this._mode === "timeline" || !!this._filter.site || !!this._filter.search.trim();
+    return this._eventsReady && (this._farmReady || !needFarm);
   }
 
   render() {
@@ -493,7 +533,11 @@ export class IrrigationCalendarCard extends LitElement {
           </div>
         </div>
         ${this._error ? html`<div class="err">${this._error}</div>` : nothing}
-        ${rows ? this._renderTimeline(rows) : this._renderGrid(events)}
+        ${!this._ready()
+          ? html`<div class="empty">Loading…</div>`
+          : rows
+            ? this._renderTimeline(rows)
+            : this._renderGrid(events)}
       </ha-card>
     `;
   }

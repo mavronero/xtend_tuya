@@ -3,7 +3,7 @@
 import type { Site } from "./data.ts";
 import type { ValveSummary } from "./valve-summary.ts";
 
-export type StatusFilter = "all" | "watering" | "attention" | "offline";
+export type StatusFilter = "all" | "online" | "watering" | "attention" | "offline";
 
 export interface ValveFilter {
   /** Site id; its whole subtree matches. null = every site. */
@@ -78,6 +78,7 @@ export function applyFilter(valves: ValveSummary[], f: ValveFilter, sites: Site[
     (v) =>
       (!inSite || (v.site !== null && inSite.has(v.site.id))) &&
       (f.status === "all" ||
+        (f.status === "online" && v.status !== "offline") ||
         (f.status === "watering" && v.status === "watering") ||
         (f.status === "offline" && v.status === "offline") ||
         (f.status === "attention" && needsAttention(v))) &&
