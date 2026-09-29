@@ -40,6 +40,7 @@ const BUNDLES = {
   "irrigation-pumps-card": "irrigation-farm-cards.js",
   "xt-pump-list": "irrigation-farm-cards.js",
   "xt-pump-chart": "irrigation-farm-cards.js",
+  "xt-pump-flow-chart": "irrigation-farm-cards.js",
   "xt-device-picker": "irrigation-farm-cards.js",
   "irrigation-run-history-card": "irrigation-farm-cards.js",
   "xt-run-history": "irrigation-farm-cards.js",
@@ -61,37 +62,92 @@ const BUNDLES = {
 const allDefined = () =>
   Object.keys(BUNDLES).every((el) => customElements.get(el));
 
-// HA's workbox service worker serves the app-shell index network-first with
-// a timeout; over nabu.casa it often loses and a stale index is used. That
-// index carries the OLD bootstrap and the OLD bundle list, so a card added
-// in a release is never imported and never healed (irrigation-locations-card,
-// 4.4.257/258). Read the live index with a unique query (bypasses the SW
-// runtime cache) and import every card bundle it lists that this page has
-// not evaluated yet. Imports are idempotent; unknown new cards define
-// themselves against the live registry on that import.
-const DISCOVERED = new Set();
-async function discover() {
+// Stale-release self-heal. HA's workbox SW (frontend 20260826) serves `/`
+// with ignoreSearch and every `/.*` GET (our bundles included) stale-while-
+// revalidate from its runtime cache. After a HACS release + restart a browser
+// can keep the pre-release index (old ?v=) and old bundles; re-reading the
+// index through the SW just returns the same stale copy (the old discover()
+// never helped). So compare the ?v=<mtime> this page actually loaded with the
+// server file's Last-Modified (1-byte ranged GET on a unique URL) and, if the
+// server is newer, purge the SW runtime caches for our files + app-shell
+// pages and reload once. Runs on every load, independent of allDefined().
+const FARM = "irrigation-farm-cards.js";
+
+// ?v= of the farm bundle this page evaluated (max if several), else the
+// bootstrap's own ?v= (same release extract, mtimes within a second or so).
+export function loadedVersion(entries, selfUrl) {
+  let v = 0;
+  for (const e of entries || []) {
+    const m = /irrigation-farm-cards\.js\?v=(\d+)/.exec((e && e.name) || "");
+    if (m) v = Math.max(v, Number(m[1]));
+  }
+  if (v) return v;
+  const m = /[?&]v=(\d+)/.exec(selfUrl || "");
+  return m ? Number(m[1]) : 0;
+}
+
+// farm/frontend.py builds ?v= as int(st_mtime) (floor); aiohttp writes
+// Last-Modified from math.ceil(st_mtime). Same file -> server - loaded is 0
+// or 1, so only a gap of >= 2 s means a newer file on the server.
+export function shouldHeal(loaded, server) {
+  return loaded > 0 && server > 0 && server - loaded >= 2;
+}
+
+// SW runtime-cache entries to drop: our static files, and extension-less
+// paths (cached index / dashboard pages).
+export function isStaleEntry(url) {
   try {
-    const html = await (
-      await fetch(`/?xt=${Date.now()}`, { cache: "no-store", headers: { Accept: "text/html" } })
-    ).text();
-    for (const m of html.matchAll(/xtend_tuya_static\/cards\/([a-z0-9-]+\.js)\?v=(\d+)/g)) {
-      const [, file, v] = m;
-      if (file === "irrigation-bootstrap.js" || DISCOVERED.has(file)) continue;
-      DISCOVERED.add(file);
-      try {
-        await import(`${PREFIX}${file}?v=${v}&d=${Date.now()}`);
-      } catch (e) {
-        // next heal() re-imports anything still undefined
-      }
-    }
+    const path = new URL(url, "http://x").pathname;
+    return path.includes("/xtend_tuya_static/") || !/\.[a-z0-9]+$/i.test(path.split("/").pop());
   } catch (e) {
-    // offline / relay hiccup: BUNDLES-based heal below still runs
+    return false;
   }
 }
 
+async function probe() {
+  try {
+    const loaded = loadedVersion(performance.getEntriesByType("resource"), import.meta.url);
+    // 1-byte ranged GET: HEAD is 405 on prod (nabu.casa). The unique ?probe=
+    // URL is never served from / stored in the SW cache (verified on prod).
+    const res = await fetch(`${PREFIX}${FARM}?probe=${Date.now()}`, {
+      cache: "no-store",
+      headers: { Range: "bytes=0-0" },
+    });
+    const lm = res.ok && res.headers.get("Last-Modified"); // ok = 200 or 206
+    try {
+      res.body && res.body.cancel();
+    } catch (e) {
+      // body already consumed/locked: ignore
+    }
+    if (!lm) return;
+    const server = Math.floor(Date.parse(lm) / 1000);
+    if (!shouldHeal(loaded, server)) return;
+    // prod: "workbox-runtime-<origin>/" + "file-cache" purged,
+    // "workbox-precache-v2-<origin>/" kept
+    for (const name of await caches.keys()) {
+      if (/-precache-|brands|map-tiles/.test(name)) continue;
+      const cache = await caches.open(name);
+      for (const req of await cache.keys()) {
+        if (isStaleEntry(req.url)) await cache.delete(req);
+      }
+    }
+    const key = `xt-reloaded-${server}`;
+    try {
+      if (sessionStorage.getItem(key)) return; // already reloaded for this release
+      sessionStorage.setItem(key, "1");
+    } catch (e) {
+      return; // no storage -> can't guard against a reload loop; purge only
+    }
+    location.reload();
+  } catch (e) {
+    // offline / relay hiccup / no Cache API: no-op
+  }
+}
+
+// once per page load, after page start has settled
+setTimeout(probe, 5000);
+
 async function heal() {
-  if (!DISCOVERED.size) await discover();
   // unique set of bundle files that own at least one missing element
   const files = [
     ...new Set(
