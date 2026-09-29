@@ -9,7 +9,8 @@
 import { LitElement, html, css, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { HomeAssistantLike } from "./farm/discovery.ts";
-import { FarmController } from "./farm/controller.ts";
+import { FarmController, errText } from "./farm/controller.ts";
+import { announceFarmChange } from "./farm/data.ts";
 import { summarizeMp } from "./farm/mp-summary.ts";
 import type { RunInfo } from "./farm/valve-summary.ts";
 import { batteryIcon, since, time, volume, when } from "./components/format.ts";
@@ -60,11 +61,68 @@ function runText(r: RunInfo): string {
 }
 
 export class IrrigationValveHeaderCard extends LitElement {
-  @property({ attribute: false }) hass?: HomeAssistantLike;
+  @property({ attribute: false }) hass?: HomeAssistantLike & {
+    user?: { is_admin?: boolean };
+    callApi?: <T>(method: string, path: string, body?: unknown) => Promise<T>;
+  };
   @state() private _config?: CardConfig;
   /** Badge whose explanation is open (tap toggles). */
   @state() private _help: string | null = null;
+  /** The "Move to…" select is open (admin, pencil toggles). */
+  @state() private _moving = false;
+  @state() private _busy = false;
+  @state() private _moveError: string | null = null;
   private _farm = new FarmController(this);
+
+  /** Same action as the Location card's "Move to…" / "Assign to…". */
+  private async _move(deviceId: string, locationId: string): Promise<void> {
+    if (!this.hass?.callApi) return;
+    this._busy = true;
+    this._moveError = null;
+    try {
+      await this.hass.callApi("POST", "xtend_tuya/irrigation_locations", {
+        action: "assign_device",
+        device_id: deviceId,
+        location_id: locationId,
+      });
+      this._moving = false;
+      announceFarmChange(); // this card's controller, the log and other pages reload
+    } catch (e) {
+      this._moveError = errText(e);
+    } finally {
+      this._busy = false;
+    }
+  }
+
+  private _moveControl(deviceId: string, currentId: string | null) {
+    if (!this.hass?.user?.is_admin) return nothing;
+    const label = currentId ? "Move to…" : "Assign to…";
+    return html`<button
+        class="pencil"
+        title=${currentId ? "Move to another metering point" : "Assign to a metering point"}
+        aria-expanded=${this._moving ? "true" : "false"}
+        @click=${() => ((this._moving = !this._moving), (this._moveError = null))}
+      >
+        <ha-icon icon="mdi:pencil-outline"></ha-icon>
+      </button>
+      ${this._moving
+        ? html`<select
+            ?disabled=${this._busy}
+            @change=${(e: Event) => {
+              const sel = e.target as HTMLSelectElement;
+              const v = sel.value;
+              sel.value = "";
+              if (v) void this._move(deviceId, v);
+            }}
+          >
+            <option value="">${label}</option>
+            ${this._farm.data.locations
+              .filter((l) => l.id !== currentId)
+              .map((l) => html`<option value=${l.id}>${l.name}</option>`)}
+          </select>`
+        : nothing}
+      ${this._moveError ? html`<span class="err">${this._moveError}</span>` : nothing}`;
+  }
 
   setConfig(config: CardConfig): void {
     if (!config.device_id) throw new Error("device_id is required");
@@ -116,9 +174,12 @@ export class IrrigationValveHeaderCard extends LitElement {
           ${status}
           <div class="where">
             ${mpRec
-              ? html`<span title="Metering point"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${mpRec.name}</span>
+              ? html`<span
+                    ><ha-icon icon="mdi:map-marker-outline"></ha-icon><span title="Metering point">${mpRec.name}</span
+                    >${this._moveControl(v.device_id, mpRec.id)}</span
+                  >
                   ${v.site ? html`<span title="Site"><ha-icon icon="mdi:sprout-outline"></ha-icon>${v.site.name}</span>` : nothing}`
-              : html`<span class="dim">No metering point</span>`}
+              : html`<span><span class="dim">No metering point</span>${this._moveControl(v.device_id, null)}</span>`}
             ${mp?.pump
               ? html`<span title="Pump${mp.pump.via ? `, inherited from ${mp.pump.via}` : ""}"
                   ><ha-icon icon="mdi:pump"></ha-icon>${mp.pump.name}${mp.pump.via ? html`<span class="dim"> · via ${mp.pump.via}</span>` : nothing}</span
@@ -260,6 +321,27 @@ export class IrrigationValveHeaderCard extends LitElement {
       }
       .dim {
         color: var(--xt-dim);
+      }
+      .pencil {
+        all: unset;
+        cursor: pointer;
+        display: inline-flex;
+        margin-left: 2px;
+        border-radius: 50%;
+      }
+      .pencil ha-icon {
+        --mdc-icon-size: 16px;
+      }
+      .pencil:focus-visible {
+        outline: 1px solid currentColor;
+      }
+      .where select {
+        font: inherit;
+        margin-left: 4px;
+      }
+      .err {
+        color: var(--xt-bad);
+        font-size: 0.85rem;
       }
       .badges {
         display: flex;
