@@ -23,7 +23,8 @@ interface CardConfig {
   title?: string;
 }
 
-const NUMBER_RE = /\((\d+)\)\s*$/;
+// "(711)" or a bare trailing "711" (FG Carob bed 711, 717)
+const NUMBER_RE = /\(?(\d{3,4})\)?\s*$/;
 
 export class IrrigationRunHistoryCard extends LitElement {
   @property({ attribute: false }) hass?: HomeAssistantLike & {

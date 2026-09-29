@@ -45,7 +45,8 @@ export const STALE_AFTER_MS = 36 * 3_600_000;
 export const MISSED_WINDOW_MS = 24 * 3_600_000;
 const DAY_MS = 86_400_000;
 
-const NUMBER_RE = /\((\d+)\)\s*$/;
+// "(711)" or a bare trailing "711" (FG Carob bed 711, 717)
+const NUMBER_RE = /\(?(\d{3,4})\)?\s*$/;
 
 function num(state: HassState | undefined): number | null {
   if (!state) return null;

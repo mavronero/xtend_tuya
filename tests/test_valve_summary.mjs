@@ -96,6 +96,10 @@ assert.deepEqual(a.badges, []);
 assert.deepEqual(a.site, { id: "east", name: "FF East" });
 
 const b = summarize(valve("b", "HM Olive (703)"), states, data, now);
+// valve numbers with or without brackets; short numbers are not valve numbers
+assert.equal(summarize(valve("c", "FG Carob bed 711"), states, data, now).number, "711");
+assert.equal(summarize(valve("d", "717"), states, data, now).number, "717");
+assert.equal(summarize(valve("e", "FF East 12"), states, data, now).number, null);
 assert.equal(b.status, "idle");
 assert.equal(b.flow_lpm, null);
 assert.equal(b.missed, 1);
