@@ -290,9 +290,19 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
         if not isinstance(wrapper, DPCodeTimeTaskRegistryWrapper):
             return
 
-        # Prime the once-per-payload guard with the device's current DP before
-        # restoring; otherwise the next state read would re-apply the last DP
-        # push (often a delete) over the restored slots.
+        # Restore first, then apply the device's current DP on top: the DP is
+        # the valve's last write (a set or a delete) and so newer than any
+        # restored slot. Applying it also primes the once-per-payload guard, so
+        # later state reads don't re-apply it. Restoring after priming let the
+        # restored slot win over the live DP (815/904: a moved timer's old
+        # days came back on every restart).
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            slots_data = last_state.attributes.get("slots")
+            if isinstance(slots_data, dict):
+                wrapper.timer_state.restore(slots_data)
+                _LOGGER.debug("Restored timer registry for %s: %s", self.entity_id, slots_data)
+
         try:
             wrapper.read_device_status(self.device)
         except Exception:
@@ -301,13 +311,6 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
                 self.entity_id,
                 exc_info=True,
             )
-
-        last_state = await self.async_get_last_state()
-        if last_state is not None:
-            slots_data = last_state.attributes.get("slots")
-            if isinstance(slots_data, dict):
-                wrapper.timer_state.restore(slots_data)
-                _LOGGER.debug("Restored timer registry for %s: %s", self.entity_id, slots_data)
 
         self.async_on_remove(
             timer_state.register(
