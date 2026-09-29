@@ -38,6 +38,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-29 | 4.4.287 | 4.4.286 | ok (SMOKE OK; valve log per metering point + header move, Timeline ?site=, Online chip, pump Flow chart via new /api/xtend_tuya/pump_flow: 24h 0.8 s, 7d 4.8 s, 30d 0.6 s cold on the Green, 60 s cache. Browser needed SW unregister to pick up the new bundle. Rollback: HACS 4.4.286 + restart, no store changes) |
 | 2026-09-29 | 4.4.288 | 4.4.287 | ok (SMOKE OK; hot-added devices prepared like setup + Find new devices button/service/6 h check; prod service run: both hubs "find new devices: none", no errors. Rollback: HACS 4.4.287 + restart) |
 | 2026-09-29 | 4.4.289 | 4.4.288 | ok (SMOKE OK; bootstrap heals a stale SW cache: 1-byte ranged GET vs loaded ?v=, purge + one reload per version; HEAD is 405 behind nabu.casa. Verified on dev with a simulated release. Rollback: HACS 4.4.288 + restart) |
+| 2026-09-29 | 4.4.290 | 4.4.289 | ok (SMOKE OK; timer registry: live DP wins over restored slot (815 now Tue/Thu/Sat, was daily), schedule_changed_at attribute (3 of 162 stamped at boot), missed marks ignore plans before it; shared valve_locations request. Rollback: HACS 4.4.289 + restart; the attribute is harmless on 289) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
