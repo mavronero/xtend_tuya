@@ -40,8 +40,11 @@ export interface ValveSummary {
 }
 
 export const LOW_BATTERY_PCT = 20;
-// Same figure as the valve matrix's stale marker (audit C23).
-export const STALE_AFTER_MS = 36 * 3_600_000;
+// "stale" = silent: no watering-relevant report (registry `last_valve_report`)
+// for this long although a planned run was due since. The `last_report`
+// sensor it used before is re-stamped by every HA restart (C23 seed), so
+// valves silent for weeks (706, 707, 712) never showed it.
+export const STALE_AFTER_MS = 24 * 3_600_000;
 export const MISSED_WINDOW_MS = 24 * 3_600_000;
 const DAY_MS = 86_400_000;
 
@@ -121,13 +124,17 @@ export function summarize(
   const has_flow_meter = !!v.volume_sensor;
 
   const battery = offline ? null : num(v.battery_level ? states[v.battery_level] : undefined);
-  const lastReport = v.last_report ? Date.parse(states[v.last_report]?.state ?? "") : NaN;
+  const lastReport = Date.parse(String(reg?.attributes?.last_valve_report ?? ""));
+  const silent =
+    Number.isFinite(lastReport) &&
+    now - lastReport > STALE_AFTER_MS &&
+    plans.some((p) => p.start > lastReport && p.start < now);
   const last = lastRun ? info(lastRun.r, lastRun.start) : null;
 
   const badges: Badge[] = [];
   if (!offline) {
     if (battery !== null && battery < LOW_BATTERY_PCT) badges.push("low_battery");
-    if (Number.isFinite(lastReport) && now - lastReport > STALE_AFTER_MS) badges.push("stale");
+    if (silent) badges.push("stale");
     if (missed > 0) badges.push("missed");
     if (has_flow_meter && last && last.liters === 0 && last.minutes >= 1) badges.push("no_flow");
   }

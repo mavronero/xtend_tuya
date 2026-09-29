@@ -185,3 +185,98 @@ def test_unregister_only_removes_its_own_entry():
     ts.register(hass, DEVICE, second)  # entity re-added before the old one was removed
     undo_first()
     assert ts.live_timers(hass, DEVICE) is second
+
+
+# --- cloud overlay (apply_cloud) ---------------------------------------------------
+
+def cloud(time, loops="1111111", alias="", start=None, duration=0):
+    """One cloud /timers entry; start=None = T3 app timer (functions [], status 0)."""
+    funcs = [] if start is None else [{"code": "time_task", "value": {"start": start, "duration": duration}}]
+    return {"alias_name": alias, "time": time, "loops": loops, "status": 0, "functions": funcs}
+
+
+def state_with(*timers):
+    state = ts.TimerState()
+    state.restore({str(t.slot): t.as_attribute() for t in timers})
+    return state
+
+
+def test_overlay_matches_alias_then_time_and_keeps_cloud_only():
+    state = state_with(timer(0, 6, 0), timer(1, 18, 0), timer(2, 20, 0))
+    assert state.apply_cloud(
+        [cloud("06:00", alias="0", start=True), cloud("18:00"), cloud("13:00", duration=300, start=True)],
+        mirror_on=True,
+    )
+    assert state.cloud["slots"] == {"0": "on", "1": "on", "2": "missing"}
+    assert [(t["hour"], t["value"]) for t in state.cloud["cloud_only"]] == [(13, 300)]
+    # an alias beats the time: slot 1's cloud twin is the "1" entry even at another time
+    state = state_with(timer(1, 18, 0))
+    state.apply_cloud([cloud("19:00", alias="1", start=True)], mirror_on=True)
+    assert state.cloud["slots"] == {"1": "on"} and state.cloud["cloud_only"] == []
+
+
+def test_old_valve_start_flag_and_t3_status_zero():
+    state = state_with(timer(0, 6, 0), timer(1, 7, 0))
+    state.apply_cloud([cloud("06:00", alias="0", start=False), cloud("07:00")], mirror_on=True)
+    assert state.cloud["slots"] == {"0": "off", "1": "on"}  # T3: status 0, no functions -> on
+
+
+def test_missing_only_with_the_mirror_on():
+    state = state_with(timer(0, 6, 0), timer(1, 7, 0, enabled=False))
+    state.apply_cloud([cloud("12:00")], mirror_on=False)
+    assert state.cloud["slots"] == {"0": "unknown", "1": "unknown"}
+    state.apply_cloud([cloud("12:00")], mirror_on=True)
+    assert state.cloud["slots"] == {"0": "missing", "1": "unknown"}  # disabled: never judged
+
+
+def test_untrusted_reads_keep_the_previous_overlay():
+    state = state_with(timer(0, 6, 0))
+    assert state.apply_cloud([cloud("06:00")], mirror_on=True)
+    before = state.cloud
+    assert not state.apply_cloud([], mirror_on=True)  # empty while HA holds an enabled slot
+    assert not state.apply_cloud([cloud("06:00", alias="1"), cloud("22:00", alias="1")], mirror_on=True)  # 969
+    assert not state.apply_cloud([cloud("06:00"), cloud("06:00")], mirror_on=True)
+    assert state.cloud is before
+    assert ts.TimerState().apply_cloud([], mirror_on=True)  # no timers anywhere: fine
+
+
+def test_dp_report_resets_the_slot_overlay():
+    state = state_with(timer(0, 6, 0), timer(1, 7, 0))
+    state.apply_cloud([cloud("07:00")], mirror_on=True)
+    assert state.cloud["slots"] == {"0": "missing", "1": "on"}
+    report(state, tt.encode_qt08w(timer(0, 6, 0)))  # boot priming read of the unchanged slot: no news
+    assert state.cloud["slots"] == {"0": "missing", "1": "on"}
+    report(state, tt.encode_qt08w(timer(0, 6, 5)))  # the device changed slot 0
+    assert state.cloud["slots"] == {"1": "on"}
+    report(state, tt.encode_qt08w(timer(1, 7, 0)))  # live re-report later: the app saved it again
+    assert state.cloud["slots"] == {}
+
+
+def test_restore_round_trip_with_overlay():
+    state = state_with(timer(0, 6, 0))
+    state.apply_cloud([cloud("13:00")], mirror_on=True)
+    again = ts.TimerState()
+    again.restore(state.attribute(), state.changed_at, state.cloud)
+    assert again.cloud == state.cloud and again.slot(0) == state.slot(0)
+    again.restore(state.attribute(), None, {"junk": 1})
+    assert again.cloud is None
+
+
+def test_changed_at_only_when_the_planned_runs_change():
+    state = state_with(timer(0, 6, 0))
+    state.apply_cloud([cloud("06:00")], mirror_on=True)  # the cloud agrees: same plan
+    assert state.changed_at is None
+    state.apply_cloud([cloud("06:00", alias="0", start=False)], mirror_on=True)  # switched off in the app
+    assert state.changed_at is not None
+    state.changed_at = None
+    state.apply_cloud([cloud("06:00", alias="0", start=False)], mirror_on=True)  # same again
+    assert state.changed_at is None
+    state.apply_cloud([cloud("06:00", alias="0", start=False), cloud("13:00")], mirror_on=True)  # new app timer
+    assert state.changed_at is not None
+
+
+async def test_resync_labels_the_slots_from_its_read(valve):
+    hass, state, _, published = valve(LIVE, {key(LIVE[1])})
+    await timer_service.resync_from_cloud(hass, {"device_id": DEVICE})
+    assert state.cloud["slots"] == {"1": "on"}  # slot 0 was cleared as an orphan, its label with it
+    assert published == [True]

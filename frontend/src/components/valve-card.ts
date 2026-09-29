@@ -12,14 +12,14 @@ import { farmTokens } from "./theme.ts";
 
 const BADGE_TEXT: Record<Badge, string> = {
   low_battery: "Low battery",
-  stale: "No report 36 h",
+  stale: "Silent",
   missed: "Missed",
   no_flow: "No water flow",
 };
 
 const BADGE_TITLE: Record<Badge, string> = {
   low_battery: "Battery below 20 %",
-  stale: "The valve has not reported for more than 36 hours",
+  stale: "No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.",
   missed: "A planned run in the last 24 hours did not happen",
   no_flow: "The last run measured no water",
 };

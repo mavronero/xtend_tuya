@@ -68,7 +68,7 @@ const states = {
   "sensor.a_battery": st(95),
   "sensor.a_flow": st(12.5),
   "sensor.a_last_report": st(iso(now - H)),
-  "sensor.b_irrigation_timer_registry": st("1"),
+  "sensor.b_irrigation_timer_registry": { ...st("1"), attributes: { last_valve_report: iso(now - 40 * H) } },
   "switch.b_valve": st("off"),
   "sensor.b_battery": st(15),
   "sensor.b_last_report": st(iso(now - 40 * H)),
@@ -111,6 +111,21 @@ assert.deepEqual(b.badges, ["low_battery", "stale", "missed", "no_flow"]);
   const b2 = summarize(valve("b", "HM Olive (703)"), moved, data, now);
   assert.equal(b2.missed, 0);
   assert.ok(!b2.badges.includes("missed"));
+}
+// Silent ("stale"): judged on last_valve_report, never on the last_report
+// sensor, which every HA restart re-stamps (712/706/707 looked fresh).
+{
+  const reg = (t) => ({ ...st("1"), attributes: { last_valve_report: iso(t) } });
+  const at = (t, extra = {}) => ({ ...states, "sensor.b_irrigation_timer_registry": reg(t), ...extra });
+  const badges = (s, id = "b") => summarize(valve(id, "HM Olive (703)"), s, data, now).badges;
+  // restart-fresh last_report sensor, valve silent 40 h with a run due: silent
+  assert.ok(badges(at(now - 40 * H, { "sensor.b_last_report": st(iso(now - 60_000)) })).includes("stale"));
+  // silent 20 h: not yet
+  assert.ok(!badges(at(now - 20 * H)).includes("stale"));
+  // silent 40 h but nothing was due since (d has no plans): nothing to worry about
+  assert.ok(!badges({ ...states, "sensor.d_irrigation_timer_registry": reg(now - 40 * H) }, "d").includes("stale"));
+  // never stamped (no attribute): no badge
+  assert.ok(!badges({ ...states, "sensor.b_irrigation_timer_registry": st("1") }).includes("stale"));
 }
 
 const c = summarize(valve("c", "Old bed (801)"), states, data, now);
