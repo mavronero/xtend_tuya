@@ -39,6 +39,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-29 | 4.4.288 | 4.4.287 | ok (SMOKE OK; hot-added devices prepared like setup + Find new devices button/service/6 h check; prod service run: both hubs "find new devices: none", no errors. Rollback: HACS 4.4.287 + restart) |
 | 2026-09-29 | 4.4.289 | 4.4.288 | ok (SMOKE OK; bootstrap heals a stale SW cache: 1-byte ranged GET vs loaded ?v=, purge + one reload per version; HEAD is 405 behind nabu.casa. Verified on dev with a simulated release. Rollback: HACS 4.4.288 + restart) |
 | 2026-09-29 | 4.4.290 | 4.4.289 | ok (SMOKE OK; timer registry: live DP wins over restored slot (815 now Tue/Thu/Sat, was daily), schedule_changed_at attribute (3 of 162 stamped at boot), missed marks ignore plans before it; shared valve_locations request. Rollback: HACS 4.4.289 + restart; the attribute is harmless on 289) |
+| 2026-09-29 | 4.4.291 | 4.4.290 | ok (SMOKE OK; searchable pickers, bare valve numbers, daily cloud /timers overlay (first sweep 15 min after load), Silent badge from last_valve_report (35 seeded; 706 485 h, 707 457 h, 712 68 h). No errors in core log. Rollback: HACS 4.4.290 + restart; new attributes are ignored by 290) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
