@@ -22,6 +22,17 @@ export interface HassDeviceRegistryEntry {
   id: string;
   name: string | null;
   name_by_user: string | null;
+  identifiers?: [string, string][];
+}
+
+/** The Tuya id of a valve. An unavailable (offline) registry sensor loses
+ * its `device_id` attribute; the device registry keeps it as an identifier.
+ * Falling back to HA's own device UUID unhooked offline valves from their
+ * metering point ("No valve assigned", Simon 2026-09-30: 810, 711). */
+export function tuyaIdOf(attr: unknown, device: HassDeviceRegistryEntry | undefined, haDeviceId: string): string {
+  if (typeof attr === "string" && attr) return attr;
+  const ids = device?.identifiers ?? [];
+  return (ids.find(([d]) => d === "xtend_tuya") ?? ids.find(([d]) => d === "tuya"))?.[1] ?? haDeviceId;
 }
 
 export interface HomeAssistantLike {
@@ -167,9 +178,7 @@ export function discoverValves(
     // `device_id` attribute) is what the fdm5kw timer services expect.
     // Manual YAML dashboards always passed the Tuya id; the strategy
     // previously fed the HA UUID, breaking set/delete service lookups.
-    const tuyaDeviceId =
-      (regState.attributes.device_id as string | undefined) ??
-      regEntry.device_id;
+    const tuyaDeviceId = tuyaIdOf(regState.attributes.device_id, hass.devices[regEntry.device_id], regEntry.device_id);
     const valve = collectValveEntities(
       hass,
       regId,

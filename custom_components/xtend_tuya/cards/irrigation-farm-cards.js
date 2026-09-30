@@ -31,7 +31,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
  * @license
  * Copyright 2017 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
- */function mt(t){return ut({...t,state:!0,attribute:!1})}let vt=null;function ft(t){if(!t.callApi)return Promise.resolve({});if(vt&&Date.now()-vt.at<2e3)return vt.p;const e=t.callApi("GET","xtend_tuya/valve_locations").then(t=>t?.locations??{},()=>({}));return vt={at:Date.now(),p:e},e}const gt="irrigation_timer_registry",_t={start_time:"start_time_sensor",close_time:"end_time_sensor",end_time:"end_time_sensor",watering_mode:"mode_sensor",watering_value:"value_sensor",watering_volume:"volume_sensor",watering_flow_rate:"flow_rate_sensor",battery_level:"battery_level",last_report:"last_report",watering_duration:"duration",rain_snow_delay:"rain_snow_delay",battery:"battery_level",indexed_irrigation_duration:"duration"},xt=[[/_last_watering_start$/,"start_time_sensor"],[/_last_watering_end$/,"end_time_sensor"],[/_watering_flow_rate$/,"flow_rate_sensor"],[/_watering_value$/,"value_sensor"],[/_watering_volume$/,"volume_sensor"],[/_watering_duration$/,"duration"],[/_watering_mode$/,"mode_sensor"],[/_rain_snow_delay$/,"rain_snow_delay"],[/_battery_level$/,"battery_level"]];function bt(t,e={}){const i=new Set;for(const e of Object.values(t.entities))e.translation_key===gt&&i.add(e.entity_id);for(const e of Object.keys(t.states))e.startsWith("sensor.")&&(e.endsWith(gt)||e.endsWith("_time_task_registry"))&&i.add(e);const s=[];for(const n of i){const i=t.states[n],a=t.entities[n];if(!i||!a||!a.device_id)continue;const r=i.attributes.device_id??a.device_id,o=yt(t,n,a.device_id,r,i,e);o&&s.push(o)}return s.sort((t,e)=>t.valve_name.localeCompare(e.valve_name)),s}function yt(t,e,i,s,n,a={}){const r=t.devices[i],o=n.attributes.valve_name??n.attributes.valve_factory_name??r?.name_by_user??r?.name??s,l=n.attributes.valve_factory_name??r?.name??o,d=`${wt}?id=${encodeURIComponent(s)}`;const c={device_id:s,registry_entity:e,valve_name:o,factory_name:l,valve_home:a[s]?.home??a[i]?.home??n.attributes.valve_home??null,valve_room:a[s]?.room??a[i]?.room??n.attributes.valve_room??null,view_path:d},p=(t,e)=>{c[t]||(c[t]=e)};let h;for(const e of Object.values(t.entities)){if(e.device_id!==i)continue;if(!t.states[e.entity_id])continue;if(e.entity_id.startsWith("switch.")&&("valve"===e.translation_key||"indexed_switch"===e.translation_key||e.entity_id.endsWith("_valve"))){c.switch||(c.switch=e.entity_id);continue}if(e.entity_id.startsWith("switch.")&&"switch_1"===e.translation_key){h||(h=e.entity_id);continue}if(e.entity_id.startsWith("switch.")&&e.entity_id.endsWith("_sleep_mode")){c.sleep_mode=e.entity_id;continue}const s=e.translation_key;if(s){const t=_t[s];if(t){p(t,e.entity_id);continue}}for(const[t,i]of xt)if(t.test(e.entity_id)){p(i,e.entity_id);break}}return!c.switch&&h&&(c.switch=h),c}const wt="valve";const $t={runs:[],planned:[],sites:[],locations:[],locationOf:{},pumps:[],pumpAssignments:[],pumpConnections:[]};let kt=null;function St(){kt=null}const Et="xt-farm-changed";function At(){St(),window.dispatchEvent(new Event(Et))}function Mt(t,e=Date.now()){if(!kt||e-kt.at>6e4){const i=async function(t,e){if(!t.callApi)return $t;const i=t=>encodeURIComponent(new Date(t).toISOString()),[s,n,a]=await Promise.all([t.callApi("GET",`xtend_tuya/runs?since=${i(e-2592e6)}`),t.callApi("GET","xtend_tuya/irrigation_locations"),t.callApi("GET",`calendars/calendar.irrigation_planned?start=${i(e-1728e5)}&end=${i(e+6912e5)}`)]),r=t=>t?Date.parse(t):null,o=new Map((n?.sites??[]).map(t=>[t.id,t.name])),l=[],d={};for(const t of n?.locations??[]){const e=t.devices??[],i=t.pump?{id:t.pump.id,name:t.pump.name,via:t.pump.inherited_from?o.get(t.pump.inherited_from)??null:null}:null,s={id:t.id,name:t.name,site_id:t.site_id??null,valves:e.filter(t=>null===t.end).map(t=>t.device_id),assignments:e.map(t=>({device_id:t.device_id,begin:r(t.begin),end:r(t.end)})),expected_lpm:t.expected_lpm??null,description:t.description??"",pump:i};l.push(s);for(const t of s.valves)d[t]=s}const c=[];for(const t of a??[]){const e=Date.parse(t.start.dateTime??t.start.date??""),i=Date.parse(t.end.dateTime??t.end.date??"");Number.isFinite(e)&&c.push({key:(t.uid??"").split("#")[0],start:e,end:i>e?i:e+6e4})}return{runs:s?.runs??[],planned:c,sites:n?.sites??[],locations:l,locationOf:d,pumps:(n?.pumps??[]).map(t=>({flow_entity:null,pressure_entity:null,status_entity:null,...t})),pumpAssignments:(n?.pump_assignments??[]).map(t=>({...t,begin:r(t.begin),end:r(t.end)})),pumpConnections:(n?.pump_connections??[]).map(t=>({...t,begin:r(t.begin),end:r(t.end)}))}}(t,e);kt={at:e,data:i},i.catch(()=>{kt?.data===i&&(kt=null)})}return kt.data}const Ct=new WeakMap;function Lt(t){let e=Ct.get(t);if(e)return e;e={runs:new Map,planned:new Map,mps:new Map};for(const i of t.runs){const t=Date.parse(i.start),s=Date.parse(i.end);if(!Number.isFinite(t)||!Number.isFinite(s))continue;const n=e.runs.get(i.device_id)??[];n.push({run:i,start:t,end:s}),e.runs.set(i.device_id,n)}for(const t of e.runs.values())t.sort((t,e)=>t.start-e.start);for(const i of t.planned){const t=e.planned.get(i.key)??[];t.push(i),e.planned.set(i.key,t)}for(const t of e.planned.values())t.sort((t,e)=>t.start-e.start);for(const i of t.locations)for(const t of new Set(i.assignments.map(t=>t.device_id))){const s=e.mps.get(t)??[];s.push(i),e.mps.set(t,s)}return Ct.set(t,e),e}function zt(t,e){return Lt(t).runs.get(e)??[]}function Nt(t,e,i){return(Lt(t).mps.get(e)??[]).find(t=>t.assignments.some(t=>t.device_id===e&&(null===t.begin||t.begin<=i)&&(null===t.end||i<t.end)))}const Ot={planned:0,missed:0,ran:1,unplanned:1,running:1};function Tt(t,e,i,s=()=>-1/0,n=9e5){const a=new Set,r=[];for(const o of[...t].sort((t,e)=>t.start-e.start)){let t=null;for(const i of e){if(a.has(i)||i.key!==o.key)continue;const e=Math.abs(i.start-o.start);e<=n&&(!t||e<Math.abs(t.start-o.start))&&(t=i)}if(t)a.add(t),r.push({...t,kind:"running"===t.kind?"running":"ran",planStart:o.start,planEnd:o.end,summary:`${t.summary??""}\nplanned ${o.summary??""}`});else{if(o.start<s(o.key))continue;o.end+n<i?r.push({...o,kind:"missed"}):r.push(o)}}for(const t of e)a.has(t)||("running"===t.kind?r.push(t):r.push({...t,kind:t.start<s(t.key)?"ran":"unplanned"}));return r}function Pt(t){const e=Date.parse(String(t?.attributes?.schedule_changed_at??""));return Number.isFinite(e)?e:-1/0}const Dt=new Set(["unavailable","unknown"]);function Rt(t,e,i){const s=[];return t.forEach((n,a)=>{if(!Dt.has(n.state))return;const r=Math.max(e,Date.parse(n.last_changed)),o=t[a+1],l=Math.min(i,o?Date.parse(o.last_changed):i);if(l<=r)return;const d=s[s.length-1];d&&d[1]>=r?d[1]=Math.max(d[1],l):s.push([r,l])}),s}let Ut,Ft;function It(t){var e;e=t?.config?.time_zone,e&&e!==Ut&&(Ut=e,Ht.clear());const i=t?.locale?.language??t?.language;i&&i!==Ft&&(Ft=i,Ht.clear())}const Ht=new Map;function Wt(t,e=Ft){const i=JSON.stringify([e??"",t]);let s=Ht.get(i);return s||(s=new Intl.DateTimeFormat(e,{...t,timeZone:Ut}),Ht.set(i,s)),s}const jt=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];function Bt(t){const e={};for(const{type:i,value:s}of Wt({year:"numeric",month:"numeric",day:"numeric",hour:"numeric",minute:"numeric",second:"numeric",weekday:"short",hourCycle:"h23"},"en-US").formatToParts(t))e[i]=s;return{year:Number(e.year),month:Number(e.month),day:Number(e.day),hour:Number(e.hour)%24,minute:Number(e.minute),second:Number(e.second),weekday:jt.indexOf(e.weekday)}}function qt(t){const e=Bt(t);return Date.UTC(e.year,e.month-1,e.day,e.hour,e.minute,e.second)-1e3*Math.floor(t/1e3)}function Vt(t,e,i,s=0,n=0){const a=Date.UTC(t,e-1,i,s,n),r=a-qt(a);return a-qt(r)}function Gt(t){const e=Bt(t);return Vt(e.year,e.month,e.day)}function Kt(t,e){const i=Bt(t),s=Date.UTC(i.year,i.month-1,i.day+e,12),n=new Date(s);return Vt(n.getUTCFullYear(),n.getUTCMonth()+1,n.getUTCDate())}function Jt(t){const e=Bt(t);return e.hour+e.minute/60}function Yt(t,e={}){return Wt(e).format(t)}function Zt(t){return Wt({hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(t)}const Xt=864e5,Qt=864e5,te=/\(?(\d{3,4})\)?\s*$/;function ee(t){if(!t)return null;const e=Number(t.state);return Number.isFinite(e)&&""!==t.state?e:null}function ie(t){return!t||"unavailable"===t.state||"unknown"===t.state}const se=Gt;function ne(t,e,i){const s=se(e)-5184e5,n={runs:0,liters:0,minutes:0,daily:[0,0,0,0,0,0,0],unit:i?"L":"min"};for(const e of t){if(e.start<s)continue;const t=Math.min(6,Math.round((se(e.start)-s)/Qt));n.runs+=1,n.liters+=e.liters??0,n.minutes+=e.minutes,n.daily[t]+=i?e.liters??0:e.minutes}return n}function ae(t,e,i,s){const n=e[t.registry_entity],a=t.switch?e[t.switch]:void 0,r=ie(n)&&ie(a),o=!r&&"on"===a?.state,l=zt(i,t.device_id).map(t=>({r:t.run,start:t.start,end:t.end})),d=(t,e)=>({start:e,minutes:(t.duration_seconds??0)/60,liters:"number"==typeof t.liters?t.liters:null}),c=l[l.length-1],p=function(t,e){return Lt(t).planned.get(e)??[]}(i,t.registry_entity),h=p.find(t=>t.start>s),u=p.filter(t=>t.end>s-Xt&&t.end<s).map(e=>({start:e.start,end:e.end,kind:"planned",name:t.valve_name,key:t.device_id})),m=l.filter(t=>t.end>s-Xt-Qt).map(e=>({start:e.start,end:e.end,kind:"ran",name:t.valve_name,key:t.device_id})),v=Pt(n),f=Tt(u,m,s,()=>v).filter(t=>"missed"===t.kind).length,g=!!t.volume_sensor,_=r?null:ee(t.battery_level?e[t.battery_level]:void 0),x=Date.parse(String(n?.attributes?.last_valve_report??"")),b=Number.isFinite(x)&&s-x>864e5&&p.some(t=>t.start>x&&t.start<s),y=c?d(c.r,c.start):null,w=[];r||(null!==_&&_<20&&w.push("low_battery"),b&&w.push("stale"),f>0&&w.push("missed"),g&&y&&0===y.liters&&y.minutes>=1&&w.push("no_flow"));const $=i.locationOf[t.device_id]??null,k=$?.site_id?i.sites.find(t=>t.id===$.site_id)??null:null,S=t=>t?.last_changed?Date.parse(t.last_changed):null;return{device_id:t.device_id,name:t.valve_name,number:te.exec(t.valve_name)?.[1]??null,view_path:t.view_path,status:r?"offline":o?"watering":"idle",since:o?S(a):r?S(n):null,flow_lpm:o?ee(t.flow_rate_sensor?e[t.flow_rate_sensor]:void 0):null,battery:_,has_flow_meter:g,last:y,next:h?{start:h.start,minutes:(h.end-h.start)/6e4,liters:null}:null,week:ne(l.map(t=>d(t.r,t.start)),s,g),missed:f,badges:w,location:$?{id:$.id,name:$.name}:null,site:k?{id:k.id,name:k.name}:null}}function re(t){const e=t,i=e?.body;return("string"==typeof i?i:i?.error??i?.message)??e?.error??e?.message??(e?.status_code?`HTTP ${e.status_code}`:String(t))}class oe{constructor(t){this.valves=[],this.data=$t,this.loaded=!1,this.error=null,this.connected=!1,this.busy=!1,this.rerun=!1,this.memo=null,this.onFarmChanged=()=>{this.refresh(!0)},this.host=t,t.addController(this)}hostConnected(){this.connected=!0,this.timer=window.setInterval(()=>{this.refresh()},6e4),window.addEventListener(Et,this.onFarmChanged)}hostDisconnected(){this.connected=!1,this.timer&&window.clearInterval(this.timer),window.clearTimeout(this.retry),window.removeEventListener(Et,this.onFarmChanged)}hostUpdated(){It(this.host.hass),this.loaded||this.busy||!this.host.hass||this.refresh()}async refresh(t=!1){const e=this.host.hass;if(e)if(this.busy)t&&(this.rerun=!0);else{t&&(St(),vt=null),this.busy=!0,window.clearTimeout(this.retry);try{let t;const[i,s]=await Promise.all([Mt(e).catch(e=>(t=e,null)),ft(e)]);if(this.valves=bt(e,s),!i)throw t;this.data=i,this.error=null}catch(t){const e=t?.status_code;this.error=!e||404===e||e>=502?`Home Assistant is starting, retrying… (${re(t)})`:re(t),this.connected&&(this.retry=window.setTimeout(()=>{this.refresh()},1e4))}finally{this.busy=!1,this.loaded=!0,this.host.requestUpdate()}this.rerun&&(this.rerun=!1,await this.refresh(!0))}}summaries(){const t=this.host.hass;if(!t)return[];const e=Date.now(),i=this.memo;if(i&&i.data===this.data&&i.valves===this.valves&&e-i.at<2e3)return i.list;const s=this.valves.map(i=>ae(i,t.states,this.data,e));return this.memo={at:e,data:this.data,valves:this.valves,list:s},s}summaryOf(t){const e=this.host.hass,i=this.valves.find(e=>e.device_id===t);return e&&i?ae(i,e.states,this.data,Date.now()):void 0}}const le={site:null,status:"all",search:""},de={watering:"Watering now",attention:"Needs attention",sites:"Online",offline:"Offline",unassigned:"Without location"},ce=["watering","attention","sites","offline"];function pe(t,e){const i=new Set([e]);for(let e=!0;e;){e=!1;for(const s of t)s.parent_id&&i.has(s.parent_id)&&!i.has(s.id)&&(i.add(s.id),e=!0)}return i}function he(t,e){const i=new Map(t.map(t=>[t.id,t])),s=[];for(let t=i.get(e);t&&s.length<20;t=t.parent_id?i.get(t.parent_id):void 0)s.unshift(t.name);return s.join(" › ")}function ue(t){return"offline"!==t.status&&t.badges.length>0}function me(t,e,i){const s=e.site?pe(i,e.site):null,n=e.search.trim().toLowerCase();return t.filter(t=>(!s||null!==t.site&&s.has(t.site.id))&&("all"===e.status||"online"===e.status&&"offline"!==t.status||"watering"===e.status&&"watering"===t.status||"offline"===e.status&&"offline"===t.status||"attention"===e.status&&ue(t))&&(!n||t.name.toLowerCase().includes(n)||(t.location?.name.toLowerCase().includes(n)??!1)||(t.site?.name.toLowerCase().includes(n)??!1)))}function ve(t){const e=window.location.pathname.split("/")[1]||"lovelace";window.history.pushState(null,"",t.startsWith("/")?t:`/${e}/${t}`),window.dispatchEvent(new Event("location-changed"))}const fe=r`
+ */function mt(t){return ut({...t,state:!0,attribute:!1})}function vt(t,e,i){if("string"==typeof t&&t)return t;const s=e?.identifiers??[];return(s.find(([t])=>"xtend_tuya"===t)??s.find(([t])=>"tuya"===t))?.[1]??i}let ft=null;function gt(t){if(!t.callApi)return Promise.resolve({});if(ft&&Date.now()-ft.at<2e3)return ft.p;const e=t.callApi("GET","xtend_tuya/valve_locations").then(t=>t?.locations??{},()=>({}));return ft={at:Date.now(),p:e},e}const _t="irrigation_timer_registry",xt={start_time:"start_time_sensor",close_time:"end_time_sensor",end_time:"end_time_sensor",watering_mode:"mode_sensor",watering_value:"value_sensor",watering_volume:"volume_sensor",watering_flow_rate:"flow_rate_sensor",battery_level:"battery_level",last_report:"last_report",watering_duration:"duration",rain_snow_delay:"rain_snow_delay",battery:"battery_level",indexed_irrigation_duration:"duration"},bt=[[/_last_watering_start$/,"start_time_sensor"],[/_last_watering_end$/,"end_time_sensor"],[/_watering_flow_rate$/,"flow_rate_sensor"],[/_watering_value$/,"value_sensor"],[/_watering_volume$/,"volume_sensor"],[/_watering_duration$/,"duration"],[/_watering_mode$/,"mode_sensor"],[/_rain_snow_delay$/,"rain_snow_delay"],[/_battery_level$/,"battery_level"]];function yt(t,e={}){const i=new Set;for(const e of Object.values(t.entities))e.translation_key===_t&&i.add(e.entity_id);for(const e of Object.keys(t.states))e.startsWith("sensor.")&&(e.endsWith(_t)||e.endsWith("_time_task_registry"))&&i.add(e);const s=[];for(const n of i){const i=t.states[n],a=t.entities[n];if(!i||!a||!a.device_id)continue;const r=vt(i.attributes.device_id,t.devices[a.device_id],a.device_id),o=wt(t,n,a.device_id,r,i,e);o&&s.push(o)}return s.sort((t,e)=>t.valve_name.localeCompare(e.valve_name)),s}function wt(t,e,i,s,n,a={}){const r=t.devices[i],o=n.attributes.valve_name??n.attributes.valve_factory_name??r?.name_by_user??r?.name??s,l=n.attributes.valve_factory_name??r?.name??o,d=`${$t}?id=${encodeURIComponent(s)}`;const c={device_id:s,registry_entity:e,valve_name:o,factory_name:l,valve_home:a[s]?.home??a[i]?.home??n.attributes.valve_home??null,valve_room:a[s]?.room??a[i]?.room??n.attributes.valve_room??null,view_path:d},p=(t,e)=>{c[t]||(c[t]=e)};let h;for(const e of Object.values(t.entities)){if(e.device_id!==i)continue;if(!t.states[e.entity_id])continue;if(e.entity_id.startsWith("switch.")&&("valve"===e.translation_key||"indexed_switch"===e.translation_key||e.entity_id.endsWith("_valve"))){c.switch||(c.switch=e.entity_id);continue}if(e.entity_id.startsWith("switch.")&&"switch_1"===e.translation_key){h||(h=e.entity_id);continue}if(e.entity_id.startsWith("switch.")&&e.entity_id.endsWith("_sleep_mode")){c.sleep_mode=e.entity_id;continue}const s=e.translation_key;if(s){const t=xt[s];if(t){p(t,e.entity_id);continue}}for(const[t,i]of bt)if(t.test(e.entity_id)){p(i,e.entity_id);break}}return!c.switch&&h&&(c.switch=h),c}const $t="valve";const kt={runs:[],planned:[],sites:[],locations:[],locationOf:{},pumps:[],pumpAssignments:[],pumpConnections:[]};let St=null;function Et(){St=null}const At="xt-farm-changed";function Mt(){Et(),window.dispatchEvent(new Event(At))}function Ct(t,e=Date.now()){if(!St||e-St.at>6e4){const i=async function(t,e){if(!t.callApi)return kt;const i=t=>encodeURIComponent(new Date(t).toISOString()),[s,n,a]=await Promise.all([t.callApi("GET",`xtend_tuya/runs?since=${i(e-2592e6)}`),t.callApi("GET","xtend_tuya/irrigation_locations"),t.callApi("GET",`calendars/calendar.irrigation_planned?start=${i(e-1728e5)}&end=${i(e+6912e5)}`)]),r=t=>t?Date.parse(t):null,o=new Map((n?.sites??[]).map(t=>[t.id,t.name])),l=[],d={};for(const t of n?.locations??[]){const e=t.devices??[],i=t.pump?{id:t.pump.id,name:t.pump.name,via:t.pump.inherited_from?o.get(t.pump.inherited_from)??null:null}:null,s={id:t.id,name:t.name,site_id:t.site_id??null,valves:e.filter(t=>null===t.end).map(t=>t.device_id),assignments:e.map(t=>({device_id:t.device_id,begin:r(t.begin),end:r(t.end)})),expected_lpm:t.expected_lpm??null,description:t.description??"",pump:i};l.push(s);for(const t of s.valves)d[t]=s}const c=[];for(const t of a??[]){const e=Date.parse(t.start.dateTime??t.start.date??""),i=Date.parse(t.end.dateTime??t.end.date??"");Number.isFinite(e)&&c.push({key:(t.uid??"").split("#")[0],start:e,end:i>e?i:e+6e4})}return{runs:s?.runs??[],planned:c,sites:n?.sites??[],locations:l,locationOf:d,pumps:(n?.pumps??[]).map(t=>({flow_entity:null,pressure_entity:null,status_entity:null,...t})),pumpAssignments:(n?.pump_assignments??[]).map(t=>({...t,begin:r(t.begin),end:r(t.end)})),pumpConnections:(n?.pump_connections??[]).map(t=>({...t,begin:r(t.begin),end:r(t.end)}))}}(t,e);St={at:e,data:i},i.catch(()=>{St?.data===i&&(St=null)})}return St.data}const Lt=new WeakMap;function zt(t){let e=Lt.get(t);if(e)return e;e={runs:new Map,planned:new Map,mps:new Map};for(const i of t.runs){const t=Date.parse(i.start),s=Date.parse(i.end);if(!Number.isFinite(t)||!Number.isFinite(s))continue;const n=e.runs.get(i.device_id)??[];n.push({run:i,start:t,end:s}),e.runs.set(i.device_id,n)}for(const t of e.runs.values())t.sort((t,e)=>t.start-e.start);for(const i of t.planned){const t=e.planned.get(i.key)??[];t.push(i),e.planned.set(i.key,t)}for(const t of e.planned.values())t.sort((t,e)=>t.start-e.start);for(const i of t.locations)for(const t of new Set(i.assignments.map(t=>t.device_id))){const s=e.mps.get(t)??[];s.push(i),e.mps.set(t,s)}return Lt.set(t,e),e}function Nt(t,e){return zt(t).runs.get(e)??[]}function Ot(t,e,i){return(zt(t).mps.get(e)??[]).find(t=>t.assignments.some(t=>t.device_id===e&&(null===t.begin||t.begin<=i)&&(null===t.end||i<t.end)))}const Tt={planned:0,missed:0,ran:1,unplanned:1,running:1};function Pt(t,e,i,s=()=>-1/0,n=9e5){const a=new Set,r=[];for(const o of[...t].sort((t,e)=>t.start-e.start)){let t=null;for(const i of e){if(a.has(i)||i.key!==o.key)continue;const e=Math.abs(i.start-o.start);e<=n&&(!t||e<Math.abs(t.start-o.start))&&(t=i)}if(t)a.add(t),r.push({...t,kind:"running"===t.kind?"running":"ran",planStart:o.start,planEnd:o.end,summary:`${t.summary??""}\nplanned ${o.summary??""}`});else{if(o.start<s(o.key))continue;o.end+n<i?r.push({...o,kind:"missed"}):r.push(o)}}for(const t of e)a.has(t)||("running"===t.kind?r.push(t):r.push({...t,kind:t.start<s(t.key)?"ran":"unplanned"}));return r}function Dt(t){const e=Date.parse(String(t?.attributes?.schedule_changed_at??""));return Number.isFinite(e)?e:-1/0}const Rt=new Set(["unavailable","unknown"]);function Ut(t,e,i){const s=[];return t.forEach((n,a)=>{if(!Rt.has(n.state))return;const r=Math.max(e,Date.parse(n.last_changed)),o=t[a+1],l=Math.min(i,o?Date.parse(o.last_changed):i);if(l<=r)return;const d=s[s.length-1];d&&d[1]>=r?d[1]=Math.max(d[1],l):s.push([r,l])}),s}let Ft,It;function Ht(t){var e;e=t?.config?.time_zone,e&&e!==Ft&&(Ft=e,Wt.clear());const i=t?.locale?.language??t?.language;i&&i!==It&&(It=i,Wt.clear())}const Wt=new Map;function jt(t,e=It){const i=JSON.stringify([e??"",t]);let s=Wt.get(i);return s||(s=new Intl.DateTimeFormat(e,{...t,timeZone:Ft}),Wt.set(i,s)),s}const Bt=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];function qt(t){const e={};for(const{type:i,value:s}of jt({year:"numeric",month:"numeric",day:"numeric",hour:"numeric",minute:"numeric",second:"numeric",weekday:"short",hourCycle:"h23"},"en-US").formatToParts(t))e[i]=s;return{year:Number(e.year),month:Number(e.month),day:Number(e.day),hour:Number(e.hour)%24,minute:Number(e.minute),second:Number(e.second),weekday:Bt.indexOf(e.weekday)}}function Vt(t){const e=qt(t);return Date.UTC(e.year,e.month-1,e.day,e.hour,e.minute,e.second)-1e3*Math.floor(t/1e3)}function Gt(t,e,i,s=0,n=0){const a=Date.UTC(t,e-1,i,s,n),r=a-Vt(a);return a-Vt(r)}function Kt(t){const e=qt(t);return Gt(e.year,e.month,e.day)}function Jt(t,e){const i=qt(t),s=Date.UTC(i.year,i.month-1,i.day+e,12),n=new Date(s);return Gt(n.getUTCFullYear(),n.getUTCMonth()+1,n.getUTCDate())}function Yt(t){const e=qt(t);return e.hour+e.minute/60}function Zt(t,e={}){return jt(e).format(t)}function Xt(t){return jt({hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(t)}const Qt=864e5,te=864e5,ee=/\(?(\d{3,4})\)?\s*$/;function ie(t){if(!t)return null;const e=Number(t.state);return Number.isFinite(e)&&""!==t.state?e:null}function se(t){return!t||"unavailable"===t.state||"unknown"===t.state}const ne=Kt;function ae(t,e,i){const s=ne(e)-5184e5,n={runs:0,liters:0,minutes:0,daily:[0,0,0,0,0,0,0],unit:i?"L":"min"};for(const e of t){if(e.start<s)continue;const t=Math.min(6,Math.round((ne(e.start)-s)/te));n.runs+=1,n.liters+=e.liters??0,n.minutes+=e.minutes,n.daily[t]+=i?e.liters??0:e.minutes}return n}function re(t,e,i,s){const n=e[t.registry_entity],a=t.switch?e[t.switch]:void 0,r=se(n)&&se(a),o=!r&&"on"===a?.state,l=Nt(i,t.device_id).map(t=>({r:t.run,start:t.start,end:t.end})),d=(t,e)=>({start:e,minutes:(t.duration_seconds??0)/60,liters:"number"==typeof t.liters?t.liters:null}),c=l[l.length-1],p=function(t,e){return zt(t).planned.get(e)??[]}(i,t.registry_entity),h=p.find(t=>t.start>s),u=p.filter(t=>t.end>s-Qt&&t.end<s).map(e=>({start:e.start,end:e.end,kind:"planned",name:t.valve_name,key:t.device_id})),m=l.filter(t=>t.end>s-Qt-te).map(e=>({start:e.start,end:e.end,kind:"ran",name:t.valve_name,key:t.device_id})),v=Dt(n),f=Pt(u,m,s,()=>v).filter(t=>"missed"===t.kind).length,g=!!t.volume_sensor,_=r?null:ie(t.battery_level?e[t.battery_level]:void 0),x=Date.parse(String(n?.attributes?.last_valve_report??"")),b=Number.isFinite(x)&&s-x>864e5&&p.some(t=>t.start>x&&t.start<s),y=c?d(c.r,c.start):null,w=[];r||(null!==_&&_<20&&w.push("low_battery"),b&&w.push("stale"),f>0&&w.push("missed"),g&&y&&0===y.liters&&y.minutes>=1&&w.push("no_flow"));const $=i.locationOf[t.device_id]??null,k=$?.site_id?i.sites.find(t=>t.id===$.site_id)??null:null,S=t=>t?.last_changed?Date.parse(t.last_changed):null;return{device_id:t.device_id,name:t.valve_name,number:ee.exec(t.valve_name)?.[1]??null,view_path:t.view_path,status:r?"offline":o?"watering":"idle",since:o?S(a):r?S(n):null,flow_lpm:o?ie(t.flow_rate_sensor?e[t.flow_rate_sensor]:void 0):null,battery:_,has_flow_meter:g,last:y,next:h?{start:h.start,minutes:(h.end-h.start)/6e4,liters:null}:null,week:ae(l.map(t=>d(t.r,t.start)),s,g),missed:f,badges:w,location:$?{id:$.id,name:$.name}:null,site:k?{id:k.id,name:k.name}:null}}function oe(t){const e=t,i=e?.body;return("string"==typeof i?i:i?.error??i?.message)??e?.error??e?.message??(e?.status_code?`HTTP ${e.status_code}`:String(t))}class le{constructor(t){this.valves=[],this.data=kt,this.loaded=!1,this.error=null,this.connected=!1,this.busy=!1,this.rerun=!1,this.memo=null,this.onFarmChanged=()=>{this.refresh(!0)},this.host=t,t.addController(this)}hostConnected(){this.connected=!0,this.timer=window.setInterval(()=>{this.refresh()},6e4),window.addEventListener(At,this.onFarmChanged)}hostDisconnected(){this.connected=!1,this.timer&&window.clearInterval(this.timer),window.clearTimeout(this.retry),window.removeEventListener(At,this.onFarmChanged)}hostUpdated(){Ht(this.host.hass),this.loaded||this.busy||!this.host.hass||this.refresh()}async refresh(t=!1){const e=this.host.hass;if(e)if(this.busy)t&&(this.rerun=!0);else{t&&(Et(),ft=null),this.busy=!0,window.clearTimeout(this.retry);try{let t;const[i,s]=await Promise.all([Ct(e).catch(e=>(t=e,null)),gt(e)]);if(this.valves=yt(e,s),!i)throw t;this.data=i,this.error=null}catch(t){const e=t?.status_code;this.error=!e||404===e||e>=502?`Home Assistant is starting, retrying… (${oe(t)})`:oe(t),this.connected&&(this.retry=window.setTimeout(()=>{this.refresh()},1e4))}finally{this.busy=!1,this.loaded=!0,this.host.requestUpdate()}this.rerun&&(this.rerun=!1,await this.refresh(!0))}}summaries(){const t=this.host.hass;if(!t)return[];const e=Date.now(),i=this.memo;if(i&&i.data===this.data&&i.valves===this.valves&&e-i.at<2e3)return i.list;const s=this.valves.map(i=>re(i,t.states,this.data,e));return this.memo={at:e,data:this.data,valves:this.valves,list:s},s}summaryOf(t){const e=this.host.hass,i=this.valves.find(e=>e.device_id===t);return e&&i?re(i,e.states,this.data,Date.now()):void 0}}const de={site:null,status:"all",search:""},ce={watering:"Watering now",attention:"Needs attention",sites:"Online",offline:"Offline",unassigned:"Without location"},pe=["watering","attention","sites","offline"];function he(t,e){const i=new Set([e]);for(let e=!0;e;){e=!1;for(const s of t)s.parent_id&&i.has(s.parent_id)&&!i.has(s.id)&&(i.add(s.id),e=!0)}return i}function ue(t,e){const i=new Map(t.map(t=>[t.id,t])),s=[];for(let t=i.get(e);t&&s.length<20;t=t.parent_id?i.get(t.parent_id):void 0)s.unshift(t.name);return s.join(" › ")}function me(t){return"offline"!==t.status&&t.badges.length>0}function ve(t,e,i){const s=e.site?he(i,e.site):null,n=e.search.trim().toLowerCase();return t.filter(t=>(!s||null!==t.site&&s.has(t.site.id))&&("all"===e.status||"online"===e.status&&"offline"!==t.status||"watering"===e.status&&"watering"===t.status||"offline"===e.status&&"offline"===t.status||"attention"===e.status&&me(t))&&(!n||t.name.toLowerCase().includes(n)||(t.location?.name.toLowerCase().includes(n)??!1)||(t.site?.name.toLowerCase().includes(n)??!1)))}function fe(t){const e=window.location.pathname.split("/")[1]||"lovelace";window.history.pushState(null,"",t.startsWith("/")?t:`/${e}/${t}`),window.dispatchEvent(new Event("location-changed"))}const ge=r`
   :host {
     --xt-water: var(--blue-color, #1e88e5);
     --xt-dim: var(--secondary-text-color, #727272);
@@ -47,7 +47,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     --ha-card-border-color: var(--xt-card-edge);
     --ha-card-box-shadow: var(--xt-card-shadow);
   }
-`,ge=[["all","All"],["online","Online"],["watering","Watering"],["attention","Attention"],["offline","Offline"]];class _e extends dt{constructor(){super(...arguments),this.sites=[],this.value=le,this.counts={},this.statuses=!0,this.search=!0}_set(t){this.value={...this.value,...t},this.dispatchEvent(new CustomEvent("xt-filter-changed",{detail:this.value,bubbles:!0,composed:!0}))}render(){const t=[...this.sites].map(t=>({id:t.id,path:he(this.sites,t.id)})).sort((t,e)=>t.path.localeCompare(e.path));return B`
+`,_e=[["all","All"],["online","Online"],["watering","Watering"],["attention","Attention"],["offline","Offline"]];class xe extends dt{constructor(){super(...arguments),this.sites=[],this.value=de,this.counts={},this.statuses=!0,this.search=!0}_set(t){this.value={...this.value,...t},this.dispatchEvent(new CustomEvent("xt-filter-changed",{detail:this.value,bubbles:!0,composed:!0}))}render(){const t=[...this.sites].map(t=>({id:t.id,path:ue(this.sites,t.id)})).sort((t,e)=>t.path.localeCompare(e.path));return B`
       <select
         aria-label="Site"
         .value=${this.value.site??""}
@@ -57,7 +57,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${t.map(t=>B`<option value=${t.id} ?selected=${t.id===this.value.site}>${t.path}</option>`)}
       </select>
       <div class="chips" role="group" aria-label="Status" ?hidden=${!this.statuses}>
-        ${ge.map(([t,e])=>B`<button
+        ${_e.map(([t,e])=>B`<button
             class=${this.value.status===t?"on":""}
             aria-pressed=${this.value.status===t}
             @click=${()=>this._set({status:t})}
@@ -73,7 +73,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         .value=${this.value.search}
         @input=${t=>this._set({search:t.target.value})}
       />
-    `}}_e.styles=[fe,r`
+    `}}xe.styles=[ge,r`
     :host {
       display: flex;
       flex-wrap: wrap;
@@ -122,11 +122,11 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       opacity: 0.75;
       font-variant-numeric: tabular-nums;
     }
-  `],t([ut({attribute:!1})],_e.prototype,"sites",void 0),t([ut({attribute:!1})],_e.prototype,"value",void 0),t([ut({attribute:!1})],_e.prototype,"counts",void 0),t([ut({type:Boolean})],_e.prototype,"statuses",void 0),t([ut({type:Boolean})],_e.prototype,"search",void 0),customElements.get("xt-valve-filter-bar")||customElements.define("xt-valve-filter-bar",_e);function xe(t,e=Date.now()){const i=Gt(e),s=Math.round((Gt(t)-i)/864e5);return 0===s?"Today":-1===s?"Yesterday":1===s?"Tomorrow":Yt(t,{weekday:"short",day:"numeric",month:"short"})}function be(t){return Zt(t)}function ye(t){return`${xe(t)} ${be(t)}`}function we(t,e=Date.now()){const i=Math.round((e-t)/6e4);if(i<60)return`${i} min`;const s=Math.round(i/60);return s<48?`${s} h`:`${Math.round(s/24)} d`}function $e(t){return`${Math.round(t).toLocaleString()} L`}function ke(t){return t>=95?"mdi:battery":t<10?"mdi:battery-outline":"mdi:battery-"+10*Math.floor(t/10)}function Se(t){return Math.abs(t)<1e3?`${Math.round(t)} L`:`${(t/1e3).toFixed(1)} m³`}class Ee extends dt{constructor(){super(...arguments),this.daily=[],this.unit="L"}render(){const t=Math.max(...this.daily,0),e=this.daily.length,i=Gt(Date.now());return this.daily.map((s,n)=>B`<span
-          title="${(t=>Yt(Kt(i,t-(e-1)),{weekday:"short",day:"numeric",month:"short"}))(n)}: ${Math.round(s).toLocaleString()} ${this.unit}"
+  `],t([ut({attribute:!1})],xe.prototype,"sites",void 0),t([ut({attribute:!1})],xe.prototype,"value",void 0),t([ut({attribute:!1})],xe.prototype,"counts",void 0),t([ut({type:Boolean})],xe.prototype,"statuses",void 0),t([ut({type:Boolean})],xe.prototype,"search",void 0),customElements.get("xt-valve-filter-bar")||customElements.define("xt-valve-filter-bar",xe);function be(t,e=Date.now()){const i=Kt(e),s=Math.round((Kt(t)-i)/864e5);return 0===s?"Today":-1===s?"Yesterday":1===s?"Tomorrow":Zt(t,{weekday:"short",day:"numeric",month:"short"})}function ye(t){return Xt(t)}function we(t){return`${be(t)} ${ye(t)}`}function $e(t,e=Date.now()){const i=Math.round((e-t)/6e4);if(i<60)return`${i} min`;const s=Math.round(i/60);return s<48?`${s} h`:`${Math.round(s/24)} d`}function ke(t){return`${Math.round(t).toLocaleString()} L`}function Se(t){return t>=95?"mdi:battery":t<10?"mdi:battery-outline":"mdi:battery-"+10*Math.floor(t/10)}function Ee(t){return Math.abs(t)<1e3?`${Math.round(t)} L`:`${(t/1e3).toFixed(1)} m³`}class Ae extends dt{constructor(){super(...arguments),this.daily=[],this.unit="L"}render(){const t=Math.max(...this.daily,0),e=this.daily.length,i=Kt(Date.now());return this.daily.map((s,n)=>B`<span
+          title="${(t=>Zt(Jt(i,t-(e-1)),{weekday:"short",day:"numeric",month:"short"}))(n)}: ${Math.round(s).toLocaleString()} ${this.unit}"
           style="height:${t>0?Math.max(8,s/t*100):8}%"
           class=${s>0?"on":""}
-        ></span>`)}}Ee.styles=[fe,r`
+        ></span>`)}}Ae.styles=[ge,r`
     :host {
       display: flex;
       align-items: flex-end;
@@ -143,18 +143,18 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     span.on {
       background: var(--xt-water);
     }
-  `],t([ut({attribute:!1})],Ee.prototype,"daily",void 0),t([ut()],Ee.prototype,"unit",void 0),customElements.get("xt-week-bars")||customElements.define("xt-week-bars",Ee);const Ae={low_battery:"Low battery",stale:"Silent",missed:"Missed",no_flow:"No water flow"},Me={low_battery:"Battery below 20 %",stale:"No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.",missed:"A planned run in the last 24 hours did not happen",no_flow:"The last run measured no water"};function Ce(t){const e=[ye(t.start),`${Math.round(t.minutes)} min`];return null!==t.liters&&e.push(`${Math.round(t.liters)} L`),e.join(" · ")}function Le(t){return(t.number?t.name.replace(/\s*\(\d+\)\s*$/,""):t.name)||t.name}class ze extends dt{_open(){this.summary&&this.dispatchEvent(new CustomEvent("xt-valve-open",{detail:this.summary.view_path,bubbles:!0,composed:!0}))}_status(t){if("watering"===t.status){const e=null!==t.flow_lpm?` · ${t.flow_lpm.toFixed(1)} L/min`:"";return B`<span class="status watering" title="Watering now"><i></i>Watering${t.since?` since ${be(t.since)}`:""}${e}</span>`}return"offline"===t.status?B`<span class="status offline" title="Not reachable"><i></i>Offline${t.since?` for ${we(t.since)}`:""}</span>`:B`<span class="status idle" title="Online, not watering"><i></i>Idle</span>`}_week(t){const e=t.week.unit,i="L"===e?`${Math.round(t.week.liters)} L`:`${Math.round(t.week.minutes)} min`;return B`<div class="week">
+  `],t([ut({attribute:!1})],Ae.prototype,"daily",void 0),t([ut()],Ae.prototype,"unit",void 0),customElements.get("xt-week-bars")||customElements.define("xt-week-bars",Ae);const Me={low_battery:"Low battery",stale:"Silent",missed:"Missed",no_flow:"No water flow"},Ce={low_battery:"Battery below 20 %",stale:"No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.",missed:"A planned run in the last 24 hours did not happen",no_flow:"The last run measured no water"};function Le(t){const e=[we(t.start),`${Math.round(t.minutes)} min`];return null!==t.liters&&e.push(`${Math.round(t.liters)} L`),e.join(" · ")}function ze(t){return(t.number?t.name.replace(/\s*\(\d+\)\s*$/,""):t.name)||t.name}class Ne extends dt{_open(){this.summary&&this.dispatchEvent(new CustomEvent("xt-valve-open",{detail:this.summary.view_path,bubbles:!0,composed:!0}))}_status(t){if("watering"===t.status){const e=null!==t.flow_lpm?` · ${t.flow_lpm.toFixed(1)} L/min`:"";return B`<span class="status watering" title="Watering now"><i></i>Watering${t.since?` since ${ye(t.since)}`:""}${e}</span>`}return"offline"===t.status?B`<span class="status offline" title="Not reachable"><i></i>Offline${t.since?` for ${$e(t.since)}`:""}</span>`:B`<span class="status idle" title="Online, not watering"><i></i>Idle</span>`}_week(t){const e=t.week.unit,i="L"===e?`${Math.round(t.week.liters)} L`:`${Math.round(t.week.minutes)} min`;return B`<div class="week">
       <ha-icon icon="mdi:chart-bar" title="Last 7 days"></ha-icon>
       <xt-week-bars .daily=${t.week.daily} unit=${e}></xt-week-bars>
       <span class="dim" title="Last 7 days: number of runs and total ${"L"===e?"water":"watering time"}"
         >${t.week.runs} runs · ${i}</span
       >
-    </div>`}render(){const t=this.summary;if(!t)return G;const e=t.location&&t.location.name!==Le(t)?t.location.name:null,i=t.location?[e,t.site?.name].filter(Boolean).join(" · "):"No location";return B`<ha-card class=${t.status} @click=${this._open} tabindex="0" role="link" aria-label=${t.name}>
+    </div>`}render(){const t=this.summary;if(!t)return G;const e=t.location&&t.location.name!==ze(t)?t.location.name:null,i=t.location?[e,t.site?.name].filter(Boolean).join(" · "):"No location";return B`<ha-card class=${t.status} @click=${this._open} tabindex="0" role="link" aria-label=${t.name}>
       <div class="head">
-        <span class="name" title=${t.name}>${Le(t)}</span>
+        <span class="name" title=${t.name}>${ze(t)}</span>
         ${t.number?B`<span class="num" title="Valve number">#${t.number}</span>`:G}
         ${null!==t.battery?B`<span class="battery ${t.badges.includes("low_battery")?"low":""}" title="Battery ${Math.round(t.battery)} %"
-              ><ha-icon icon=${ke(t.battery)}></ha-icon>${Math.round(t.battery)} %</span
+              ><ha-icon icon=${Se(t.battery)}></ha-icon>${Math.round(t.battery)} %</span
             >`:G}
       </div>
       ${i?B`<div class="place dim" title="Metering point · site">
@@ -163,15 +163,15 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       ${this._status(t)}
       <dl>
         <dt title="Last run"><ha-icon icon="mdi:history"></ha-icon></dt>
-        <dd title="Last run: start · duration${t.has_flow_meter?" · water":""}">${t.last?Ce(t.last):"–"}</dd>
+        <dd title="Last run: start · duration${t.has_flow_meter?" · water":""}">${t.last?Le(t.last):"–"}</dd>
         <dt title="Next planned run"><ha-icon icon="mdi:calendar-clock"></ha-icon></dt>
-        <dd title="Next planned run: start · duration">${t.next?Ce(t.next):"–"}</dd>
+        <dd title="Next planned run: start · duration">${t.next?Le(t.next):"–"}</dd>
       </dl>
       ${this._week(t)}
       ${t.badges.length?B`<div class="badges">
-            ${t.badges.map(e=>B`<span class="badge ${e}" title=${Me[e]}>${Ae[e]}${"missed"===e&&t.missed>1?` ${t.missed}`:""}</span>`)}
+            ${t.badges.map(e=>B`<span class="badge ${e}" title=${Ce[e]}>${Me[e]}${"missed"===e&&t.missed>1?` ${t.missed}`:""}</span>`)}
           </div>`:G}
-    </ha-card>`}}ze.styles=[fe,r`
+    </ha-card>`}}Ne.styles=[ge,r`
     :host {
       display: block;
     }
@@ -302,7 +302,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .badge.no_flow {
       background: color-mix(in srgb, var(--xt-bad) 18%, transparent);
     }
-  `],t([ut({attribute:!1})],ze.prototype,"summary",void 0),customElements.get("xt-valve-card")||customElements.define("xt-valve-card",ze);class Ne extends dt{constructor(){super(...arguments),this.collapsed=!1}render(){const t=this.section;return t?B`
+  `],t([ut({attribute:!1})],Ne.prototype,"summary",void 0),customElements.get("xt-valve-card")||customElements.define("xt-valve-card",Ne);class Oe extends dt{constructor(){super(...arguments),this.collapsed=!1}render(){const t=this.section;return t?B`
       <button class="title" @click=${()=>this.collapsed=!this.collapsed} aria-expanded=${!this.collapsed}>
         <span>${t.title}</span><span class="count">${t.count}</span>
         <ha-icon icon=${this.collapsed?"mdi:chevron-down":"mdi:chevron-up"}></ha-icon>
@@ -311,7 +311,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               ${t.title?B`<div class="group">${t.title} <span class="count">${t.valves.length}</span></div>`:G}
               <div class="grid">${t.valves.map(t=>B`<xt-valve-card .summary=${t}></xt-valve-card>`)}</div>
             `)}
-    `:G}}Ne.styles=[fe,r`
+    `:G}}Oe.styles=[ge,r`
     :host {
       display: block;
       margin-bottom: 20px;
@@ -351,7 +351,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
       gap: 12px;
     }
-  `],t([ut({attribute:!1})],Ne.prototype,"section",void 0),t([ut({type:Boolean,reflect:!0})],Ne.prototype,"collapsed",void 0),customElements.get("xt-valve-section")||customElements.define("xt-valve-section",Ne);const Oe="xt-valves-filter";class Te extends dt{constructor(){super(...arguments),this._filter=function(){try{return{...le,...JSON.parse(localStorage.getItem(Oe)??"{}")}}catch{return le}}(),this._farm=new oe(this)}setConfig(t){this._config=t}getCardSize(){return 12}_onFilter(t){this._filter=t.detail,function(t){try{localStorage.setItem(Oe,JSON.stringify(t))}catch{}}(t.detail)}_onOpen(t){ve(t.detail)}render(){if(!this._config||!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading valves…</div></ha-card>`;const t=this._farm.summaries(),e=this._farm.data,i=this._config.site??null,s={...this._filter,site:i??this._filter.site},n=me(t,{...s,status:"all"},e.sites),a={};for(const t of["all","online","watering","attention","offline"])a[t]="all"===t?n.length:me(n,{...le,status:t},e.sites).length;const r=function(t,e,i=ce){const s=(t,e)=>t.name.localeCompare(e.name),n=(t,e)=>({key:t,title:de[t],groups:[{site:null,title:"",valves:[...e].sort(s)}],count:e.length}),a=t.filter(t=>"offline"!==t.status),r=a.filter(t=>t.location),o=new Map;for(const t of r){const e=t.site?.id??null;o.set(e,[...o.get(e)??[],t])}const l=[...o.entries()].map(([t,i])=>({site:t,title:t?he(e,t):"No site",valves:i.sort(s)})).sort((t,e)=>null===t.site?1:null===e.site?-1:t.title.localeCompare(e.title)),d={watering:n("watering",a.filter(t=>"watering"===t.status)),attention:n("attention",a.filter(ue)),sites:{key:"sites",title:de.sites,groups:l,count:r.length},offline:n("offline",t.filter(t=>"offline"===t.status)),unassigned:n("unassigned",a.filter(t=>!t.location))};return i.map(t=>d[t]).filter(t=>t.count>0)}(me(n,{...le,status:s.status},e.sites),e.sites,this._config.sections??ce),o=new Set(this._config.collapsed??["offline"]);return B`
+  `],t([ut({attribute:!1})],Oe.prototype,"section",void 0),t([ut({type:Boolean,reflect:!0})],Oe.prototype,"collapsed",void 0),customElements.get("xt-valve-section")||customElements.define("xt-valve-section",Oe);const Te="xt-valves-filter";class Pe extends dt{constructor(){super(...arguments),this._filter=function(){try{return{...de,...JSON.parse(localStorage.getItem(Te)??"{}")}}catch{return de}}(),this._farm=new le(this)}setConfig(t){this._config=t}getCardSize(){return 12}_onFilter(t){this._filter=t.detail,function(t){try{localStorage.setItem(Te,JSON.stringify(t))}catch{}}(t.detail)}_onOpen(t){fe(t.detail)}render(){if(!this._config||!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading valves…</div></ha-card>`;const t=this._farm.summaries(),e=this._farm.data,i=this._config.site??null,s={...this._filter,site:i??this._filter.site},n=ve(t,{...s,status:"all"},e.sites),a={};for(const t of["all","online","watering","attention","offline"])a[t]="all"===t?n.length:ve(n,{...de,status:t},e.sites).length;const r=function(t,e,i=pe){const s=(t,e)=>t.name.localeCompare(e.name),n=(t,e)=>({key:t,title:ce[t],groups:[{site:null,title:"",valves:[...e].sort(s)}],count:e.length}),a=t.filter(t=>"offline"!==t.status),r=a.filter(t=>t.location),o=new Map;for(const t of r){const e=t.site?.id??null;o.set(e,[...o.get(e)??[],t])}const l=[...o.entries()].map(([t,i])=>({site:t,title:t?ue(e,t):"No site",valves:i.sort(s)})).sort((t,e)=>null===t.site?1:null===e.site?-1:t.title.localeCompare(e.title)),d={watering:n("watering",a.filter(t=>"watering"===t.status)),attention:n("attention",a.filter(me)),sites:{key:"sites",title:ce.sites,groups:l,count:r.length},offline:n("offline",t.filter(t=>"offline"===t.status)),unassigned:n("unassigned",a.filter(t=>!t.location))};return i.map(t=>d[t]).filter(t=>t.count>0)}(ve(n,{...de,status:s.status},e.sites),e.sites,this._config.sections??pe),o=new Set(this._config.collapsed??["offline"]);return B`
       <div @xt-valve-open=${this._onOpen}>
         ${!1===this._config.filter?G:B`<xt-valve-filter-bar
               .sites=${i?[]:e.sites}
@@ -362,7 +362,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${this._farm.error?B`<div class="msg err">Could not load farm data: ${this._farm.error}</div>`:G}
         ${r.length?r.map(t=>B`<xt-valve-section .section=${t} ?collapsed=${o.has(t.key)}></xt-valve-section>`):B`<div class="msg">No valves match the filter.</div>`}
       </div>
-    `}}Te.styles=r`
+    `}}Pe.styles=r`
     :host {
       display: block;
     }
@@ -373,7 +373,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .err {
       color: var(--error-color, #db4437);
     }
-  `,t([ut({attribute:!1})],Te.prototype,"hass",void 0),t([mt()],Te.prototype,"_config",void 0),t([mt()],Te.prototype,"_filter",void 0),customElements.get("irrigation-valves-card")||customElements.define("irrigation-valves-card",Te);const Pe="__no_site__";function De(t,e){return t.filter(t=>t.parent_id===e).sort((t,e)=>t.name.localeCompare(e.name))}function Re(t,e,i){const s=t===Pe,n=s?null:e.sites.find(e=>e.id===t)??null,a=s?null:pe(e.sites,t),r=i.filter(t=>a?!!t.site_id&&a.has(t.site_id):!t.site_id),o=r.flatMap(t=>t.valves),l=[0,0,0,0,0,0,0];let d=0,c=0;for(const t of r)d+=t.week.runs,c+=t.week.liters,"L"===t.week.unit&&t.week.daily.forEach((t,e)=>l[e]+=t);const p=r.map(t=>t.last?.start).filter(t=>"number"==typeof t),h=r.map(t=>t.next?.start).filter(t=>"number"==typeof t),u=s?null:function(t,e){const i=new Map(t.sites.map(t=>[t.id,t]));for(let s=i.get(e),n=0;s&&n<20;s=s.parent_id?i.get(s.parent_id):void 0,n++){const i=t.pumpAssignments.find(t=>"site"===t.target_kind&&t.target_id===s.id&&null===t.end),n=i&&t.pumps.find(t=>t.id===i.pump_id);if(n)return{pump:n,via:s.id===e?null:s.name}}return null}(e,t);return{id:t,name:n?.name??"No site",path:n?he(e.sites,n.id):"No site",parent_id:n?.parent_id??null,children:s?[]:De(e.sites,t).map(t=>t.id),mps:r.length,valves:o.length,online:o.filter(t=>"offline"!==t.status).length,watering:o.filter(t=>"watering"===t.status).length,attention:r.filter(t=>"offline"!==t.status&&t.badges.length>0).length,offline:o.filter(t=>"offline"===t.status).length,last:p.length?Math.max(...p):null,next:h.length?Math.min(...h):null,week:{runs:d,liters:c,daily:l},pump:u?{name:u.pump.name,via:u.via}:null}}function Ue(t,e,i,s){const n=t.valves.map(t=>i.find(e=>e.device_id===t)).filter(t=>!!t),a=function(t,e){const i=[];for(const s of t.assignments)for(const t of zt(e,s.device_id))if((null===s.begin||s.begin<=t.end)&&(null===s.end||t.end<s.end)){const e=t.run;i.push({start:t.start,minutes:(e.duration_seconds??0)/60,liters:"number"==typeof e.liters?e.liters:null})}return i.sort((t,e)=>t.start-e.start)}(t,e),r=n.some(t=>t.has_flow_meter)||a.some(t=>null!==t.liters&&t.liters>0),o=a.filter(t=>t.start>=s-2592e6&&(t.liters??0)>0&&t.minutes>=1),l=o.reduce((t,e)=>t+e.minutes,0),d=r&&l>0?o.reduce((t,e)=>t+(e.liters??0),0)/l:null,c=n.length?n.some(t=>"watering"===t.status)?"watering":n.every(t=>"offline"===t.status)?"offline":"idle":"empty",p=n.map(t=>t.next).filter(t=>!!t),h=a[a.length-1]??null,u=n.reduce((t,e)=>t+e.missed,0),m=[];t.valves.length||m.push("no_valve");for(const t of["low_battery","stale"])n.some(e=>e.badges.includes(t))&&m.push(t);if(u>0&&m.push("missed"),r&&h&&0===h.liters&&h.minutes>=1&&m.push("no_flow"),null!==d&&t.expected_lpm){const e=(d-t.expected_lpm)/t.expected_lpm;e<-.25?m.push("flow_low"):e>.25&&m.push("flow_high")}return{id:t.id,name:t.name,site_id:t.site_id,valves:n.map(t=>({device_id:t.device_id,number:t.number,name:t.name,status:t.status,battery:t.battery,view_path:t.view_path})),status:c,last:h,next:p.length?p.reduce((t,e)=>e.start<t.start?e:t):null,week:ne(a,s,r),avg_lpm:d,expected_lpm:t.expected_lpm,pump:t.pump,missed:u,badges:m}}class Fe extends dt{_open(){this.summary&&this.dispatchEvent(new CustomEvent("xt-site-open",{detail:this.summary.id,bubbles:!0,composed:!0}))}render(){const t=this.summary;if(!t)return G;const e=t.watering?B`<span class="status watering" title="Valves watering now"><i></i>${t.watering} watering</span>`:B`<span class="status" title="Valves online / valves in this site"><i></i>${t.online} / ${t.valves} online</span>`;return B`<ha-card @click=${this._open} tabindex="0" role="link" aria-label=${t.path}>
+  `,t([ut({attribute:!1})],Pe.prototype,"hass",void 0),t([mt()],Pe.prototype,"_config",void 0),t([mt()],Pe.prototype,"_filter",void 0),customElements.get("irrigation-valves-card")||customElements.define("irrigation-valves-card",Pe);const De="__no_site__";function Re(t,e){return t.filter(t=>t.parent_id===e).sort((t,e)=>t.name.localeCompare(e.name))}function Ue(t,e,i){const s=t===De,n=s?null:e.sites.find(e=>e.id===t)??null,a=s?null:he(e.sites,t),r=i.filter(t=>a?!!t.site_id&&a.has(t.site_id):!t.site_id),o=r.flatMap(t=>t.valves),l=[0,0,0,0,0,0,0];let d=0,c=0;for(const t of r)d+=t.week.runs,c+=t.week.liters,"L"===t.week.unit&&t.week.daily.forEach((t,e)=>l[e]+=t);const p=r.map(t=>t.last?.start).filter(t=>"number"==typeof t),h=r.map(t=>t.next?.start).filter(t=>"number"==typeof t),u=s?null:function(t,e){const i=new Map(t.sites.map(t=>[t.id,t]));for(let s=i.get(e),n=0;s&&n<20;s=s.parent_id?i.get(s.parent_id):void 0,n++){const i=t.pumpAssignments.find(t=>"site"===t.target_kind&&t.target_id===s.id&&null===t.end),n=i&&t.pumps.find(t=>t.id===i.pump_id);if(n)return{pump:n,via:s.id===e?null:s.name}}return null}(e,t);return{id:t,name:n?.name??"No site",path:n?ue(e.sites,n.id):"No site",parent_id:n?.parent_id??null,children:s?[]:Re(e.sites,t).map(t=>t.id),mps:r.length,valves:o.length,online:o.filter(t=>"offline"!==t.status).length,watering:o.filter(t=>"watering"===t.status).length,attention:r.filter(t=>"offline"!==t.status&&t.badges.length>0).length,offline:o.filter(t=>"offline"===t.status).length,last:p.length?Math.max(...p):null,next:h.length?Math.min(...h):null,week:{runs:d,liters:c,daily:l},pump:u?{name:u.pump.name,via:u.via}:null}}function Fe(t,e,i,s){const n=t.valves.map(t=>i.find(e=>e.device_id===t)).filter(t=>!!t),a=function(t,e){const i=[];for(const s of t.assignments)for(const t of Nt(e,s.device_id))if((null===s.begin||s.begin<=t.end)&&(null===s.end||t.end<s.end)){const e=t.run;i.push({start:t.start,minutes:(e.duration_seconds??0)/60,liters:"number"==typeof e.liters?e.liters:null})}return i.sort((t,e)=>t.start-e.start)}(t,e),r=n.some(t=>t.has_flow_meter)||a.some(t=>null!==t.liters&&t.liters>0),o=a.filter(t=>t.start>=s-2592e6&&(t.liters??0)>0&&t.minutes>=1),l=o.reduce((t,e)=>t+e.minutes,0),d=r&&l>0?o.reduce((t,e)=>t+(e.liters??0),0)/l:null,c=n.length?n.some(t=>"watering"===t.status)?"watering":n.every(t=>"offline"===t.status)?"offline":"idle":"empty",p=n.map(t=>t.next).filter(t=>!!t),h=a[a.length-1]??null,u=n.reduce((t,e)=>t+e.missed,0),m=[];t.valves.length||m.push("no_valve");for(const t of["low_battery","stale"])n.some(e=>e.badges.includes(t))&&m.push(t);if(u>0&&m.push("missed"),r&&h&&0===h.liters&&h.minutes>=1&&m.push("no_flow"),null!==d&&t.expected_lpm){const e=(d-t.expected_lpm)/t.expected_lpm;e<-.25?m.push("flow_low"):e>.25&&m.push("flow_high")}return{id:t.id,name:t.name,site_id:t.site_id,valves:n.map(t=>({device_id:t.device_id,number:t.number,name:t.name,status:t.status,battery:t.battery,view_path:t.view_path})),status:c,last:h,next:p.length?p.reduce((t,e)=>e.start<t.start?e:t):null,week:ae(a,s,r),avg_lpm:d,expected_lpm:t.expected_lpm,pump:t.pump,missed:u,badges:m}}class Ie extends dt{_open(){this.summary&&this.dispatchEvent(new CustomEvent("xt-site-open",{detail:this.summary.id,bubbles:!0,composed:!0}))}render(){const t=this.summary;if(!t)return G;const e=t.watering?B`<span class="status watering" title="Valves watering now"><i></i>${t.watering} watering</span>`:B`<span class="status" title="Valves online / valves in this site"><i></i>${t.online} / ${t.valves} online</span>`;return B`<ha-card @click=${this._open} tabindex="0" role="link" aria-label=${t.path}>
       <div class="head">
         <span class="name" title=${t.path}>${t.name}</span>
         ${t.children.length?B`<span class="dim" title="Sub-sites"><ha-icon icon="mdi:file-tree-outline"></ha-icon>${t.children.length}</span>`:G}
@@ -385,15 +385,15 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       ${e}
       <dl>
         <dt title="Last run in this site"><ha-icon icon="mdi:history"></ha-icon></dt>
-        <dd title="Last run in this site">${t.last?ye(t.last):"–"}</dd>
+        <dd title="Last run in this site">${t.last?we(t.last):"–"}</dd>
         <dt title="Next planned run in this site"><ha-icon icon="mdi:calendar-clock"></ha-icon></dt>
-        <dd title="Next planned run in this site">${t.next?ye(t.next):"–"}</dd>
+        <dd title="Next planned run in this site">${t.next?we(t.next):"–"}</dd>
       </dl>
       <div class="week">
         <ha-icon icon="mdi:chart-bar" title="Last 7 days"></ha-icon>
         <xt-week-bars .daily=${t.week.daily}></xt-week-bars>
         <span class="dim" title="Last 7 days: runs and water of all valves in this site"
-          >${t.week.runs} runs · ${$e(t.week.liters)}</span
+          >${t.week.runs} runs · ${ke(t.week.liters)}</span
         >
       </div>
       ${t.attention||t.offline?B`<div class="badges">
@@ -402,7 +402,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 >`:G}
             ${t.offline?B`<span class="badge" title="Valves not reachable">${t.offline} offline</span>`:G}
           </div>`:G}
-    </ha-card>`}}Fe.styles=[fe,r`
+    </ha-card>`}}Ie.styles=[ge,r`
     :host {
       display: block;
     }
@@ -508,7 +508,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .badge.warn {
       background: color-mix(in srgb, var(--xt-warn) 18%, transparent);
     }
-  `],t([ut({attribute:!1})],Fe.prototype,"summary",void 0),customElements.get("xt-site-card")||customElements.define("xt-site-card",Fe);class Ie extends dt{constructor(){super(...arguments),this.sites=[],this.selected=null,this.counts={},this.noSite=!1,this._closed=new Set}_open(t){this.dispatchEvent(new CustomEvent("xt-site-open",{detail:t,bubbles:!0,composed:!0}))}_toggle(t,e){t.stopPropagation();const i=new Set(this._closed);i.has(e)?i.delete(e):i.add(e),this._closed=i}_node(t,e){const i=De(this.sites,t.id),s=this._closed.has(t.id);return B`
+  `],t([ut({attribute:!1})],Ie.prototype,"summary",void 0),customElements.get("xt-site-card")||customElements.define("xt-site-card",Ie);class He extends dt{constructor(){super(...arguments),this.sites=[],this.selected=null,this.counts={},this.noSite=!1,this._closed=new Set}_open(t){this.dispatchEvent(new CustomEvent("xt-site-open",{detail:t,bubbles:!0,composed:!0}))}_toggle(t,e){t.stopPropagation();const i=new Set(this._closed);i.has(e)?i.delete(e):i.add(e),this._closed=i}_node(t,e){const i=Re(this.sites,t.id),s=this._closed.has(t.id);return B`
       <button
         class="node ${t.id===this.selected?"on":""}"
         style="padding-left:${8+16*e}px"
@@ -528,12 +528,12 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       <button class="node all ${null===this.selected?"on":""}" @click=${()=>this._open(null)}>
         <ha-icon class="chev" icon="mdi:sprout-outline"></ha-icon><span class="label">All sites</span>
       </button>
-      ${De(this.sites,null).map(t=>this._node(t,0))}
-      ${this.noSite?B`<button class="node ${this.selected===Pe?"on":""}" @click=${()=>this._open(Pe)}>
+      ${Re(this.sites,null).map(t=>this._node(t,0))}
+      ${this.noSite?B`<button class="node ${this.selected===De?"on":""}" @click=${()=>this._open(De)}>
             <span class="chev"></span><span class="label dim">No site</span>
-            <span class="count">${this.counts[Pe]??""}</span>
+            <span class="count">${this.counts[De]??""}</span>
           </button>`:G}
-    `}}Ie.styles=[fe,r`
+    `}}He.styles=[ge,r`
     :host {
       display: flex;
       flex-direction: column;
@@ -585,12 +585,12 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       font-size: 0.8rem;
       font-variant-numeric: tabular-nums;
     }
-  `],t([ut({attribute:!1})],Ie.prototype,"sites",void 0),t([ut({attribute:!1})],Ie.prototype,"selected",void 0),t([ut({attribute:!1})],Ie.prototype,"counts",void 0),t([ut({type:Boolean})],Ie.prototype,"noSite",void 0),t([mt()],Ie.prototype,"_closed",void 0),customElements.get("xt-site-tree")||customElements.define("xt-site-tree",Ie);const He={no_valve:["No valve","No valve is assigned to this metering point","warn"],low_battery:["Low battery","The valve's battery is below 20 %","warn"],stale:["Silent","No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.","bad"],missed:["Missed","A planned run in the last 24 hours did not happen","bad"],no_flow:["No water flow","The last run here measured no water","bad"],flow_low:["Flow low","Mean flow of the last 30 days is well below the expected L/min","bad"],flow_high:["Flow high","Mean flow of the last 30 days is well above the expected L/min (leak?)","bad"]},We={watering:"Watering",idle:"Idle",offline:"Offline"};function je(t){const e=[ye(t.start),`${Math.round(t.minutes)} min`];return null!==t.liters&&e.push(`${Math.round(t.liters)} L`),e.join(" · ")}class Be extends dt{constructor(){super(...arguments),this.editable=!1,this.admin=!1}_edit(){this.dispatchEvent(new CustomEvent("xt-mp-edit",{detail:this.summary?.id,bubbles:!0,composed:!0}))}_openValve(t,e){t.stopPropagation(),this.dispatchEvent(new CustomEvent("xt-valve-open",{detail:e.view_path,bubbles:!0,composed:!0}))}_valve(t){return B`<button class="valve ${t.status}" @click=${e=>this._openValve(e,t)} title="Open valve ${t.name}">
+  `],t([ut({attribute:!1})],He.prototype,"sites",void 0),t([ut({attribute:!1})],He.prototype,"selected",void 0),t([ut({attribute:!1})],He.prototype,"counts",void 0),t([ut({type:Boolean})],He.prototype,"noSite",void 0),t([mt()],He.prototype,"_closed",void 0),customElements.get("xt-site-tree")||customElements.define("xt-site-tree",He);const We={no_valve:["No valve","No valve is assigned to this metering point","warn"],low_battery:["Low battery","The valve's battery is below 20 %","warn"],stale:["Silent","No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.","bad"],missed:["Missed","A planned run in the last 24 hours did not happen","bad"],no_flow:["No water flow","The last run here measured no water","bad"],flow_low:["Flow low","Mean flow of the last 30 days is well below the expected L/min","bad"],flow_high:["Flow high","Mean flow of the last 30 days is well above the expected L/min (leak?)","bad"]},je={watering:"Watering",idle:"Idle",offline:"Offline"};function Be(t){const e=[we(t.start),`${Math.round(t.minutes)} min`];return null!==t.liters&&e.push(`${Math.round(t.liters)} L`),e.join(" · ")}class qe extends dt{constructor(){super(...arguments),this.editable=!1,this.admin=!1}_edit(){this.dispatchEvent(new CustomEvent("xt-mp-edit",{detail:this.summary?.id,bubbles:!0,composed:!0}))}_openValve(t,e){t.stopPropagation(),this.dispatchEvent(new CustomEvent("xt-valve-open",{detail:e.view_path,bubbles:!0,composed:!0}))}_valve(t){return B`<button class="valve ${t.status}" @click=${e=>this._openValve(e,t)} title="Open valve ${t.name}">
       <ha-icon icon="mdi:valve"></ha-icon>
       <span class="num">${t.number?`#${t.number}`:t.name}</span>
-      <i></i><span>${We[t.status]}</span>
+      <i></i><span>${je[t.status]}</span>
       ${null!==t.battery?B`<span class="battery" title="Battery ${Math.round(t.battery)} %"
-            ><ha-icon icon=${ke(t.battery)}></ha-icon>${Math.round(t.battery)} %</span
+            ><ha-icon icon=${Se(t.battery)}></ha-icon>${Math.round(t.battery)} %</span
           >`:G}
     </button>`}_flow(t){if(null===t.avg_lpm)return G;const e=t.expected_lpm?` · expected ${t.expected_lpm}`:"";return B`<div class="row" title="Mean flow of the last 30 days' runs${t.expected_lpm?" vs. the expected L/min":""}">
       <ha-icon icon="mdi:speedometer"></ha-icon><span>${t.avg_lpm.toFixed(1)} L/min${e}</span>
@@ -612,9 +612,9 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           </div>`:G}
       <dl>
         <dt title="Last run here"><ha-icon icon="mdi:history"></ha-icon></dt>
-        <dd title="Last run here: start · duration · water">${t.last?je(t.last):"–"}</dd>
+        <dd title="Last run here: start · duration · water">${t.last?Be(t.last):"–"}</dd>
         <dt title="Next planned run"><ha-icon icon="mdi:calendar-clock"></ha-icon></dt>
-        <dd title="Next planned run: start · duration">${t.next?je(t.next):"–"}</dd>
+        <dd title="Next planned run: start · duration">${t.next?Be(t.next):"–"}</dd>
       </dl>
       <div class="week">
         <ha-icon icon="mdi:chart-bar" title="Last 7 days"></ha-icon>
@@ -623,9 +623,9 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       </div>
       ${this._flow(t)}
       ${t.badges.length?B`<div class="badges">
-            ${t.badges.map(e=>{const[i,s,n]=He[e];return B`<span class="badge ${n}" title=${s}>${i}${"missed"===e&&t.missed>1?` ${t.missed}`:""}</span>`})}
+            ${t.badges.map(e=>{const[i,s,n]=We[e];return B`<span class="badge ${n}" title=${s}>${i}${"missed"===e&&t.missed>1?` ${t.missed}`:""}</span>`})}
           </div>`:G}
-    </ha-card>`}}function qe(t,e,i,s,n){const a=t=>{const e=t.target,s=i.find(t=>t.text===e.value);s&&(e.value="",n(s.key))};return B`<input
+    </ha-card>`}}function Ve(t,e,i,s,n){const a=t=>{const e=t.target,s=i.find(t=>t.text===e.value);s&&(e.value="",n(s.key))};return B`<input
       class="pick"
       type="search"
       list=${t}
@@ -634,7 +634,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       ?disabled=${s}
       @input=${t=>{t.inputType&&"insertReplacementText"!==t.inputType||a(t)}}
       @change=${a}
-    /><datalist id=${t}>${i.map(t=>B`<option value=${t.text}></option>`)}</datalist>`}Be.styles=[fe,r`
+    /><datalist id=${t}>${i.map(t=>B`<option value=${t.text}></option>`)}</datalist>`}qe.styles=[ge,r`
     :host {
       display: block;
     }
@@ -792,7 +792,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .badge.bad {
       background: color-mix(in srgb, var(--xt-bad) 18%, transparent);
     }
-  `],t([ut({attribute:!1})],Be.prototype,"summary",void 0),t([ut({type:Boolean})],Be.prototype,"editable",void 0),t([ut({type:Boolean})],Be.prototype,"admin",void 0),customElements.get("xt-mp-card")||customElements.define("xt-mp-card",Be);const Ve=r`
+  `],t([ut({attribute:!1})],qe.prototype,"summary",void 0),t([ut({type:Boolean})],qe.prototype,"editable",void 0),t([ut({type:Boolean})],qe.prototype,"admin",void 0),customElements.get("xt-mp-card")||customElements.define("xt-mp-card",qe);const Ge=r`
   input.pick {
     box-sizing: border-box;
     width: 100%;
@@ -804,11 +804,11 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     background: var(--card-background-color, transparent);
     color: var(--primary-text-color);
   }
-`,Ge={watering:"Watering",idle:"Idle",offline:"Offline"};function Ke(t){return Yt(t,{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}class Je extends dt{constructor(){super(...arguments),this.sites=[],this.valves=[],this.busy=!1,this.error=null}_fire(t,e){this.dispatchEvent(new CustomEvent(t,{detail:e,bubbles:!0,composed:!0}))}_save(t){t.preventDefault();const e=t.target,i=t=>e.elements.namedItem(t).value,s=i("expected_lpm").trim();this._fire("xt-mp-save",{name:i("name"),description:i("description"),expected_lpm:""===s?null:Number(s),site_id:i("site_id")||null})}_valveLine(t,e){return B`<div class="valve">
+`,Ke={watering:"Watering",idle:"Idle",offline:"Offline"};function Je(t){return Zt(t,{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}class Ye extends dt{constructor(){super(...arguments),this.sites=[],this.valves=[],this.busy=!1,this.error=null}_fire(t,e){this.dispatchEvent(new CustomEvent(t,{detail:e,bubbles:!0,composed:!0}))}_save(t){t.preventDefault();const e=t.target,i=t=>e.elements.namedItem(t).value,s=i("expected_lpm").trim();this._fire("xt-mp-save",{name:i("name"),description:i("description"),expected_lpm:""===s?null:Number(s),site_id:i("site_id")||null})}_valveLine(t,e){return B`<div class="valve">
       <ha-icon icon="mdi:valve"></ha-icon>
       <span class="num">${t?.label??e}</span>
-      ${t?B`<i class=${t.status}></i><span>${Ge[t.status]}</span>`:G}
-      ${null!=t?.battery?B`<span class="dim"><ha-icon icon=${ke(t.battery)}></ha-icon>${Math.round(t.battery)} %</span>`:G}
+      ${t?B`<i class=${t.status}></i><span>${Ke[t.status]}</span>`:G}
+      ${null!=t?.battery?B`<span class="dim"><ha-icon icon=${Se(t.battery)}></ha-icon>${Math.round(t.battery)} %</span>`:G}
       <button type="button" class="link danger" ?disabled=${this.busy} @click=${()=>this._fire("xt-mp-unassign",e)}>
         Remove
       </button>
@@ -844,7 +844,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           ${t.valves.length?t.valves.map(t=>this._valveLine(e.get(t),t)):B`<div class="dim">No valve assigned.</div>`}
           <label
             >${t.valves.length?"Exchange for":"Assign"}
-            ${qe("xt-mp-valves","Type a number or name…",i.map(t=>({key:t.device_id,text:`${t.label}${t.name&&`#${t.name}`!==t.label&&t.name!==t.label?` · ${t.name}`:""}${t.at?` — now at ${t.at}`:" — free"}${"offline"===t.status?" (offline)":""}`})),this.busy,t=>this._fire("xt-mp-assign",t))}
+            ${Ve("xt-mp-valves","Type a number or name…",i.map(t=>({key:t.device_id,text:`${t.label}${t.name&&`#${t.name}`!==t.label&&t.name!==t.label?` · ${t.name}`:""}${t.at?` — now at ${t.at}`:" — free"}${"offline"===t.status?" (offline)":""}`})),this.busy,t=>this._fire("xt-mp-assign",t))}
           </label>
           <p class="hint dim">
             ${t.valves.length>1?"Both current valves' assignments end now (one valve per metering point).":t.valves.length?"The current valve's assignment ends now.":"The valve leaves the metering point it is at now."}
@@ -858,7 +858,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 ${s.map(t=>B`<li>
                     <span class="num">${e.get(t.device_id)?.label??t.device_id}</span>
                     <span class="dim"
-                      >${t.begin?Ke(t.begin):"from the start"} – ${t.end?Ke(t.end):"now"}</span
+                      >${t.begin?Je(t.begin):"from the start"} – ${t.end?Je(t.end):"now"}</span
                     >
                   </li>`)}
               </ul>
@@ -871,7 +871,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
             </section>`}
         ${this.error?B`<div class="error">${this.error}</div>`:G}
       </aside>
-    `}}Je.styles=[Ve,fe,r`
+    `}}Ye.styles=[Ge,ge,r`
       .backdrop {
         position: fixed;
         inset: 0;
@@ -1023,7 +1023,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       .error {
         color: var(--xt-bad);
       }
-    `],t([ut({attribute:!1})],Je.prototype,"mp",void 0),t([ut({attribute:!1})],Je.prototype,"sites",void 0),t([ut({attribute:!1})],Je.prototype,"valves",void 0),t([ut({type:Boolean})],Je.prototype,"busy",void 0),t([ut()],Je.prototype,"error",void 0),customElements.get("xt-mp-editor")||customElements.define("xt-mp-editor",Je);const Ye=r`
+    `],t([ut({attribute:!1})],Ye.prototype,"mp",void 0),t([ut({attribute:!1})],Ye.prototype,"sites",void 0),t([ut({attribute:!1})],Ye.prototype,"valves",void 0),t([ut({type:Boolean})],Ye.prototype,"busy",void 0),t([ut()],Ye.prototype,"error",void 0),customElements.get("xt-mp-editor")||customElements.define("xt-mp-editor",Ye);const Ze=r`
     :host {
       display: block;
     }
@@ -1180,7 +1180,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .err {
       color: var(--xt-bad);
     }
-`,Ze="xtend_tuya/irrigation_locations";function Xe(){return new URLSearchParams(window.location.search).get("site")}class Qe extends dt{constructor(){super(...arguments),this._selected=Xe(),this._edit=!1,this._editing=null,this._busy=!1,this._error=null,this._farm=new oe(this),this._mpMemo=null,this._onLocation=()=>{this._selected=Xe()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("site",t):e.searchParams.delete("site"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null}async _post(t){if(!this.hass?.callApi)return!1;this._busy=!0,this._error=null;try{return await this.hass.callApi("POST",Ze,t),At(),await this._farm.refresh(!0),!0}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),!1}finally{this._busy=!1}}async _createSite(t,e){const i=t.querySelector("input");i.value.trim()&&await this._post({action:"create_site",name:i.value,parent_id:e})&&(i.value="")}async _saveSite(t,e){const i=t.querySelector("input").value,s=t.querySelector("select").value||null;await this._post({action:"update_site",id:e.id,name:i,parent_id:s})}async _deleteSite(t){await this._post({action:"delete_site",id:t.id})&&this._open(t.parent_id)}_header(t,e){const i=[{id:null,name:"All sites"}];if(t&&t.id!==Pe){const e=new Map(this._farm.data.sites.map(t=>[t.id,t])),s=[];for(let i=e.get(t.id);i&&s.length<20;i=i.parent_id?e.get(i.parent_id):void 0)s.unshift(i);i.push(...s.map(t=>({id:t.id,name:t.name})))}else t&&i.push({id:Pe,name:"No site"});const s=i[i.length-1].name;return B`<div class="header">
+`,Xe="xtend_tuya/irrigation_locations";function Qe(){return new URLSearchParams(window.location.search).get("site")}class ti extends dt{constructor(){super(...arguments),this._selected=Qe(),this._edit=!1,this._editing=null,this._busy=!1,this._error=null,this._farm=new le(this),this._mpMemo=null,this._onLocation=()=>{this._selected=Qe()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("site",t):e.searchParams.delete("site"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null}async _post(t){if(!this.hass?.callApi)return!1;this._busy=!0,this._error=null;try{return await this.hass.callApi("POST",Xe,t),Mt(),await this._farm.refresh(!0),!0}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),!1}finally{this._busy=!1}}async _createSite(t,e){const i=t.querySelector("input");i.value.trim()&&await this._post({action:"create_site",name:i.value,parent_id:e})&&(i.value="")}async _saveSite(t,e){const i=t.querySelector("input").value,s=t.querySelector("select").value||null;await this._post({action:"update_site",id:e.id,name:i,parent_id:s})}async _deleteSite(t){await this._post({action:"delete_site",id:t.id})&&this._open(t.parent_id)}_header(t,e){const i=[{id:null,name:"All sites"}];if(t&&t.id!==De){const e=new Map(this._farm.data.sites.map(t=>[t.id,t])),s=[];for(let i=e.get(t.id);i&&s.length<20;i=i.parent_id?e.get(i.parent_id):void 0)s.unshift(i);i.push(...s.map(t=>({id:t.id,name:t.name})))}else t&&i.push({id:De,name:"No site"});const s=i[i.length-1].name;return B`<div class="header">
       <nav class="crumbs" aria-label="Site path">
         ${i.slice(0,-1).map(t=>B`<a href="#" @click=${e=>(e.preventDefault(),this._open(t.id))}>${t.name}</a><span>›</span>`)}
       </nav>
@@ -1197,7 +1197,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               ${t.watering?B`<span class="water" title="Valves watering now"><i></i>${t.watering} watering</span>`:G}
               ${t.attention?B`<span class="warn" title="Metering points with a warning">${t.attention} need attention</span>`:G}
               <span title="Last 7 days"
-                ><xt-week-bars .daily=${t.week.daily}></xt-week-bars>${t.week.runs} runs · ${$e(t.week.liters)}</span
+                ><xt-week-bars .daily=${t.week.daily}></xt-week-bars>${t.week.runs} runs · ${ke(t.week.liters)}</span
               >
               ${t.pump?B`<span title="Pump"><ha-icon icon="mdi:pump"></ha-icon>${t.pump.name}${t.pump.via?` · via ${t.pump.via}`:""}</span>`:G}
             `:B`
@@ -1206,7 +1206,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               <span><ha-icon icon="mdi:valve"></ha-icon>${e.online} / ${e.valves} online</span>
             `}
       </div>
-    </div>`}_editSite(t){const e=this._farm.data.sites,i=pe(e,t.id),s=e.filter(t=>!i.has(t.id)).map(t=>({id:t.id,path:he(e,t.id)})).sort((t,e)=>t.path.localeCompare(e.path)),n=!e.some(e=>e.parent_id===t.id)&&!this._farm.data.locations.some(e=>e.site_id===t.id);return B`<form class="editor" @submit=${e=>(e.preventDefault(),this._saveSite(e.target,t))}>
+    </div>`}_editSite(t){const e=this._farm.data.sites,i=he(e,t.id),s=e.filter(t=>!i.has(t.id)).map(t=>({id:t.id,path:ue(e,t.id)})).sort((t,e)=>t.path.localeCompare(e.path)),n=!e.some(e=>e.parent_id===t.id)&&!this._farm.data.locations.some(e=>e.site_id===t.id);return B`<form class="editor" @submit=${e=>(e.preventDefault(),this._saveSite(e.target,t))}>
       <label>Name <input .value=${t.name} required /></label>
       <label
         >Part of
@@ -1228,7 +1228,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     </form>`}_addSite(t){return B`<form class="editor" @submit=${e=>(e.preventDefault(),this._createSite(e.target,t))}>
       <label>${t?"New sub-site":"New site"} <input placeholder="Name" /></label>
       <button type="submit" ?disabled=${this._busy}>Add</button>
-    </form>`}async _saveMp(t,e){await this._post({action:"update_location",id:t.id,name:e.name,description:e.description,expected_lpm:e.expected_lpm})&&e.site_id!==t.site_id&&await this._post({action:"set_location_site",location_id:t.id,site_id:e.site_id})}async _createMp(t,e){const i=t.querySelector("input");if(i.value.trim()&&this.hass?.callApi){this._busy=!0,this._error=null;try{const t=await this.hass.callApi("POST",Ze,{action:"create_location",name:i.value});e&&await this.hass.callApi("POST",Ze,{action:"set_location_site",location_id:t.location.id,site_id:e}),i.value="",await this._farm.refresh(!0),this._editing=t.location.id}catch(t){const e=t;this._error=e.body?.error??e.message??String(t)}finally{this._busy=!1}}}_editor(t,e){const i=this._farm.data,s=i.sites.map(t=>({id:t.id,path:he(i.sites,t.id)})).sort((t,e)=>t.path.localeCompare(e.path)),n=e.map(t=>({device_id:t.device_id,label:t.number?`#${t.number}`:t.name,status:t.status,battery:t.battery,at:i.locationOf[t.device_id]?.name??null,name:t.name}));return B`<xt-mp-editor
+    </form>`}async _saveMp(t,e){await this._post({action:"update_location",id:t.id,name:e.name,description:e.description,expected_lpm:e.expected_lpm})&&e.site_id!==t.site_id&&await this._post({action:"set_location_site",location_id:t.id,site_id:e.site_id})}async _createMp(t,e){const i=t.querySelector("input");if(i.value.trim()&&this.hass?.callApi){this._busy=!0,this._error=null;try{const t=await this.hass.callApi("POST",Xe,{action:"create_location",name:i.value});e&&await this.hass.callApi("POST",Xe,{action:"set_location_site",location_id:t.location.id,site_id:e}),i.value="",await this._farm.refresh(!0),this._editing=t.location.id}catch(t){const e=t;this._error=e.body?.error??e.message??String(t)}finally{this._busy=!1}}}_editor(t,e){const i=this._farm.data,s=i.sites.map(t=>({id:t.id,path:ue(i.sites,t.id)})).sort((t,e)=>t.path.localeCompare(e.path)),n=e.map(t=>({device_id:t.device_id,label:t.number?`#${t.number}`:t.name,status:t.status,battery:t.battery,at:i.locationOf[t.device_id]?.name??null,name:t.name}));return B`<xt-mp-editor
       .mp=${t}
       .sites=${s}
       .valves=${n}
@@ -1242,10 +1242,10 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     ></xt-mp-editor>`}_addMp(t){return B`<form class="editor" @submit=${e=>(e.preventDefault(),this._createMp(e.target,t))}>
       <label>New metering point <input placeholder="Name" /></label>
       <button type="submit" ?disabled=${this._busy}>Add</button>
-    </form>`}render(){if(!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading sites…</div></ha-card>`;const t=this._farm.data,e=this._farm.summaries();if(this._mpMemo?.valves!==e){const i=Date.now();this._mpMemo={valves:e,list:t.locations.map(s=>Ue(s,t,e,i))}}const i=this._mpMemo.list,s=new Map(i.map(t=>[t.id,t])),n=t.locations.some(t=>!t.site_id),a=this._selected&&(this._selected===Pe||t.sites.some(t=>t.id===this._selected))?this._selected:null,r=a&&a!==Pe?t.sites.find(t=>t.id===a)??null:null,o=a?Re(a,t,i):null,l=a?o.children:[...De(t.sites,null).map(t=>t.id),...n?[Pe]:[]],d=l.map(e=>Re(e,t,i)),c=a?t.locations.filter(t=>a===Pe?!t.site_id:t.site_id===a).sort((t,e)=>t.name.localeCompare(e.name)):[],p={};for(const e of t.sites)p[e.id]=t.locations.filter(i=>pe(t.sites,e.id).has(i.site_id??"")).length;p[Pe]=t.locations.filter(t=>!t.site_id).length;const h=i.flatMap(t=>t.valves),u={sites:t.sites.length,mps:t.locations.length,valves:h.length,online:h.filter(t=>"offline"!==t.status).length},m=this._editing?t.locations.find(t=>t.id===this._editing):void 0,v=!!this.hass.user?.is_admin;return B`<div
+    </form>`}render(){if(!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading sites…</div></ha-card>`;const t=this._farm.data,e=this._farm.summaries();if(this._mpMemo?.valves!==e){const i=Date.now();this._mpMemo={valves:e,list:t.locations.map(s=>Fe(s,t,e,i))}}const i=this._mpMemo.list,s=new Map(i.map(t=>[t.id,t])),n=t.locations.some(t=>!t.site_id),a=this._selected&&(this._selected===De||t.sites.some(t=>t.id===this._selected))?this._selected:null,r=a&&a!==De?t.sites.find(t=>t.id===a)??null:null,o=a?Ue(a,t,i):null,l=a?o.children:[...Re(t.sites,null).map(t=>t.id),...n?[De]:[]],d=l.map(e=>Ue(e,t,i)),c=a?t.locations.filter(t=>a===De?!t.site_id:t.site_id===a).sort((t,e)=>t.name.localeCompare(e.name)):[],p={};for(const e of t.sites)p[e.id]=t.locations.filter(i=>he(t.sites,e.id).has(i.site_id??"")).length;p[De]=t.locations.filter(t=>!t.site_id).length;const h=i.flatMap(t=>t.valves),u={sites:t.sites.length,mps:t.locations.length,valves:h.length,online:h.filter(t=>"offline"!==t.status).length},m=this._editing?t.locations.find(t=>t.id===this._editing):void 0,v=!!this.hass.user?.is_admin;return B`<div
       class="layout"
       @xt-site-open=${t=>this._open(t.detail)}
-      @xt-valve-open=${t=>ve(t.detail)}
+      @xt-valve-open=${t=>fe(t.detail)}
       @xt-mp-edit=${t=>(this._editing=t.detail,this._error=null)}
     >
       <aside>
@@ -1258,34 +1258,34 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           ${this._farm.error?B`<div class="msg err">Could not load farm data: ${this._farm.error}</div>`:G}
           ${this._edit&&r?this._editSite(r):G}
         </section>
-        ${d.length||this._edit&&a!==Pe?B`<section class="panel">
+        ${d.length||this._edit&&a!==De?B`<section class="panel">
               <h3>${a?"Sub-sites":"Sites"} <span class="count">${d.length}</span></h3>
               <div class="grid">${d.map(t=>B`<xt-site-card .summary=${t}></xt-site-card>`)}</div>
-              ${this._edit&&a!==Pe?this._addSite(a):G}
+              ${this._edit&&a!==De?this._addSite(a):G}
             </section>`:G}
         ${c.length||this._edit&&a?B`<section class="panel">
               <h3>Metering points <span class="count">${c.length}</span></h3>
               <div class="grid">
                 ${c.map(t=>B`<xt-mp-card .summary=${s.get(t.id)} ?editable=${this._edit} ?admin=${v}></xt-mp-card>`)}
               </div>
-              ${this._edit&&a?this._addMp(a===Pe?null:a):G}
+              ${this._edit&&a?this._addMp(a===De?null:a):G}
             </section>`:G}
         ${a||t.sites.length?G:B`<div class="msg">No sites yet. Sites are created from the Tuya rooms once the valves report them, or by hand in Edit.</div>`}
       </main>
       ${m?this._editor(m,e):G}
-    </div>`}}Qe.styles=[fe,Ye,r`
+    </div>`}}ti.styles=[ge,Ze,r`
       .panel > h3:first-child {
         margin-top: 0;
       }
-    `],t([ut({attribute:!1})],Qe.prototype,"hass",void 0),t([mt()],Qe.prototype,"_selected",void 0),t([mt()],Qe.prototype,"_edit",void 0),t([mt()],Qe.prototype,"_editing",void 0),t([mt()],Qe.prototype,"_busy",void 0),t([mt()],Qe.prototype,"_error",void 0),customElements.get("irrigation-sites-card")||customElements.define("irrigation-sites-card",Qe);const ti=1e3;function ei(t,e){return(null===t.begin||t.begin<=e)&&(null===t.end||e<t.end)}function ii(t,e,i){const s=(e,s)=>t.pumpAssignments.find(t=>t.target_kind===e&&t.target_id===s&&ei(t,i))?.pump_id??null,n=s("location",e.id);if(n)return n;const a=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?a.get(e.site_id):void 0,i=0;t&&i<20;i++){const e=s("site",t.id);if(e)return e;t=t.parent_id?a.get(t.parent_id):void 0}return null}function si(t,e,i){const s=t.pumpAssignments.filter(t=>t.pump_id===e&&"site"===t.target_kind&&ei(t,i)).map(t=>t.target_id),n=[],a=[],r=e=>{const i=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?i.get(e.site_id):void 0,n=0;t&&n<20;n++){if(s.includes(t.id))return!0;t=t.parent_id?i.get(t.parent_id):void 0}return!1};for(const s of t.locations){const o=ii(t,s,i);o===e?n.push(s.id):o&&r(s)&&a.push({mp:s.id,pump:o})}return{sites:s,mps:n,overridden:a}}function ni(t,e){const i=Gt(t);return"day"===e?i:i+36e5*Math.floor(Jt(t))}function ai(t,e,i,s,n,a,r){const o=new Map,l=t=>{const e=ni(t,a);let i=o.get(e);return i||o.set(e,i={start:e,pump:null,valves:0,consumers:0}),i},d="hour"===a?36e5:864e5;for(let t=ni(s,a);t<n;t+=d)l(t);let c=null;for(const t of i[e.meter_entity]??[]){if(t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0)continue;const e=l(t.start);e.pump=(e.pump??0)+t.change*ti,c=(c??0)+t.change*ti}let p=0;for(const i of t.runs){const a=Date.parse(i.end);if(a<s||a>=n||"number"!=typeof i.liters)continue;const o=Nt(t,i.device_id,a);!o||ii(t,o,a)!==e.id||r&&!r(o)||(p+=i.liters,l(Date.parse(i.start)).valves+=i.liters)}let h=0;for(const a of function(t,e,i,s){return t.pumpConnections.filter(t=>t.pump_id===e&&(null===t.begin||t.begin<s)&&(null===t.end||t.end>i))}(t,e.id,s,n))if("consumer"===a.role&&a.meter_entity)for(const t of i[a.meter_entity]??[])t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0||!ei(a,t.start)||(h+=t.change*ti,l(t.start).consumers+=t.change*ti);return{pump:c,valves:p,consumers:h,unaccounted:null===c?null:c-p-h,buckets:[...o.values()].sort((t,e)=>t.start-e.start)}}function ri(t,e,i){const s=s=>{const n=[];let a=null;return t.forEach((r,o)=>{const l=r[s];"number"==typeof l?(a||n.push(a=[]),a.push([r.start,l]),e&&a.push([t[o+1]?.start??i,l])):a=null}),n},n=s("mean"),a=e?[]:s("max"),r=Math.max(0,...[...n,...a].flat().map(t=>t[1]));return{mean:n,max:a,peak:r}}function oi(t,e=3){const i=t/e,s=10**Math.floor(Math.log10(i)),n=[1,2,5,10].find(t=>t*s>=i)*s,a=Math.ceil(t/n-1e-9);return Array.from({length:a+1},(t,e)=>Math.round(e*n*1e9)/1e9)}const li="__no_pump__";class di extends dt{constructor(){super(...arguments),this.items=[],this.selected=null}render(){return this.items.map(t=>B`<button
+    `],t([ut({attribute:!1})],ti.prototype,"hass",void 0),t([mt()],ti.prototype,"_selected",void 0),t([mt()],ti.prototype,"_edit",void 0),t([mt()],ti.prototype,"_editing",void 0),t([mt()],ti.prototype,"_busy",void 0),t([mt()],ti.prototype,"_error",void 0),customElements.get("irrigation-sites-card")||customElements.define("irrigation-sites-card",ti);const ei=1e3;function ii(t,e){return(null===t.begin||t.begin<=e)&&(null===t.end||e<t.end)}function si(t,e,i){const s=(e,s)=>t.pumpAssignments.find(t=>t.target_kind===e&&t.target_id===s&&ii(t,i))?.pump_id??null,n=s("location",e.id);if(n)return n;const a=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?a.get(e.site_id):void 0,i=0;t&&i<20;i++){const e=s("site",t.id);if(e)return e;t=t.parent_id?a.get(t.parent_id):void 0}return null}function ni(t,e,i){const s=t.pumpAssignments.filter(t=>t.pump_id===e&&"site"===t.target_kind&&ii(t,i)).map(t=>t.target_id),n=[],a=[],r=e=>{const i=new Map(t.sites.map(t=>[t.id,t]));for(let t=e.site_id?i.get(e.site_id):void 0,n=0;t&&n<20;n++){if(s.includes(t.id))return!0;t=t.parent_id?i.get(t.parent_id):void 0}return!1};for(const s of t.locations){const o=si(t,s,i);o===e?n.push(s.id):o&&r(s)&&a.push({mp:s.id,pump:o})}return{sites:s,mps:n,overridden:a}}function ai(t,e){const i=Kt(t);return"day"===e?i:i+36e5*Math.floor(Yt(t))}function ri(t,e,i,s,n,a,r){const o=new Map,l=t=>{const e=ai(t,a);let i=o.get(e);return i||o.set(e,i={start:e,pump:null,valves:0,consumers:0}),i},d="hour"===a?36e5:864e5;for(let t=ai(s,a);t<n;t+=d)l(t);let c=null;for(const t of i[e.meter_entity]??[]){if(t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0)continue;const e=l(t.start);e.pump=(e.pump??0)+t.change*ei,c=(c??0)+t.change*ei}let p=0;for(const i of t.runs){const a=Date.parse(i.end);if(a<s||a>=n||"number"!=typeof i.liters)continue;const o=Ot(t,i.device_id,a);!o||si(t,o,a)!==e.id||r&&!r(o)||(p+=i.liters,l(Date.parse(i.start)).valves+=i.liters)}let h=0;for(const a of function(t,e,i,s){return t.pumpConnections.filter(t=>t.pump_id===e&&(null===t.begin||t.begin<s)&&(null===t.end||t.end>i))}(t,e.id,s,n))if("consumer"===a.role&&a.meter_entity)for(const t of i[a.meter_entity]??[])t.start<s||t.start>=n||"number"!=typeof t.change||t.change<0||!ii(a,t.start)||(h+=t.change*ei,l(t.start).consumers+=t.change*ei);return{pump:c,valves:p,consumers:h,unaccounted:null===c?null:c-p-h,buckets:[...o.values()].sort((t,e)=>t.start-e.start)}}function oi(t,e,i){const s=s=>{const n=[];let a=null;return t.forEach((r,o)=>{const l=r[s];"number"==typeof l?(a||n.push(a=[]),a.push([r.start,l]),e&&a.push([t[o+1]?.start??i,l])):a=null}),n},n=s("mean"),a=e?[]:s("max"),r=Math.max(0,...[...n,...a].flat().map(t=>t[1]));return{mean:n,max:a,peak:r}}function li(t,e=3){const i=t/e,s=10**Math.floor(Math.log10(i)),n=[1,2,5,10].find(t=>t*s>=i)*s,a=Math.ceil(t/n-1e-9);return Array.from({length:a+1},(t,e)=>Math.round(e*n*1e9)/1e9)}const di="__no_pump__";class ci extends dt{constructor(){super(...arguments),this.items=[],this.selected=null}render(){return this.items.map(t=>B`<button
         class="node ${t.id===this.selected?"on":""}"
         aria-current=${t.id===this.selected?"page":"false"}
         @click=${()=>this.dispatchEvent(new CustomEvent("xt-pump-open",{detail:t.id,bubbles:!0,composed:!0}))}
       >
-        ${t.id===li?B`<span class="dot none"></span>`:B`<span class="dot ${t.state}" title=${"unknown"===t.state?"No data from the pump":t.state}></span>`}
-        <span class="label ${t.id===li?"dim":""}">${t.name}</span>
+        ${t.id===di?B`<span class="dot none"></span>`:B`<span class="dot ${t.state}" title=${"unknown"===t.state?"No data from the pump":t.state}></span>`}
+        <span class="label ${t.id===di?"dim":""}">${t.name}</span>
         <span class="count">${t.count}</span>
-      </button>`)}}di.styles=[fe,r`
+      </button>`)}}ci.styles=[ge,r`
       :host {
         display: flex;
         flex-direction: column;
@@ -1347,16 +1347,16 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         font-size: 0.8rem;
         font-variant-numeric: tabular-nums;
       }
-    `],t([ut({attribute:!1})],di.prototype,"items",void 0),t([ut({attribute:!1})],di.prototype,"selected",void 0),customElements.get("xt-pump-list")||customElements.define("xt-pump-list",di);const ci=160;class pi extends dt{constructor(){super(...arguments),this.buckets=[],this.period="hour"}_label(t){return"hour"===this.period?Zt(t):Yt(t,{weekday:"short",day:"numeric"})}render(){const t=this.buckets.length;if(!t)return G;const e=Math.max(100,...this.buckets.map(t=>Math.max(t.pump??0,t.valves+t.consumers))),i=oi(e/1e3),s=1e3*i[i.length-1],n=i[1]<1?String(i[1]).split(".")[1].length:0,a=100/t,r=t=>t/s*142,o="hour"===this.period?4:t>10?5:1;return B`
+    `],t([ut({attribute:!1})],ci.prototype,"items",void 0),t([ut({attribute:!1})],ci.prototype,"selected",void 0),customElements.get("xt-pump-list")||customElements.define("xt-pump-list",ci);const pi=160;class hi extends dt{constructor(){super(...arguments),this.buckets=[],this.period="hour"}_label(t){return"hour"===this.period?Xt(t):Zt(t,{weekday:"short",day:"numeric"})}render(){const t=this.buckets.length;if(!t)return G;const e=Math.max(100,...this.buckets.map(t=>Math.max(t.pump??0,t.valves+t.consumers))),i=li(e/1e3),s=1e3*i[i.length-1],n=i[1]<1?String(i[1]).split(".")[1].length:0,a=100/t,r=t=>t/s*142,o="hour"===this.period?4:t>10?5:1;return B`
       <div class="unit">m³</div>
       <div class="plot">
         <div class="y">
           ${i.map(t=>B`<span style="top:${142-r(1e3*t)}px">${t.toFixed(n)}</span>`)}
         </div>
         <div>
-          <svg viewBox="0 0 100 ${ci}" preserveAspectRatio="none" role="img" aria-label="Pump delivery against valve and consumer use">
+          <svg viewBox="0 0 100 ${pi}" preserveAspectRatio="none" role="img" aria-label="Pump delivery against valve and consumer use">
             ${i.map(t=>q`<line class="grid" x1="0" x2="100" y1=${142-r(1e3*t)} y2=${142-r(1e3*t)}></line>`)}
-            ${this.buckets.map((t,e)=>{const i=e*a,s=t.valves+t.consumers,n=`${this._label(t.start)}: pump ${null===t.pump?"no data":Se(t.pump)}, valves ${Se(t.valves)}${t.consumers?`, consumers ${Se(t.consumers)}`:""}${null!==t.pump?`, unaccounted ${Se(t.pump-s)}`:""}`;return q`<g>
+            ${this.buckets.map((t,e)=>{const i=e*a,s=t.valves+t.consumers,n=`${this._label(t.start)}: pump ${null===t.pump?"no data":Ee(t.pump)}, valves ${Ee(t.valves)}${t.consumers?`, consumers ${Ee(t.consumers)}`:""}${null!==t.pump?`, unaccounted ${Ee(t.pump-s)}`:""}`;return q`<g>
                 <title>${n}</title>
                 <rect class="hit" x=${i} y="0" width=${a} height=${142}></rect>
                 ${null!==t.pump?q`<rect class="pump" x=${i+.1*a} y=${142-r(t.pump)} width=${.8*a} height=${r(t.pump)}></rect>`:G}
@@ -1373,14 +1373,14 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         <span><i class="pump"></i>Pump volume</span>
         <span><i class="valves"></i>Valve volume</span>
       </div>
-    `}}pi.styles=[fe,r`
+    `}}hi.styles=[ge,r`
       :host {
         display: block;
         --xt-consumer: var(--teal-color, #009688);
       }
       svg {
         width: 100%;
-        height: ${ci}px;
+        height: ${pi}px;
         display: block;
       }
       .unit {
@@ -1464,12 +1464,12 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       i.valves {
         background: var(--xt-water);
       }
-    `],t([ut({attribute:!1})],pi.prototype,"buckets",void 0),t([ut()],pi.prototype,"period",void 0),customElements.get("xt-pump-chart")||customElements.define("xt-pump-chart",pi);const hi=120;class ui extends dt{constructor(){super(...arguments),this.lines=null,this.from=0,this.to=0,this.period="hour"}_label(t){return"hour"===this.period?Zt(t):Yt(t,{weekday:"short",day:"numeric"})}render(){const t=this.lines,e=this.to-this.from;if(!t||e<=0)return G;const i=oi(Math.max(10,t.peak)),s=i[i.length-1],n=t=>Math.min(100,Math.max(0,(t-this.from)/e*100)),a=t=>102-t/s*102,r=t=>t.map(([t,e])=>`${n(t)},${a(e)}`).join(" "),o="hour"===this.period?36e5:864e5,l="hour"===this.period?4:e>864e6?5:1,d=[];for(let t=ni(this.from,this.period),e=0;t<this.to;t+=o,e++)e%l===0&&t>=this.from&&d.push(t);return B`
+    `],t([ut({attribute:!1})],hi.prototype,"buckets",void 0),t([ut()],hi.prototype,"period",void 0),customElements.get("xt-pump-chart")||customElements.define("xt-pump-chart",hi);const ui=120;class mi extends dt{constructor(){super(...arguments),this.lines=null,this.from=0,this.to=0,this.period="hour"}_label(t){return"hour"===this.period?Xt(t):Zt(t,{weekday:"short",day:"numeric"})}render(){const t=this.lines,e=this.to-this.from;if(!t||e<=0)return G;const i=li(Math.max(10,t.peak)),s=i[i.length-1],n=t=>Math.min(100,Math.max(0,(t-this.from)/e*100)),a=t=>102-t/s*102,r=t=>t.map(([t,e])=>`${n(t)},${a(e)}`).join(" "),o="hour"===this.period?36e5:864e5,l="hour"===this.period?4:e>864e6?5:1,d=[];for(let t=ai(this.from,this.period),e=0;t<this.to;t+=o,e++)e%l===0&&t>=this.from&&d.push(t);return B`
       <div class="unit">L/min</div>
       <div class="plot">
         <div class="y">${i.map(t=>B`<span style="top:${a(t)}px">${t}</span>`)}</div>
         <div>
-          <svg viewBox="0 0 100 ${hi}" preserveAspectRatio="none" role="img" aria-label="Pump flow rate">
+          <svg viewBox="0 0 100 ${ui}" preserveAspectRatio="none" role="img" aria-label="Pump flow rate">
             ${i.map(t=>q`<line class="grid" x1="0" x2="100" y1=${a(t)} y2=${a(t)}></line>`)}
             ${t.max.map(t=>q`<polyline class="max" points=${r(t)}></polyline>`)}
             ${t.mean.map(t=>q`<polyline class="flow" points=${r(t)}></polyline>`)}
@@ -1478,9 +1478,9 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         </div>
       </div>
       ${t.max.length?B`<div class="legend"><span><i class="flow"></i>Mean</span><span><i class="max"></i>Max</span></div>`:G}
-    `}}ui.styles=[pi.styles,r`
+    `}}mi.styles=[hi.styles,r`
       svg {
-        height: ${hi}px;
+        height: ${ui}px;
       }
       polyline {
         fill: none;
@@ -1504,7 +1504,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       i.max {
         background: color-mix(in srgb, var(--xt-water) 35%, transparent);
       }
-    `],t([ut({attribute:!1})],ui.prototype,"lines",void 0),t([ut({attribute:!1})],ui.prototype,"from",void 0),t([ut({attribute:!1})],ui.prototype,"to",void 0),t([ut()],ui.prototype,"period",void 0),customElements.get("xt-pump-flow-chart")||customElements.define("xt-pump-flow-chart",ui);class mi extends dt{constructor(){super(...arguments),this.devices=[],this.exclude=[],this.placeholder="Search devices by name, area or model",this._q=""}render(){const t=this._q.trim().toLowerCase(),e=t?this.devices.filter(t=>!this.exclude.includes(t.id)).filter(e=>[e.name,e.area,e.model].some(e=>e?.toLowerCase().includes(t))).slice(0,30):[];return B`
+    `],t([ut({attribute:!1})],mi.prototype,"lines",void 0),t([ut({attribute:!1})],mi.prototype,"from",void 0),t([ut({attribute:!1})],mi.prototype,"to",void 0),t([ut()],mi.prototype,"period",void 0),customElements.get("xt-pump-flow-chart")||customElements.define("xt-pump-flow-chart",mi);class vi extends dt{constructor(){super(...arguments),this.devices=[],this.exclude=[],this.placeholder="Search devices by name, area or model",this._q=""}render(){const t=this._q.trim().toLowerCase(),e=t?this.devices.filter(t=>!this.exclude.includes(t.id)).filter(e=>[e.name,e.area,e.model].some(e=>e?.toLowerCase().includes(t))).slice(0,30):[];return B`
       <input type="search" placeholder=${this.placeholder} .value=${this._q} @input=${t=>this._q=t.target.value} />
       ${t?B`<ul role="listbox">
             ${e.length?e.map(t=>B`<li
@@ -1516,7 +1516,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                     <span>${t.name}</span><span class="dim">${[t.area,t.model].filter(Boolean).join(" · ")}</span>
                   </li>`):B`<li class="dim">No device matches.</li>`}
           </ul>`:G}
-    `}_pick(t){this._q="",this.dispatchEvent(new CustomEvent("xt-device-picked",{detail:t,bubbles:!0,composed:!0}))}}mi.styles=[fe,r`
+    `}_pick(t){this._q="",this.dispatchEvent(new CustomEvent("xt-device-picked",{detail:t,bubbles:!0,composed:!0}))}}vi.styles=[ge,r`
       :host {
         display: flex;
         flex-direction: column;
@@ -1557,7 +1557,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         color: var(--xt-dim);
         font-size: 0.85rem;
       }
-    `],t([ut({attribute:!1})],mi.prototype,"devices",void 0),t([ut({attribute:!1})],mi.prototype,"exclude",void 0),t([ut()],mi.prototype,"placeholder",void 0),t([mt()],mi.prototype,"_q",void 0),customElements.get("xt-device-picker")||customElements.define("xt-device-picker",mi);const vi={"24h":{ms:864e5,period:"hour"},"7d":{ms:6048e5,period:"day"},"30d":{ms:2592e6,period:"day"}},fi="xt-pumps-range",gi=["meter_entity","flow_entity","pressure_entity","status_entity"],_i={meter_entity:"Water meter (m³ total)",flow_entity:"Flow rate",pressure_entity:"Pressure",status_entity:"Status"},xi={meter_entity:/_fct_total_delivered_flow_mc$/,flow_entity:/_vf_flowliter$/,pressure_entity:/_vp_pressurebar$/,status_entity:/_pumpstatus$/};function bi(){return new URLSearchParams(window.location.search).get("pump")}class yi extends dt{constructor(){super(...arguments),this._selected=bi(),this._range=function(){try{const t=localStorage.getItem(fi);return t&&t in vi?t:"7d"}catch{return"7d"}}(),this._stats={},this._site=null,this._edit=!1,this._busy=!1,this._error=null,this._connecting=null,this._statsKey="",this._flow=null,this._flowWanted=null,this._flowKey="",this._farm=new oe(this),this._balanceMemo=null,this._mpMemo=null,this._onLocation=()=>{this._selected=bi()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}updated(){const t=`${this._range}|${this._farm.data.pumps.length}|${this._farm.data.pumpConnections.length}`;this.hass?.callApi&&this._farm.loaded&&t!==this._statsKey&&(this._statsKey=t,this._loadStats());const e=this._flowWanted,i=e?`${e.entity}|${e.range}`:"";this.hass?.callApi&&e&&i!==this._flowKey&&(this._flowKey=i,this._loadFlow(e.entity,e.range,i))}async _loadFlow(t,e,i){try{const s=await this.hass.callApi("GET",`xtend_tuya/pump_flow?range=${e}&entity=${encodeURIComponent(t)}`),n=Date.now();i===this._flowKey&&(this._flow={key:i,lines:ri(s.rows??[],s.raw,n),from:n-vi[e].ms,to:n})}catch(t){this._error=`Could not load pump flow: ${t instanceof Error?t.message:String(t)}`}}async _loadStats(){const{ms:t}=vi[this._range],e=new Date(Date.now()-t).toISOString();try{const t=await this.hass.callApi("GET",`xtend_tuya/pump_stats?period=hour&start=${encodeURIComponent(e)}`);this._stats=t.series??{}}catch(t){this._error=`Could not load pump statistics: ${t instanceof Error?t.message:String(t)}`}}_state(t){return t?this.hass?.states[t]:void 0}_num(t){const e=this._state(t),i=Number(e?.state);return e&&""!==e.state&&Number.isFinite(i)?i:null}_pumpState(t){const e=this._state(t.status_entity)?.state,i=this._num(t.flow_entity),s=this._state(t.meter_entity)?.state;return s&&"unknown"!==s&&"unavailable"!==s?"Go"===e||null!==i&&i>0?"running":"idle":"unknown"}_devices(){const t=this.hass?.areas??{};return Object.values(this.hass?.devices??{}).map(e=>({id:e.id,name:e.name_by_user||e.name||e.id,area:e.area_id?t[e.area_id]?.name??null:null,model:e.model??null}))}_deviceName(t){const e=this.hass?.devices[t];return e&&(e.name_by_user||e.name)||t}_sensorsOf(t){return t&&this.hass?Object.values(this.hass.entities).filter(e=>e.device_id===t&&e.entity_id.startsWith("sensor.")).map(t=>t.entity_id).sort():[]}_deviceOf(t){return t?this.hass?.entities[t]?.device_id??null:null}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("pump",t):e.searchParams.delete("pump"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null,this._connecting=null}_setRange(t){this._range=t;try{localStorage.setItem(fi,t)}catch{}}async _post(t){if(!this.hass?.callApi)return null;this._busy=!0,this._error=null;try{const e=await this.hass.callApi("POST","xtend_tuya/irrigation_locations",t);return await this._farm.refresh(!0),this._statsKey="",e}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),null}finally{this._busy=!1}}async _createPump(t){const e=this._sensorsOf(t),i=t=>e.find(e=>xi[t].test(e))??null,s=i("meter_entity");if(!s)return void(this._error=`${this._deviceName(t)} has no water meter sensor (…_fct_total_delivered_flow_mc). Create the pump from its meter's device.`);const n=await this._post({action:"create_pump",name:this._deviceName(t),meter_entity:s,flow_entity:i("flow_entity"),pressure_entity:i("pressure_entity"),status_entity:i("status_entity")}),a=n?.pump;a&&this._open(a.id)}_savePump(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value,n={action:"update_pump",id:e.id,name:s("name")};for(const t of gi)n[t]=s(t)||null;this._post(n)}_assign(t,e){t.preventDefault();const i=t.target.querySelector("select"),[s,n]=i.value.split(":");n&&this._post({action:"assign_pump",pump_id:e.id,target_kind:s,target_id:n})}_connect(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value;this._post({action:"connect_device",pump_id:e.id,device_id:this._connecting,role:s("role"),meter_entity:s("meter_entity")||null}).then(t=>{t&&(this._connecting=null)})}_figures(t,e){const i=this._num(t.flow_entity),s=this._num(t.pressure_entity),n=this._state(t.status_entity)?.state,a=this._pumpState(t);return B`<div class="figures">
+    `],t([ut({attribute:!1})],vi.prototype,"devices",void 0),t([ut({attribute:!1})],vi.prototype,"exclude",void 0),t([ut()],vi.prototype,"placeholder",void 0),t([mt()],vi.prototype,"_q",void 0),customElements.get("xt-device-picker")||customElements.define("xt-device-picker",vi);const fi={"24h":{ms:864e5,period:"hour"},"7d":{ms:6048e5,period:"day"},"30d":{ms:2592e6,period:"day"}},gi="xt-pumps-range",_i=["meter_entity","flow_entity","pressure_entity","status_entity"],xi={meter_entity:"Water meter (m³ total)",flow_entity:"Flow rate",pressure_entity:"Pressure",status_entity:"Status"},bi={meter_entity:/_fct_total_delivered_flow_mc$/,flow_entity:/_vf_flowliter$/,pressure_entity:/_vp_pressurebar$/,status_entity:/_pumpstatus$/};function yi(){return new URLSearchParams(window.location.search).get("pump")}class wi extends dt{constructor(){super(...arguments),this._selected=yi(),this._range=function(){try{const t=localStorage.getItem(gi);return t&&t in fi?t:"7d"}catch{return"7d"}}(),this._stats={},this._site=null,this._edit=!1,this._busy=!1,this._error=null,this._connecting=null,this._statsKey="",this._flow=null,this._flowWanted=null,this._flowKey="",this._farm=new le(this),this._balanceMemo=null,this._mpMemo=null,this._onLocation=()=>{this._selected=yi()}}setConfig(t){}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation)}updated(){const t=`${this._range}|${this._farm.data.pumps.length}|${this._farm.data.pumpConnections.length}`;this.hass?.callApi&&this._farm.loaded&&t!==this._statsKey&&(this._statsKey=t,this._loadStats());const e=this._flowWanted,i=e?`${e.entity}|${e.range}`:"";this.hass?.callApi&&e&&i!==this._flowKey&&(this._flowKey=i,this._loadFlow(e.entity,e.range,i))}async _loadFlow(t,e,i){try{const s=await this.hass.callApi("GET",`xtend_tuya/pump_flow?range=${e}&entity=${encodeURIComponent(t)}`),n=Date.now();i===this._flowKey&&(this._flow={key:i,lines:oi(s.rows??[],s.raw,n),from:n-fi[e].ms,to:n})}catch(t){this._error=`Could not load pump flow: ${t instanceof Error?t.message:String(t)}`}}async _loadStats(){const{ms:t}=fi[this._range],e=new Date(Date.now()-t).toISOString();try{const t=await this.hass.callApi("GET",`xtend_tuya/pump_stats?period=hour&start=${encodeURIComponent(e)}`);this._stats=t.series??{}}catch(t){this._error=`Could not load pump statistics: ${t instanceof Error?t.message:String(t)}`}}_state(t){return t?this.hass?.states[t]:void 0}_num(t){const e=this._state(t),i=Number(e?.state);return e&&""!==e.state&&Number.isFinite(i)?i:null}_pumpState(t){const e=this._state(t.status_entity)?.state,i=this._num(t.flow_entity),s=this._state(t.meter_entity)?.state;return s&&"unknown"!==s&&"unavailable"!==s?"Go"===e||null!==i&&i>0?"running":"idle":"unknown"}_devices(){const t=this.hass?.areas??{};return Object.values(this.hass?.devices??{}).map(e=>({id:e.id,name:e.name_by_user||e.name||e.id,area:e.area_id?t[e.area_id]?.name??null:null,model:e.model??null}))}_deviceName(t){const e=this.hass?.devices[t];return e&&(e.name_by_user||e.name)||t}_sensorsOf(t){return t&&this.hass?Object.values(this.hass.entities).filter(e=>e.device_id===t&&e.entity_id.startsWith("sensor.")).map(t=>t.entity_id).sort():[]}_deviceOf(t){return t?this.hass?.entities[t]?.device_id??null:null}_open(t){const e=new URL(window.location.href);t?e.searchParams.set("pump",t):e.searchParams.delete("pump"),window.history.pushState(null,"",e.pathname+e.search),this._selected=t,this._error=null,this._connecting=null}_setRange(t){this._range=t;try{localStorage.setItem(gi,t)}catch{}}async _post(t){if(!this.hass?.callApi)return null;this._busy=!0,this._error=null;try{const e=await this.hass.callApi("POST","xtend_tuya/irrigation_locations",t);return await this._farm.refresh(!0),this._statsKey="",e}catch(t){const e=t;return this._error=e.body?.error??e.message??String(t),null}finally{this._busy=!1}}async _createPump(t){const e=this._sensorsOf(t),i=t=>e.find(e=>bi[t].test(e))??null,s=i("meter_entity");if(!s)return void(this._error=`${this._deviceName(t)} has no water meter sensor (…_fct_total_delivered_flow_mc). Create the pump from its meter's device.`);const n=await this._post({action:"create_pump",name:this._deviceName(t),meter_entity:s,flow_entity:i("flow_entity"),pressure_entity:i("pressure_entity"),status_entity:i("status_entity")}),a=n?.pump;a&&this._open(a.id)}_savePump(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value,n={action:"update_pump",id:e.id,name:s("name")};for(const t of _i)n[t]=s(t)||null;this._post(n)}_assign(t,e){t.preventDefault();const i=t.target.querySelector("select"),[s,n]=i.value.split(":");n&&this._post({action:"assign_pump",pump_id:e.id,target_kind:s,target_id:n})}_connect(t,e){t.preventDefault();const i=t.target,s=t=>i.elements.namedItem(t).value;this._post({action:"connect_device",pump_id:e.id,device_id:this._connecting,role:s("role"),meter_entity:s("meter_entity")||null}).then(t=>{t&&(this._connecting=null)})}_figures(t,e){const i=this._num(t.flow_entity),s=this._num(t.pressure_entity),n=this._state(t.status_entity)?.state,a=this._pumpState(t);return B`<div class="figures">
       ${"unknown"===a?B`<span class="warn" title="The pump's meter reports no value">No data from the pump</span>`:B`<span title=${n?`Pump status: ${n}`:"Pump status"}
             ><i class="dot ${a}"></i>${"Go"===n?"Running":n??("running"===a?"Running":"Idle")}</span
           >`}
@@ -1566,23 +1566,23 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       <span title="Metering points and valves fed now"
         ><ha-icon icon="mdi:map-marker-multiple-outline"></ha-icon>${e.mps} metering points · ${e.valves} valves</span
       >
-    </div>`}_inSite(){if(!this._site)return;const t=pe(this._farm.data.sites,this._site);return e=>!!e.site_id&&t.has(e.site_id)}_balance(t){const{ms:e,period:i}=vi[this._range],s=`${t.id}|${this._range}|${this._site}|${Math.floor(Date.now()/6e4)}`,n=this._balanceMemo;if(!n||n.key!==s||n.data!==this._farm.data||n.stats!==this._stats){const n=Date.now();this._balanceMemo={key:s,data:this._farm.data,stats:this._stats,value:ai(this._farm.data,t,this._stats,n-e,n,i,this._inSite())}}const a=this._balanceMemo.value,r=t=>a.pump?`${Math.round(t/a.pump*100)} %`:"",o=this._site?he(this._farm.data.sites,this._site):null;return B`<section>
+    </div>`}_inSite(){if(!this._site)return;const t=he(this._farm.data.sites,this._site);return e=>!!e.site_id&&t.has(e.site_id)}_balance(t){const{ms:e,period:i}=fi[this._range],s=`${t.id}|${this._range}|${this._site}|${Math.floor(Date.now()/6e4)}`,n=this._balanceMemo;if(!n||n.key!==s||n.data!==this._farm.data||n.stats!==this._stats){const n=Date.now();this._balanceMemo={key:s,data:this._farm.data,stats:this._stats,value:ri(this._farm.data,t,this._stats,n-e,n,i,this._inSite())}}const a=this._balanceMemo.value,r=t=>a.pump?`${Math.round(t/a.pump*100)} %`:"",o=this._site?ue(this._farm.data.sites,this._site):null;return B`<section>
       <div class="section-head">
         <h3>Water flow</h3>
         <div class="chips" role="group" aria-label="Range">
-          ${Object.keys(vi).map(t=>B`<button class=${t===this._range?"on":""} @click=${()=>this._setRange(t)}>${t}</button>`)}
+          ${Object.keys(fi).map(t=>B`<button class=${t===this._range?"on":""} @click=${()=>this._setRange(t)}>${t}</button>`)}
         </div>
       </div>
       <div class="panel">
         <div class="tiles">
           <div title="What the pump's meter counted">
             <ha-icon icon="mdi:waves"></ha-icon>
-            <div><span>Pump volume</span><b>${null===a.pump?"no data":Se(a.pump)}</b><span class="dim">${r(a.pump??0)}</span></div>
+            <div><span>Pump volume</span><b>${null===a.pump?"no data":Ee(a.pump)}</b><span class="dim">${r(a.pump??0)}</span></div>
           </div>
           <div title="Runs of the valves this pump fed at the time${o?`, in ${o}`:""}">
             <ha-icon icon="mdi:pipe-valve"></ha-icon>
             <div>
-              <span>${o?`Valve volume in ${o}`:"Valve volume"}</span><b>${Se(a.valves)}</b><span class="dim">${r(a.valves)}</span>
+              <span>${o?`Valve volume in ${o}`:"Valve volume"}</span><b>${Ee(a.valves)}</b><span class="dim">${r(a.valves)}</span>
             </div>
           </div>
           ${o?B`<div class="warn" title="Unaccounted water needs the whole pump: clear the site filter">
@@ -1591,7 +1591,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               </div>`:B`<div class="warn" title="Pump minus valves minus metered consumers: tanks, taps, unmetered valves, leaks">
                 <ha-icon icon="mdi:alert-outline"></ha-icon>
                 <div>
-                  <span>Unaccounted water</span><b>${null===a.unaccounted?"–":Se(a.unaccounted)}</b
+                  <span>Unaccounted water</span><b>${null===a.unaccounted?"–":Ee(a.unaccounted)}</b
                   ><span class="dim">${null===a.unaccounted?"":r(a.unaccounted)}</span>
                 </div>
               </div>`}
@@ -1602,7 +1602,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     </section>`}_flowChart(t,e){if(this._flowWanted=t.flow_entity?{entity:t.flow_entity,range:this._range}:null,!t.flow_entity)return G;const i=this._flow?.key===`${t.flow_entity}|${this._range}`?this._flow:null;return B`<div class="panel flow">
       <h4>Flow</h4>
       ${i?B`<xt-pump-flow-chart .lines=${i.lines} .from=${i.from} .to=${i.to} period=${e}></xt-pump-flow-chart>`:B`<div class="dim">Loading…</div>`}
-    </div>`}_feeds(t,e){const i=this._farm.data,s=si(i,t.id,Date.now()),n=this._inSite(),a=t=>{const e=i.locations.find(e=>e.id===t);return!n||!!e&&n(e)},r={...s,mps:s.mps.filter(a),overridden:s.overridden.filter(t=>a(t.mp))},o=t=>B`<xt-mp-card .summary=${e.get(t)}></xt-mp-card>`,l=new Set,d=r.sites.map(t=>{const e=pe(i.sites,t),s=r.mps.filter(t=>{const s=i.locations.find(e=>e.id===t);return s?.site_id&&e.has(s.site_id)});return s.forEach(t=>l.add(t)),{siteId:t,path:he(i.sites,t),mps:s}}).sort((t,e)=>t.path.localeCompare(e.path)),c=r.mps.filter(t=>!l.has(t));return B`<section>
+    </div>`}_feeds(t,e){const i=this._farm.data,s=ni(i,t.id,Date.now()),n=this._inSite(),a=t=>{const e=i.locations.find(e=>e.id===t);return!n||!!e&&n(e)},r={...s,mps:s.mps.filter(a),overridden:s.overridden.filter(t=>a(t.mp))},o=t=>B`<xt-mp-card .summary=${e.get(t)}></xt-mp-card>`,l=new Set,d=r.sites.map(t=>{const e=he(i.sites,t),s=r.mps.filter(t=>{const s=i.locations.find(e=>e.id===t);return s?.site_id&&e.has(s.site_id)});return s.forEach(t=>l.add(t)),{siteId:t,path:ue(i.sites,t),mps:s}}).sort((t,e)=>t.path.localeCompare(e.path)),c=r.mps.filter(t=>!l.has(t));return B`<section>
       <h3>Assigned Valves <span class="count">· ${r.mps.length}</span></h3>
       <div class="panel">
         ${this._edit?this._assignForm(t):G}
@@ -1623,7 +1623,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                   </li>`;var e})}
               </ul>`:G}
       </div>
-    </section>`}_assignForm(t){const e=this._farm.data,i=e.sites.map(t=>({v:`site:${t.id}`,l:he(e.sites,t.id)})).sort((t,e)=>t.l.localeCompare(e.l)),s=e.locations.map(t=>({v:`location:${t.id}`,l:t.name})).sort((t,e)=>t.l.localeCompare(e.l));return B`<form class="editor" @submit=${e=>this._assign(e,t)}>
+    </section>`}_assignForm(t){const e=this._farm.data,i=e.sites.map(t=>({v:`site:${t.id}`,l:ue(e.sites,t.id)})).sort((t,e)=>t.l.localeCompare(e.l)),s=e.locations.map(t=>({v:`location:${t.id}`,l:t.name})).sort((t,e)=>t.l.localeCompare(e.l));return B`<form class="editor" @submit=${e=>this._assign(e,t)}>
       <label
         >Assign this pump to
         <select>
@@ -1677,20 +1677,20 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       </label>
       <button type="submit" ?disabled=${this._busy}>Connect</button>
       <button type="button" @click=${()=>this._connecting=null}>Cancel</button>
-    </form>`}_valveDevices(){return this._farm.valves.map(t=>this.hass?.entities[t.registry_entity]?.device_id).filter(t=>!!t)}_pumpForm(t){const e=this._deviceOf(t.meter_entity),i=[...new Set([...this._sensorsOf(e),...gi.map(e=>t[e]).filter(t=>!!t)])].sort();return B`<form class="editor" @submit=${e=>this._savePump(e,t)}>
+    </form>`}_valveDevices(){return this._farm.valves.map(t=>this.hass?.entities[t.registry_entity]?.device_id).filter(t=>!!t)}_pumpForm(t){const e=this._deviceOf(t.meter_entity),i=[...new Set([...this._sensorsOf(e),..._i.map(e=>t[e]).filter(t=>!!t)])].sort();return B`<form class="editor" @submit=${e=>this._savePump(e,t)}>
       <label>Name <input name="name" .value=${t.name} required /></label>
-      ${gi.map(e=>B`<label
-          >${_i[e]}
+      ${_i.map(e=>B`<label
+          >${xi[e]}
           <select name=${e}>
             ${"meter_entity"===e?G:B`<option value="" ?selected=${!t[e]}>— none —</option>`}
             ${i.map(i=>B`<option value=${i} ?selected=${i===t[e]}>${i}</option>`)}
           </select>
         </label>`)}
       <button type="submit" ?disabled=${this._busy}>Save</button>
-    </form>`}render(){if(!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading pumps…</div></ha-card>`;const t=this._farm.data,e=Date.now(),i=this._farm.summaries();this._mpMemo?.valves!==i&&(this._mpMemo={valves:i,map:new Map(t.locations.map(s=>[s.id,Ue(s,t,i,e)]))});const s=this._mpMemo.map,n=t.locations.filter(t=>!t.pump),a=[...t.pumps].sort((t,e)=>t.name.localeCompare(e.name)).map(i=>({id:i.id,name:i.name,state:this._pumpState(i),count:si(t,i.id,e).mps.length}));n.length&&a.push({id:li,name:"No pump",state:"unknown",count:n.length});const r=this._selected&&a.some(t=>t.id===this._selected)?this._selected:a[0]?.id??null,o=r&&r!==li?t.pumps.find(t=>t.id===r)??null:null,l=!!this.hass.user?.is_admin,d=o?si(t,o.id,e).mps:[],c=d.reduce((t,e)=>t+(s.get(e)?.valves.length??0),0);return B`<div
+    </form>`}render(){if(!this.hass)return G;if(!this._farm.loaded)return B`<ha-card><div class="msg">Loading pumps…</div></ha-card>`;const t=this._farm.data,e=Date.now(),i=this._farm.summaries();this._mpMemo?.valves!==i&&(this._mpMemo={valves:i,map:new Map(t.locations.map(s=>[s.id,Fe(s,t,i,e)]))});const s=this._mpMemo.map,n=t.locations.filter(t=>!t.pump),a=[...t.pumps].sort((t,e)=>t.name.localeCompare(e.name)).map(i=>({id:i.id,name:i.name,state:this._pumpState(i),count:ni(t,i.id,e).mps.length}));n.length&&a.push({id:di,name:"No pump",state:"unknown",count:n.length});const r=this._selected&&a.some(t=>t.id===this._selected)?this._selected:a[0]?.id??null,o=r&&r!==di?t.pumps.find(t=>t.id===r)??null:null,l=!!this.hass.user?.is_admin,d=o?ni(t,o.id,e).mps:[],c=d.reduce((t,e)=>t+(s.get(e)?.valves.length??0),0);return B`<div
       class="layout"
       @xt-pump-open=${t=>this._open(t.detail)}
-      @xt-valve-open=${t=>ve(t.detail)}
+      @xt-valve-open=${t=>fe(t.detail)}
     >
       <aside>
         <xt-pump-list .items=${a} .selected=${r}></xt-pump-list>
@@ -1706,7 +1706,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       </aside>
       <main>
         <div class="title-row">
-          <h2>${o?o.name:r===li?"No pump":"Pumps"}</h2>
+          <h2>${o?o.name:r===di?"No pump":"Pumps"}</h2>
           ${l?B`<button class="edit ${this._edit?"on":""}" @click=${()=>(this._edit=!this._edit,this._connecting=null)}>
                 <ha-icon icon=${this._edit?"mdi:check":"mdi:pencil-outline"}></ha-icon>${this._edit?"Done":"Edit"}
               </button>`:G}
@@ -1717,17 +1717,17 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${o?B`${this._figures(o,{mps:d.length,valves:c})}
               <xt-valve-filter-bar
                 .sites=${t.sites}
-                .value=${{...le,site:this._site}}
+                .value=${{...de,site:this._site}}
                 .statuses=${!1}
                 .search=${!1}
                 @xt-filter-changed=${t=>this._site=t.detail.site}
               ></xt-valve-filter-bar>
               ${this._edit?this._pumpForm(o):G} ${this._balance(o)} ${this._feeds(o,s)}
               ${this._connections(o,c)}`:G}
-        ${r===li?B`<p class="dim">Metering points no pump feeds: set a pump on their site or on them.</p>
+        ${r===di?B`<p class="dim">Metering points no pump feeds: set a pump on their site or on them.</p>
               <div class="grid">${n.map(t=>B`<xt-mp-card .summary=${s.get(t.id)}></xt-mp-card>`)}</div>`:G}
       </main>
-    </div>`}}yi.styles=[fe,Ye,r`
+    </div>`}}wi.styles=[ge,Ze,r`
       section {
         margin-top: 24px;
       }
@@ -1871,7 +1871,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       aside .editor label {
         width: 100%;
       }
-    `],t([ut({attribute:!1})],yi.prototype,"hass",void 0),t([mt()],yi.prototype,"_selected",void 0),t([mt()],yi.prototype,"_range",void 0),t([mt()],yi.prototype,"_stats",void 0),t([mt()],yi.prototype,"_site",void 0),t([mt()],yi.prototype,"_edit",void 0),t([mt()],yi.prototype,"_busy",void 0),t([mt()],yi.prototype,"_error",void 0),t([mt()],yi.prototype,"_connecting",void 0),t([mt()],yi.prototype,"_flow",void 0),customElements.get("irrigation-pumps-card")||customElements.define("irrigation-pumps-card",yi);class wi extends dt{constructor(){super(...arguments),this.runs=[],this.metered=!0,this._shown=5}render(){const t=[...this.runs].sort((t,e)=>Date.parse(e.start)-Date.parse(t.start));return t.length?B`
+    `],t([ut({attribute:!1})],wi.prototype,"hass",void 0),t([mt()],wi.prototype,"_selected",void 0),t([mt()],wi.prototype,"_range",void 0),t([mt()],wi.prototype,"_stats",void 0),t([mt()],wi.prototype,"_site",void 0),t([mt()],wi.prototype,"_edit",void 0),t([mt()],wi.prototype,"_busy",void 0),t([mt()],wi.prototype,"_error",void 0),t([mt()],wi.prototype,"_connecting",void 0),t([mt()],wi.prototype,"_flow",void 0),customElements.get("irrigation-pumps-card")||customElements.define("irrigation-pumps-card",wi);class $i extends dt{constructor(){super(...arguments),this.runs=[],this.metered=!0,this._shown=5}render(){const t=[...this.runs].sort((t,e)=>Date.parse(e.start)-Date.parse(t.start));return t.length?B`
       <table>
         <thead>
           <tr>
@@ -1887,9 +1887,9 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         <tbody>
           ${t.slice(0,this._shown).map(t=>{const e=Date.parse(t.start),i="number"==typeof t.liters?`${Math.round(t.liters)} L`:"–",s=this.metered&&0===t.liters,n=this.metered?function(t){const e=(t.duration_seconds??0)/60;return"number"==typeof t.liters&&t.liters>0&&e>=1?t.liters/e:null}(t):null;return B`<tr>
               ${this.valveOf?B`<td class="valve">${this.valveOf(t.device_id)}</td>`:G}
-              <td>${xe(e)}</td>
               <td>${be(e)}</td>
-              <td>${be(Date.parse(t.end))}</td>
+              <td>${ye(e)}</td>
+              <td>${ye(Date.parse(t.end))}</td>
               <td class="num">${function(t){const e=Math.round(t/60);return e<60?`${e} min`:`${Math.floor(e/60)} h ${e%60} min`}(t.duration_seconds??0)}</td>
               <td class="num ${s?"dry":""}" title=${s?"No water measured":""}>
                 ${this.metered?i:"–"}
@@ -1899,7 +1899,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         </tbody>
       </table>
       ${t.length>this._shown?B`<button @click=${()=>this._shown+=5}>Show more (${t.length-this._shown})</button>`:G}
-    `:B`<div class="empty">No runs recorded in the last 30 days.</div>`}}wi.styles=[fe,r`
+    `:B`<div class="empty">No runs recorded in the last 30 days.</div>`}}$i.styles=[ge,r`
       :host {
         display: block;
       }
@@ -1942,7 +1942,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         padding: 8px 6px 0;
         font-size: 0.9rem;
       }
-    `],t([ut({attribute:!1})],wi.prototype,"runs",void 0),t([ut({type:Boolean})],wi.prototype,"metered",void 0),t([ut({attribute:!1})],wi.prototype,"valveOf",void 0),t([mt()],wi.prototype,"_shown",void 0),customElements.get("xt-run-history")||customElements.define("xt-run-history",wi);const $i=/\(?(\d{3,4})\)?\s*$/;class ki extends dt{constructor(){super(...arguments),this._farm=new oe(this),this._valveOf=t=>{const e=this._farm.valves.find(e=>e.device_id===t)?.valve_name;if(!e)return"removed";const i=$i.exec(e)?.[1];return i?`#${i}`:e}}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 6}updated(){this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(t=>{const e=this._config?.device_id,i=this._farm.data,s=e?i.locationOf[e]:void 0;(t.data.device_id===e||s&&t.data.device_id&&i.locationOf[t.data.device_id]?.id===s.id)&&this._farm.refresh(!0)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{}))}disconnectedCallback(){super.disconnectedCallback(),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}render(){if(!this._config)return G;const{mp:t,runs:e}=function(t,e){const i=t.locationOf[e]??null,s=i?t.runs.filter(e=>Nt(t,e.device_id,Date.parse(e.start))?.id===i.id):t.runs.filter(t=>t.device_id===e);return{mp:i,runs:s}}(this._farm.data,this._config.device_id);return B`<ha-card>
+    `],t([ut({attribute:!1})],$i.prototype,"runs",void 0),t([ut({type:Boolean})],$i.prototype,"metered",void 0),t([ut({attribute:!1})],$i.prototype,"valveOf",void 0),t([mt()],$i.prototype,"_shown",void 0),customElements.get("xt-run-history")||customElements.define("xt-run-history",$i);const ki=/\(?(\d{3,4})\)?\s*$/;class Si extends dt{constructor(){super(...arguments),this._farm=new le(this),this._valveOf=t=>{const e=this._farm.valves.find(e=>e.device_id===t)?.valve_name;if(!e)return"removed";const i=ki.exec(e)?.[1];return i?`#${i}`:e}}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 6}updated(){this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(t=>{const e=this._config?.device_id,i=this._farm.data,s=e?i.locationOf[e]:void 0;(t.data.device_id===e||s&&t.data.device_id&&i.locationOf[t.data.device_id]?.id===s.id)&&this._farm.refresh(!0)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{}))}disconnectedCallback(){super.disconnectedCallback(),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}render(){if(!this._config)return G;const{mp:t,runs:e}=function(t,e){const i=t.locationOf[e]??null,s=i?t.runs.filter(e=>Ot(t,e.device_id,Date.parse(e.start))?.id===i.id):t.runs.filter(t=>t.device_id===e);return{mp:i,runs:s}}(this._farm.data,this._config.device_id);return B`<ha-card>
       <div class="title">
         <ha-icon icon="mdi:format-list-bulleted"></ha-icon>${this._config.title??(t?`Watering log · ${t.name}`:"Watering log")}
       </div>
@@ -1953,7 +1953,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           ?metered=${!1!==this._config.metered}
         ></xt-run-history>
       </div>
-    </ha-card>`}}ki.styles=r`
+    </ha-card>`}}Si.styles=r`
     .title {
       display: flex;
       align-items: center;
@@ -1968,7 +1968,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
     .content {
       padding: 0 16px 12px;
     }
-  `,t([ut({attribute:!1})],ki.prototype,"hass",void 0),t([mt()],ki.prototype,"_config",void 0),customElements.get("irrigation-run-history-card")||customElements.define("irrigation-run-history-card",ki);class Si extends dt{connectedCallback(){super.connectedCallback(),this.setAttribute("role","progressbar"),this.setAttribute("aria-label","Loading")}}Si.styles=[fe,r`
+  `,t([ut({attribute:!1})],Si.prototype,"hass",void 0),t([mt()],Si.prototype,"_config",void 0),customElements.get("irrigation-run-history-card")||customElements.define("irrigation-run-history-card",Si);class Ei extends dt{connectedCallback(){super.connectedCallback(),this.setAttribute("role","progressbar"),this.setAttribute("aria-label","Loading")}}Ei.styles=[ge,r`
       :host {
         display: inline-block;
         width: 18px;
@@ -1984,7 +1984,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
           transform: rotate(360deg);
         }
       }
-    `],customElements.get("xt-spinner")||customElements.define("xt-spinner",Si);const Ei={low_battery:["Low battery","Battery below 20 %. Replace the valve's batteries soon.","warn"],stale:["Silent","No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.","bad"],missed:["Missed","A planned run in the last 24 h did not happen. Check the valve is online and has battery. Clears 24 h after the slot.","bad"],no_flow:["No water flow","The last run measured no water. Check the pump ran and the supply is open. Clears after a run that measures water.","bad"],flow_low:["Flow low","30-day mean flow is well below the expected L/min: check the filter, or set the expected L/min for this metering point.","bad"],flow_high:["Flow high","30-day mean flow is well above the expected L/min: check for a leak, or set the expected L/min for this metering point.","bad"]};class Ai extends dt{constructor(){super(...arguments),this._help=null,this._moving=!1,this._busy=!1,this._moveError=null,this._farm=new oe(this)}async _move(t,e){if(this.hass?.callApi){this._busy=!0,this._moveError=null;try{await this.hass.callApi("POST","xtend_tuya/irrigation_locations",{action:"assign_device",device_id:t,location_id:e}),this._moving=!1,At()}catch(t){this._moveError=re(t)}finally{this._busy=!1}}}_moveControl(t,e){if(!this.hass?.user?.is_admin)return G;const i=e?"Move to…":"Assign to…";return B`<button
+    `],customElements.get("xt-spinner")||customElements.define("xt-spinner",Ei);const Ai={low_battery:["Low battery","Battery below 20 %. Replace the valve's batteries soon.","warn"],stale:["Silent","No report from the valve for over 24 h although a run was due. Check battery and Wi‑Fi; it may need a restart.","bad"],missed:["Missed","A planned run in the last 24 h did not happen. Check the valve is online and has battery. Clears 24 h after the slot.","bad"],no_flow:["No water flow","The last run measured no water. Check the pump ran and the supply is open. Clears after a run that measures water.","bad"],flow_low:["Flow low","30-day mean flow is well below the expected L/min: check the filter, or set the expected L/min for this metering point.","bad"],flow_high:["Flow high","30-day mean flow is well above the expected L/min: check for a leak, or set the expected L/min for this metering point.","bad"]};class Mi extends dt{constructor(){super(...arguments),this._help=null,this._moving=!1,this._busy=!1,this._moveError=null,this._farm=new le(this)}async _move(t,e){if(this.hass?.callApi){this._busy=!0,this._moveError=null;try{await this.hass.callApi("POST","xtend_tuya/irrigation_locations",{action:"assign_device",device_id:t,location_id:e}),this._moving=!1,Mt()}catch(t){this._moveError=oe(t)}finally{this._busy=!1}}}_moveControl(t,e){if(!this.hass?.user?.is_admin)return G;const i=e?"Move to…":"Assign to…";return B`<button
         class="pencil"
         title=${e?"Move to another metering point":"Assign to a metering point"}
         aria-expanded=${this._moving?"true":"false"}
@@ -1992,15 +1992,15 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
       >
         <ha-icon icon="mdi:pencil-outline"></ha-icon>
       </button>
-      ${this._moving?B`<span class="move">${qe("xt-move-mp",i,this._farm.data.locations.filter(t=>t.id!==e).map(t=>({key:t.id,text:t.site_id?`${t.name} · ${he(this._farm.data.sites,t.site_id)}`:t.name})),this._busy,e=>{this._move(t,e)})}</span>`:G}
-      ${this._moveError?B`<span class="err">${this._moveError}</span>`:G}`}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 3}render(){if(!this._config||!this.hass)return G;if(!this._farm.loaded)return B`<ha-card class="loading"><xt-spinner></xt-spinner></ha-card>`;const t=Date.now(),e=this._farm.summaryOf(this._config.device_id);if(!e)return B`<ha-card><div class="msg">Valve not found.</div></ha-card>`;const i=this._farm.data.locations.find(t=>t.valves.includes(e.device_id)),s=i?i.valves.map(t=>t===e.device_id?e:this._farm.summaryOf(t)).filter(t=>!!t):[],n=i?Ue(i,this._farm.data,s,t):null,a=n?.week??e.week,r=n?.last??e.last,o=[...new Set([...n?.badges.filter(t=>"no_valve"!==t)??[],...e.badges])],l=e.number?e.name.replace(/\s*\(\d+\)\s*$/,""):e.name,d="watering"===e.status?B`<span class="status watering"><i></i>Watering${e.since?` since ${be(e.since)}`:""}${null!==e.flow_lpm?` · ${e.flow_lpm.toFixed(1)} L/min`:""}</span>`:"offline"===e.status?B`<span class="status offline"><i></i>Offline${e.since?` for ${we(e.since)}`:""}</span>`:B`<span class="status"><i></i>Idle</span>`,c="L"===a.unit?Se(a.liters):`${Math.round(a.minutes)} min`;return B`<ha-card>
+      ${this._moving?B`<span class="move">${Ve("xt-move-mp",i,this._farm.data.locations.filter(t=>t.id!==e).map(t=>({key:t.id,text:t.site_id?`${t.name} · ${ue(this._farm.data.sites,t.site_id)}`:t.name})),this._busy,e=>{this._move(t,e)})}</span>`:G}
+      ${this._moveError?B`<span class="err">${this._moveError}</span>`:G}`}setConfig(t){if(!t.device_id)throw new Error("device_id is required");this._config=t}getCardSize(){return 3}render(){if(!this._config||!this.hass)return G;if(!this._farm.loaded)return B`<ha-card class="loading"><xt-spinner></xt-spinner></ha-card>`;const t=Date.now(),e=this._farm.summaryOf(this._config.device_id);if(!e)return B`<ha-card><div class="msg">Valve not found.</div></ha-card>`;const i=this._farm.data.locations.find(t=>t.valves.includes(e.device_id)),s=i?i.valves.map(t=>t===e.device_id?e:this._farm.summaryOf(t)).filter(t=>!!t):[],n=i?Fe(i,this._farm.data,s,t):null,a=n?.week??e.week,r=n?.last??e.last,o=[...new Set([...n?.badges.filter(t=>"no_valve"!==t)??[],...e.badges])],l=e.number?e.name.replace(/\s*\(\d+\)\s*$/,""):e.name,d="watering"===e.status?B`<span class="status watering"><i></i>Watering${e.since?` since ${ye(e.since)}`:""}${null!==e.flow_lpm?` · ${e.flow_lpm.toFixed(1)} L/min`:""}</span>`:"offline"===e.status?B`<span class="status offline"><i></i>Offline${e.since?` for ${$e(e.since)}`:""}</span>`:B`<span class="status"><i></i>Idle</span>`,c="L"===a.unit?Ee(a.liters):`${Math.round(a.minutes)} min`;return B`<ha-card>
       <div class="top">
         <div class="who">
           <div class="name-row">
             <h1>${l}</h1>
             ${e.number?B`<span class="num" title="Valve number">#${e.number}</span>`:G}
             ${null!==e.battery?B`<span class="battery ${e.badges.includes("low_battery")?"low":""}" title="Battery ${Math.round(e.battery)} %"
-                  ><ha-icon icon=${ke(e.battery)}></ha-icon>${Math.round(e.battery)} %</span
+                  ><ha-icon icon=${Se(e.battery)}></ha-icon>${Math.round(e.battery)} %</span
                 >`:G}
           </div>
           ${d}
@@ -2015,7 +2015,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 >`:G}
           </div>
           ${o.length?B`<div class="badges">
-                ${o.map(t=>{const[e,i,s]=Ei[t]??[t,t,"warn"];return B`<button
+                ${o.map(t=>{const[e,i,s]=Ai[t]??[t,t,"warn"];return B`<button
                     class="badge ${s} ${this._help===t?"open":""}"
                     title=${i}
                     aria-expanded=${this._help===t?"true":"false"}
@@ -2024,17 +2024,17 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                     ${e}
                   </button>`})}
               </div>
-              ${this._help&&o.includes(this._help)?B`<div class="help">${Ei[this._help]?.[1]??this._help}</div>`:G}`:G}
+              ${this._help&&o.includes(this._help)?B`<div class="help">${Ai[this._help]?.[1]??this._help}</div>`:G}`:G}
         </div>
         <div class="tiles">
           <div title="Last run: when, how long, how much">
             <span class="lbl"><ha-icon icon="mdi:history"></ha-icon>Last run</span>
-            <b>${r?ye(r.start):"–"}</b>
+            <b>${r?we(r.start):"–"}</b>
             <span class="dim">${r?function(t){const e=[`${Math.round(t.minutes)} min`];return null!==t.liters&&e.push(`${Math.round(t.liters)} L`),e.join(" · ")}(r):""}</span>
           </div>
           <div title="Next planned run">
             <span class="lbl"><ha-icon icon="mdi:calendar-clock"></ha-icon>Next run</span>
-            <b>${e.next?ye(e.next.start):"–"}</b>
+            <b>${e.next?we(e.next.start):"–"}</b>
             <span class="dim">${e.next?`${Math.round(e.next.minutes)} min`:"nothing planned"}</span>
           </div>
           <div title="Last 7 days${n?" at this metering point":""}">
@@ -2049,7 +2049,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               </div>`:G}
         </div>
       </div>
-    </ha-card>`}}Ai.styles=[Ve,fe,r`
+    </ha-card>`}}Mi.styles=[Ge,ge,r`
       ha-card {
         padding: 16px 18px;
       }
@@ -2225,7 +2225,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         padding: 16px;
         color: var(--xt-dim);
       }
-    `],t([ut({attribute:!1})],Ai.prototype,"hass",void 0),t([mt()],Ai.prototype,"_config",void 0),t([mt()],Ai.prototype,"_help",void 0),t([mt()],Ai.prototype,"_moving",void 0),t([mt()],Ai.prototype,"_busy",void 0),t([mt()],Ai.prototype,"_moveError",void 0),customElements.get("irrigation-valve-header-card")||customElements.define("irrigation-valve-header-card",Ai);const Mi="No site",Ci="No metering point";function Li(t){return t===Ci?2:t===Mi?1:0}const zi=864e5,Ni=36e5,Oi="xt-irrigation-calendar-mode",Ti="xt-irrigation-calendar-range",Pi=t=>new Date(Gt(t.getTime())),Di=t=>{return new Date(Kt(e=t.getTime(),-(Bt(e).weekday+6)%7));var e},Ri=(t,e)=>new Date(Kt(t.getTime(),e)),Ui=t=>String(t).padStart(2,"0"),Fi=t=>{const e=Bt(t);return`${Ui(e.hour)}:${Ui(e.minute)}`},Ii=t=>t>0?String(Math.round(t/6e4)):"–";function Hi(t){const e=/·\s*~?([\d.,]+)\s*L\s*$/.exec(t);return e?Number(e[1].replace(",",".")):null}function Wi(t){return("ran"===t.kind||"unplanned"===t.kind)&&0===t.liters}const ji="xt-irrigation-calendar-filter";function Bi(){return new URLSearchParams(window.location.search).get("site")}function qi(t,e){try{return localStorage.getItem(t)??e}catch{return e}}function Vi(t,e){try{localStorage.setItem(t,e)}catch{}}class Gi extends dt{constructor(){super(...arguments),this._config=null,this._mode=["day","week","timeline"].includes(qi(Oi,"day"))?qi(Oi,"day"):"day",this._range=[1,3,7].includes(Number(qi(Ti,"7")))?Number(qi(Ti,"7")):7,this._anchor=Pi(new Date),this._events=[],this._problemsOnly=!1,this._filter=function(){let t=le;try{t={...le,...JSON.parse(localStorage.getItem(ji)??"{}"),status:"all"}}catch{}const e=Bi();return e?{...t,site:e}:t}(),this._farm=$t,this._farmLoaded=!1,this._farmReady=!1,this._eventsReady=!1,this._found=null,this._foundAt=0,this._offline=new Map,this._loading=!1,this._error=null,this._loadedKey="",this._onLocation=()=>{const t=Bi();t&&t!==this._filter.site&&(this._filter={...this._filter,site:t})}}setConfig(t){this._config=t;const e=this._modes();e.includes(this._mode)||(this._mode=e[0])}_modes(){const t=(this._config?.modes??[]).filter(t=>["day","week","timeline"].includes(t));return t.length?t:["day","week","timeline"]}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation),this._timer=window.setInterval(()=>this._load(!0),3e5)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation),this._timer&&window.clearInterval(this._timer),window.clearTimeout(this._debounce),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}updated(){It(this.hass),this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(()=>{window.clearTimeout(this._debounce),this._debounce=window.setTimeout(()=>this._load(!0),2e3)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{})),!this._farmLoaded&&this.hass?.callApi&&(this._farmLoaded=!0,Mt(this.hass).then(t=>{this._farm=t,this._farmReady=!0},()=>this._farmReady=!0));const t=`${this._mode}|${this._range}|${this._anchor.getTime()}`;t!==this._loadedKey&&this.hass?.callApi&&(this._loadedKey=t,this._load())}_window(){if("week"===this._mode){const t=Di(this._anchor);return[t,Ri(t,7)]}if("timeline"===this._mode){const t=Ri(Pi(this._anchor),1);return[Ri(t,-this._range),t]}const t=Pi(this._anchor);return[t,Ri(t,1)]}_valves(){if(this._config?.valves?.length)return this._config.valves;const t=this.hass;return t?.entities&&(!this._found||Date.now()-this._foundAt>6e4)&&(this._found=bt(t).map(t=>({device_id:t.device_id,registry_entity:t.registry_entity,valve_name:t.valve_name,view_path:t.view_path,home:t.valve_home,room:t.valve_room,battery:t.battery_level??null})),this._foundAt=Date.now()),this._found??[]}_valveByRegistry(){const t=new Map;for(const e of this._valves())t.set(e.registry_entity,e);return t}async _load(t=!1){if(!this.hass?.callApi)return;const[e,i]=this._window();"timeline"===this._mode&&this._loadOffline(e,i);const s=`?start=${encodeURIComponent(e.toISOString())}&end=${encodeURIComponent(i.toISOString())}`,n=this._config?.planned_entity??"calendar.irrigation_planned",a=this._config?.completed_entity??"calendar.irrigation_completed";t||(this._loading=!0),this._error=null;try{const[t,e]=await Promise.all([this.hass.callApi("GET",`calendars/${n}${s}`),this.hass.callApi("GET",`calendars/${a}${s}`)]),i=this._valveByRegistry(),r=(t,e)=>{const s=Date.parse(t.start.dateTime??t.start.date??"");let n=Date.parse(t.end.dateTime??t.end.date??"");if(!Number.isFinite(s))return null;(!Number.isFinite(n)||n<=s)&&(n=s+6e4);const a=(t.uid??"").split("#")[0],r=i.get(a);return{start:s,end:n,kind:e,key:a,name:r?.valve_name??t.summary.split(" · ")[0],summary:t.summary,liters:"planned"===e?null:Hi(t.summary),path:r?.view_path}},o=(e??[]).map(t=>r(t,/Type: In progress/.test(t.description??"")?"running":"ran")).filter(t=>!!t),l=(t??[]).map(t=>r(t,"planned")).filter(t=>!!t),d=this.hass.states,c=t=>Pt(d?.[t]);this._events=Tt(l,o,Date.now(),c)}catch(t){this._error=function(t){const e=t;return e?.body?.message??e?.message??String(t)}(t)}finally{this._loading=!1,this._eventsReady=!0,t||this.updateComplete.then(()=>this._scrollToFirst())}}async _loadOffline(t,e){const i=this._valves().map(t=>t.registry_entity),s=new Map;for(let n=0;n<i.length;n+=40){const a=i.slice(n,n+40);try{const i=await this.hass.callApi("GET",`history/period/${encodeURIComponent(t.toISOString())}?end_time=${encodeURIComponent(e.toISOString())}&filter_entity_id=${a.join(",")}&minimal_response&no_attributes`);for(const n of i??[]){const i=n[0]?.entity_id;i&&s.set(i,Rt(n,t.getTime(),Math.min(e.getTime(),Date.now())))}}catch{}}this._offline=s}_scrollToFirst(){if("timeline"===this._mode)return;const[t,e]=this._window();let i=null;for(const s of this._events){if(s.end<=t.getTime()||s.start>=e.getTime())continue;const n=Jt(Math.max(s.start,t.getTime()));(null===i||n<i)&&(i=n)}const s=this.renderRoot.querySelector(".scroll");s&&null!==i&&(s.scrollTop=Math.max(0,(i-1)*this._hourPx()))}_hourPx(){return this._config?.hour_height??Math.max(36,Math.round(.72*window.innerHeight/8))}_setMode(t){this._mode=t,Vi(Oi,t)}_setRange(t){this._range=t,Vi(Ti,String(t)),this._anchor=Pi(new Date)}_shift(t){const e="week"===this._mode?7:"timeline"===this._mode?this._range:1;this._anchor=Ri(this._anchor,e*t)}_open(t){if(!t)return;const e=window.location.pathname.split("/")[1]||"lovelace";window.history.pushState(null,"",`/${e}/${t}`),this.dispatchEvent(new Event("location-changed",{bubbles:!0,composed:!0}))}_rangeLabel(){const[t,e]=this._window(),i={weekday:"short",day:"numeric",month:"short"};return e.getTime()-t.getTime()<=9e7?Yt(t.getTime(),i):`${Yt(t.getTime(),{day:"numeric",month:"short"})} – ${Yt(Ri(e,-1).getTime(),i)}`}_placeOf(t){const e=this._farm.locationOf[t.device_id],i=e?.site_id??null;return{site:i,siteName:i?he(this._farm.sites,i):null,mp:e?.name??null}}_visible(){const t=this._filter,e=t.site?pe(this._farm.sites,t.site):null,i=t.search.trim().toLowerCase();return this._valves().filter(t=>{const s=this._placeOf(t);return!!(!e||s.site&&e.has(s.site))&&(!i||[t.valve_name,s.mp,s.siteName].some(t=>t?.toLowerCase().includes(i)))})}_shownEvents(){if(!this._filter.site&&!this._filter.search.trim())return this._events;const t=new Set(this._visible().map(t=>t.registry_entity));return this._events.filter(e=>t.has(e.key))}_onFilter(t){if(t.detail.site!==this._filter.site){const e=new URL(window.location.href);t.detail.site?e.searchParams.set("site",t.detail.site):e.searchParams.delete("site"),window.history.replaceState(window.history.state,"",e.pathname+e.search+e.hash)}this._filter=t.detail;try{localStorage.setItem(ji,JSON.stringify(t.detail))}catch{}}_legend(t){const e={planned:0,ran:0,missed:0,unplanned:0,running:0,dry:0};for(const i of t)e[i.kind]++,Wi(i)&&e.dry++;const i=(t,e,i,s)=>B`<span class="lg" title=${s}><i class="sw ${t}"></i><b>${e}</b> ${i}</span>`;return B`<div class="legend">
+    `],t([ut({attribute:!1})],Mi.prototype,"hass",void 0),t([mt()],Mi.prototype,"_config",void 0),t([mt()],Mi.prototype,"_help",void 0),t([mt()],Mi.prototype,"_moving",void 0),t([mt()],Mi.prototype,"_busy",void 0),t([mt()],Mi.prototype,"_moveError",void 0),customElements.get("irrigation-valve-header-card")||customElements.define("irrigation-valve-header-card",Mi);const Ci="No site",Li="No metering point";function zi(t){return t===Li?2:t===Ci?1:0}const Ni=864e5,Oi=36e5,Ti="xt-irrigation-calendar-mode",Pi="xt-irrigation-calendar-range",Di=t=>new Date(Kt(t.getTime())),Ri=t=>{return new Date(Jt(e=t.getTime(),-(qt(e).weekday+6)%7));var e},Ui=(t,e)=>new Date(Jt(t.getTime(),e)),Fi=t=>String(t).padStart(2,"0"),Ii=t=>{const e=qt(t);return`${Fi(e.hour)}:${Fi(e.minute)}`},Hi=t=>t>0?String(Math.round(t/6e4)):"–";function Wi(t){const e=/·\s*~?([\d.,]+)\s*L\s*$/.exec(t);return e?Number(e[1].replace(",",".")):null}function ji(t){return("ran"===t.kind||"unplanned"===t.kind)&&0===t.liters}const Bi="xt-irrigation-calendar-filter";function qi(){return new URLSearchParams(window.location.search).get("site")}function Vi(t,e){try{return localStorage.getItem(t)??e}catch{return e}}function Gi(t,e){try{localStorage.setItem(t,e)}catch{}}class Ki extends dt{constructor(){super(...arguments),this._config=null,this._mode=["day","week","timeline"].includes(Vi(Ti,"day"))?Vi(Ti,"day"):"day",this._range=[1,3,7].includes(Number(Vi(Pi,"7")))?Number(Vi(Pi,"7")):7,this._anchor=Di(new Date),this._events=[],this._problemsOnly=!1,this._filter=function(){let t=de;try{t={...de,...JSON.parse(localStorage.getItem(Bi)??"{}"),status:"all"}}catch{}const e=qi();return e?{...t,site:e}:t}(),this._farm=kt,this._farmLoaded=!1,this._farmReady=!1,this._eventsReady=!1,this._found=null,this._foundAt=0,this._offline=new Map,this._loading=!1,this._error=null,this._loadedKey="",this._onLocation=()=>{const t=qi();t&&t!==this._filter.site&&(this._filter={...this._filter,site:t})}}setConfig(t){this._config=t;const e=this._modes();e.includes(this._mode)||(this._mode=e[0])}_modes(){const t=(this._config?.modes??[]).filter(t=>["day","week","timeline"].includes(t));return t.length?t:["day","week","timeline"]}getCardSize(){return 12}connectedCallback(){super.connectedCallback(),window.addEventListener("location-changed",this._onLocation),window.addEventListener("popstate",this._onLocation),this._timer=window.setInterval(()=>this._load(!0),3e5)}disconnectedCallback(){super.disconnectedCallback(),window.removeEventListener("location-changed",this._onLocation),window.removeEventListener("popstate",this._onLocation),this._timer&&window.clearInterval(this._timer),window.clearTimeout(this._debounce),this._unsub?.then(t=>t(),()=>{}),this._unsub=void 0}updated(){Ht(this.hass),this.hass?.connection&&!this._unsub&&(this._unsub=this.hass.connection.subscribeEvents(()=>{window.clearTimeout(this._debounce),this._debounce=window.setTimeout(()=>this._load(!0),2e3)},"xtend_tuya_run_recorded"),this._unsub.catch(()=>{})),!this._farmLoaded&&this.hass?.callApi&&(this._farmLoaded=!0,Ct(this.hass).then(t=>{this._farm=t,this._farmReady=!0},()=>this._farmReady=!0));const t=`${this._mode}|${this._range}|${this._anchor.getTime()}`;t!==this._loadedKey&&this.hass?.callApi&&(this._loadedKey=t,this._load())}_window(){if("week"===this._mode){const t=Ri(this._anchor);return[t,Ui(t,7)]}if("timeline"===this._mode){const t=Ui(Di(this._anchor),1);return[Ui(t,-this._range),t]}const t=Di(this._anchor);return[t,Ui(t,1)]}_valves(){if(this._config?.valves?.length)return this._config.valves;const t=this.hass;return t?.entities&&(!this._found||Date.now()-this._foundAt>6e4)&&(this._found=yt(t).map(t=>({device_id:t.device_id,registry_entity:t.registry_entity,valve_name:t.valve_name,view_path:t.view_path,home:t.valve_home,room:t.valve_room,battery:t.battery_level??null})),this._foundAt=Date.now()),this._found??[]}_valveByRegistry(){const t=new Map;for(const e of this._valves())t.set(e.registry_entity,e);return t}async _load(t=!1){if(!this.hass?.callApi)return;const[e,i]=this._window();"timeline"===this._mode&&this._loadOffline(e,i);const s=`?start=${encodeURIComponent(e.toISOString())}&end=${encodeURIComponent(i.toISOString())}`,n=this._config?.planned_entity??"calendar.irrigation_planned",a=this._config?.completed_entity??"calendar.irrigation_completed";t||(this._loading=!0),this._error=null;try{const[t,e]=await Promise.all([this.hass.callApi("GET",`calendars/${n}${s}`),this.hass.callApi("GET",`calendars/${a}${s}`)]),i=this._valveByRegistry(),r=(t,e)=>{const s=Date.parse(t.start.dateTime??t.start.date??"");let n=Date.parse(t.end.dateTime??t.end.date??"");if(!Number.isFinite(s))return null;(!Number.isFinite(n)||n<=s)&&(n=s+6e4);const a=(t.uid??"").split("#")[0],r=i.get(a);return{start:s,end:n,kind:e,key:a,name:r?.valve_name??t.summary.split(" · ")[0],summary:t.summary,liters:"planned"===e?null:Wi(t.summary),path:r?.view_path}},o=(e??[]).map(t=>r(t,/Type: In progress/.test(t.description??"")?"running":"ran")).filter(t=>!!t),l=(t??[]).map(t=>r(t,"planned")).filter(t=>!!t),d=this.hass.states,c=t=>Dt(d?.[t]);this._events=Pt(l,o,Date.now(),c)}catch(t){this._error=function(t){const e=t;return e?.body?.message??e?.message??String(t)}(t)}finally{this._loading=!1,this._eventsReady=!0,t||this.updateComplete.then(()=>this._scrollToFirst())}}async _loadOffline(t,e){const i=this._valves().map(t=>t.registry_entity),s=new Map;for(let n=0;n<i.length;n+=40){const a=i.slice(n,n+40);try{const i=await this.hass.callApi("GET",`history/period/${encodeURIComponent(t.toISOString())}?end_time=${encodeURIComponent(e.toISOString())}&filter_entity_id=${a.join(",")}&minimal_response&no_attributes`);for(const n of i??[]){const i=n[0]?.entity_id;i&&s.set(i,Ut(n,t.getTime(),Math.min(e.getTime(),Date.now())))}}catch{}}this._offline=s}_scrollToFirst(){if("timeline"===this._mode)return;const[t,e]=this._window();let i=null;for(const s of this._events){if(s.end<=t.getTime()||s.start>=e.getTime())continue;const n=Yt(Math.max(s.start,t.getTime()));(null===i||n<i)&&(i=n)}const s=this.renderRoot.querySelector(".scroll");s&&null!==i&&(s.scrollTop=Math.max(0,(i-1)*this._hourPx()))}_hourPx(){return this._config?.hour_height??Math.max(36,Math.round(.72*window.innerHeight/8))}_setMode(t){this._mode=t,Gi(Ti,t)}_setRange(t){this._range=t,Gi(Pi,String(t)),this._anchor=Di(new Date)}_shift(t){const e="week"===this._mode?7:"timeline"===this._mode?this._range:1;this._anchor=Ui(this._anchor,e*t)}_open(t){if(!t)return;const e=window.location.pathname.split("/")[1]||"lovelace";window.history.pushState(null,"",`/${e}/${t}`),this.dispatchEvent(new Event("location-changed",{bubbles:!0,composed:!0}))}_rangeLabel(){const[t,e]=this._window(),i={weekday:"short",day:"numeric",month:"short"};return e.getTime()-t.getTime()<=9e7?Zt(t.getTime(),i):`${Zt(t.getTime(),{day:"numeric",month:"short"})} – ${Zt(Ui(e,-1).getTime(),i)}`}_placeOf(t){const e=this._farm.locationOf[t.device_id],i=e?.site_id??null;return{site:i,siteName:i?ue(this._farm.sites,i):null,mp:e?.name??null}}_visible(){const t=this._filter,e=t.site?he(this._farm.sites,t.site):null,i=t.search.trim().toLowerCase();return this._valves().filter(t=>{const s=this._placeOf(t);return!!(!e||s.site&&e.has(s.site))&&(!i||[t.valve_name,s.mp,s.siteName].some(t=>t?.toLowerCase().includes(i)))})}_shownEvents(){if(!this._filter.site&&!this._filter.search.trim())return this._events;const t=new Set(this._visible().map(t=>t.registry_entity));return this._events.filter(e=>t.has(e.key))}_onFilter(t){if(t.detail.site!==this._filter.site){const e=new URL(window.location.href);t.detail.site?e.searchParams.set("site",t.detail.site):e.searchParams.delete("site"),window.history.replaceState(window.history.state,"",e.pathname+e.search+e.hash)}this._filter=t.detail;try{localStorage.setItem(Bi,JSON.stringify(t.detail))}catch{}}_legend(t){const e={planned:0,ran:0,missed:0,unplanned:0,running:0,dry:0};for(const i of t)e[i.kind]++,ji(i)&&e.dry++;const i=(t,e,i,s)=>B`<span class="lg" title=${s}><i class="sw ${t}"></i><b>${e}</b> ${i}</span>`;return B`<div class="legend">
       ${i("ran",e.ran,"ran","Planned runs that happened (filled blue)")}
       ${i("missed",e.missed,"missed","Planned runs that did not happen (red outline)")}
       ${i("planned",e.planned,"ahead","Planned runs still to come (outline)")}
@@ -2251,7 +2251,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               <button class="icon" @click=${()=>this._shift(-1)} aria-label="Previous"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
               <span class="range-label">${this._rangeLabel()}</span>
               <button class="icon" @click=${()=>this._shift(1)} aria-label="Next"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
-              ${s(!1,"Today",()=>this._anchor=Pi(new Date))}
+              ${s(!1,"Today",()=>this._anchor=Di(new Date))}
             </div>
           </div>
           <xt-valve-filter-bar
@@ -2268,34 +2268,34 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${this._error?B`<div class="err">${this._error}</div>`:G}
         ${this._ready()?e?this._renderTimeline(e):this._renderGrid(i):B`<div class="empty">Loading…</div>`}
       </ha-card>
-    `}_renderGrid(t){const[e]=this._window(),i="day"===this._mode?1:7,s=this._hourPx(),n=Pi(new Date).getTime();return B`
+    `}_renderGrid(t){const[e]=this._window(),i="day"===this._mode?1:7,s=this._hourPx(),n=Di(new Date).getTime();return B`
       <div class="scroll">
         <div class="grid" style="--hour:${s}px;--days:${i}">
           <div class="hours">
             ${i>1?B`<div class="colhead"></div>`:G}
-            ${Array.from({length:24},(t,e)=>B`<div class="hour">${Ui(e)}:00</div>`)}
+            ${Array.from({length:24},(t,e)=>B`<div class="hour">${Fi(e)}:00</div>`)}
           </div>
-          ${Array.from({length:i},(a,r)=>{const o=Ri(e,r).getTime(),l=o+zi,d=t.filter(t=>t.start<l&&t.end>o).map(t=>({...t,start:Math.max(t.start,o),end:Math.min(Math.max(t.end,t.start+9e5),l)})),c=function(t){const e=[...t].sort((t,e)=>t.start-e.start||Ot[t.kind]-Ot[e.kind]||t.name.localeCompare(e.name)),i=[];let s=[],n=[],a=-1/0;const r=()=>{const t=s.length;for(const e of n)e.lanes=t;n=[],s=[]};for(const t of e){t.start>=a&&r();let e=s.findIndex(e=>e<=t.start);-1===e?(e=s.length,s.push(t.end)):s[e]=t.end;const o={ev:t,lane:e,lanes:0};n.push(o),i.push(o),a=Math.max(a,t.end)}return r(),i}(d),p=c.reduce((t,e)=>Math.max(t,e.lanes),1),h=i>1?40:72;return B`
+          ${Array.from({length:i},(a,r)=>{const o=Ui(e,r).getTime(),l=o+Ni,d=t.filter(t=>t.start<l&&t.end>o).map(t=>({...t,start:Math.max(t.start,o),end:Math.min(Math.max(t.end,t.start+9e5),l)})),c=function(t){const e=[...t].sort((t,e)=>t.start-e.start||Tt[t.kind]-Tt[e.kind]||t.name.localeCompare(e.name)),i=[];let s=[],n=[],a=-1/0;const r=()=>{const t=s.length;for(const e of n)e.lanes=t;n=[],s=[]};for(const t of e){t.start>=a&&r();let e=s.findIndex(e=>e<=t.start);-1===e?(e=s.length,s.push(t.end)):s[e]=t.end;const o={ev:t,lane:e,lanes:0};n.push(o),i.push(o),a=Math.max(a,t.end)}return r(),i}(d),p=c.reduce((t,e)=>Math.max(t,e.lanes),1),h=i>1?40:72;return B`
               <div
                 class="col ${o===n?"today":""}"
                 style="min-width:${Math.max(110,p*h)}px"
               >
-                ${i>1?B`<div class="colhead"><span>${Yt(o,{weekday:"long",day:"numeric"})}</span></div>`:G}
+                ${i>1?B`<div class="colhead"><span>${Zt(o,{weekday:"long",day:"numeric"})}</span></div>`:G}
                 <div class="lines"></div>
-                ${c.map(({ev:t,lane:e,lanes:i})=>{const n=(t.start-o)/Ni*s,a=Math.max((t.end-t.start)/Ni*s,s/4),r=100/i;return B`<div
-                    class="ev ${t.kind} ${Wi(t)?"dry":""} ${t.path?"link":""}"
+                ${c.map(({ev:t,lane:e,lanes:i})=>{const n=(t.start-o)/Oi*s,a=Math.max((t.end-t.start)/Oi*s,s/4),r=100/i;return B`<div
+                    class="ev ${t.kind} ${ji(t)?"dry":""} ${t.path?"link":""}"
                     style="top:${n}px;height:${a}px;left:${e*r}%;width:calc(${r}% - 2px)"
                     title=${t.summary}
                     @click=${()=>this._open(t.path)}
                   >
                     <b>${t.name}</b>
-                    <span>${Fi(t.start)}–${Fi(t.end)}${null!=t.liters?` · ${Math.round(t.liters)} L`:""}</span>
+                    <span>${Ii(t.start)}–${Ii(t.end)}${null!=t.liters?` · ${Math.round(t.liters)} L`:""}</span>
                   </div>`})}
               </div>
             `})}
         </div>
       </div>
-    `}_online(t){const e=this.hass?.states?.[t.registry_entity]?.state;return!!e&&"unavailable"!==e&&"unknown"!==e}_battery(t){const e=t.battery?this.hass?.states?.[t.battery]?.state:void 0,i=Number(e);return e&&""!==e&&Number.isFinite(i)?Math.round(i):null}_timelineRows(){const[t,e]=this._window();return function(t,e,i,s,n,a){const r=new Map(t.map(t=>[t.registry_entity,t])),o=new Set(t.map(t=>t.device_id)),l=new Map,d=e=>{const s=`mp:${e.id}`;let n=l.get(s);return n||(n={key:s,group:e.site_id?he(i.sites,e.site_id):Mi,name:e.name,mp:e,valve:t.find(t=>e.valves.includes(t.device_id))??null,evs:[]},l.set(s,n)),n},c=t=>{const e=`valve:${t.registry_entity}`;let i=l.get(e);return i||l.set(e,i={key:e,group:Ci,name:t.valve_name,mp:null,valve:t,evs:[]}),i};for(const t of i.locations)d(t);for(const e of t)i.locationOf[e.device_id]||c(e);for(const t of e){const e=r.get(t.key);if(!e)continue;const s=Nt(i,e.device_id,t.start);(s?d(s):c(e)).evs.push(t)}const[p,h]=n;for(const t of i.runs){if(o.has(t.device_id))continue;const e=Date.parse(t.start);if(!(e<h&&Date.parse(t.end)>p))continue;const n=Nt(i,t.device_id,e);n&&d(n).evs.push(s(t,n))}const u=a.site?pe(i.sites,a.site):null,m=a.search.trim().toLowerCase();return[...l.values()].filter(t=>!u||null!=t.mp?.site_id&&u.has(t.mp.site_id)).filter(t=>!m||[t.name,t.valve?.valve_name,t.group].some(t=>t?.toLowerCase().includes(m))).sort((t,e)=>Li(t.group)-Li(e.group)||t.group.localeCompare(e.group)||t.name.localeCompare(e.name))}(this._valves(),this._events,this._farm,(t,e)=>{const i=Date.parse(t.start),s=t.liters??null,n=Math.round(t.duration_seconds/60);return{start:i,end:Math.max(Date.parse(t.end),i+6e4),kind:"ran",key:`retired:${t.device_id}`,name:e.name,summary:`${e.name} · removed valve · ${n} min${null!=s?` · ${s} L`:""}`,liters:s}},[t.getTime(),e.getTime()],this._filter)}_renderTimeline(t){const[e,i]=this._window(),s=e.getTime(),n=i.getTime()-s,a=t=>(t-s)/n*100,r=Date.now(),o=new Map;for(const e of t)(o.get(e.group)??o.set(e.group,[]).get(e.group)).push(e);const l=[...o.keys()],d=1===this._range?3:3===this._range?12:24,c=[];for(let t=s;t<i.getTime();t+=d*Ni){const e=Bt(t).hour;c.push({left:a(t),label:d>=24||0===e&&this._range>1?Yt(t,{weekday:"short"}):`${Ui(e)}`})}const p=Array.from({length:this._range-1},(t,e)=>a(s+(e+1)*zi)),h=r>s&&r<i.getTime()?a(r):null;let u=0;const m=l.map(t=>{const e=o.get(t).map(t=>{const{evs:e,valve:i}=t,s=e.some(t=>"missed"===t.kind||"unplanned"===t.kind||Wi(t)||t.end-t.start>144e5);return{row:t,v:i,evs:e,problem:s}}).filter(t=>!this._problemsOnly||t.problem);return e.length?(u+=e.length,B`
+    `}_online(t){const e=this.hass?.states?.[t.registry_entity]?.state;return!!e&&"unavailable"!==e&&"unknown"!==e}_battery(t){const e=t.battery?this.hass?.states?.[t.battery]?.state:void 0,i=Number(e);return e&&""!==e&&Number.isFinite(i)?Math.round(i):null}_timelineRows(){const[t,e]=this._window();return function(t,e,i,s,n,a){const r=new Map(t.map(t=>[t.registry_entity,t])),o=new Set(t.map(t=>t.device_id)),l=new Map,d=e=>{const s=`mp:${e.id}`;let n=l.get(s);return n||(n={key:s,group:e.site_id?ue(i.sites,e.site_id):Ci,name:e.name,mp:e,valve:t.find(t=>e.valves.includes(t.device_id))??null,evs:[]},l.set(s,n)),n},c=t=>{const e=`valve:${t.registry_entity}`;let i=l.get(e);return i||l.set(e,i={key:e,group:Li,name:t.valve_name,mp:null,valve:t,evs:[]}),i};for(const t of i.locations)d(t);for(const e of t)i.locationOf[e.device_id]||c(e);for(const t of e){const e=r.get(t.key);if(!e)continue;const s=Ot(i,e.device_id,t.start);(s?d(s):c(e)).evs.push(t)}const[p,h]=n;for(const t of i.runs){if(o.has(t.device_id))continue;const e=Date.parse(t.start);if(!(e<h&&Date.parse(t.end)>p))continue;const n=Ot(i,t.device_id,e);n&&d(n).evs.push(s(t,n))}const u=a.site?he(i.sites,a.site):null,m=a.search.trim().toLowerCase();return[...l.values()].filter(t=>!u||null!=t.mp?.site_id&&u.has(t.mp.site_id)).filter(t=>!m||[t.name,t.valve?.valve_name,t.group].some(t=>t?.toLowerCase().includes(m))).sort((t,e)=>zi(t.group)-zi(e.group)||t.group.localeCompare(e.group)||t.name.localeCompare(e.name))}(this._valves(),this._events,this._farm,(t,e)=>{const i=Date.parse(t.start),s=t.liters??null,n=Math.round(t.duration_seconds/60);return{start:i,end:Math.max(Date.parse(t.end),i+6e4),kind:"ran",key:`retired:${t.device_id}`,name:e.name,summary:`${e.name} · removed valve · ${n} min${null!=s?` · ${s} L`:""}`,liters:s}},[t.getTime(),e.getTime()],this._filter)}_renderTimeline(t){const[e,i]=this._window(),s=e.getTime(),n=i.getTime()-s,a=t=>(t-s)/n*100,r=Date.now(),o=new Map;for(const e of t)(o.get(e.group)??o.set(e.group,[]).get(e.group)).push(e);const l=[...o.keys()],d=1===this._range?3:3===this._range?12:24,c=[];for(let t=s;t<i.getTime();t+=d*Oi){const e=qt(t).hour;c.push({left:a(t),label:d>=24||0===e&&this._range>1?Zt(t,{weekday:"short"}):`${Fi(e)}`})}const p=Array.from({length:this._range-1},(t,e)=>a(s+(e+1)*Ni)),h=r>s&&r<i.getTime()?a(r):null;let u=0;const m=l.map(t=>{const e=o.get(t).map(t=>{const{evs:e,valve:i}=t,s=e.some(t=>"missed"===t.kind||"unplanned"===t.kind||ji(t)||t.end-t.start>144e5);return{row:t,v:i,evs:e,problem:s}}).filter(t=>!this._problemsOnly||t.problem);return e.length?(u+=e.length,B`
         <div class="grouphdr">${t}</div>
         ${e.map(({row:t,v:e,evs:i,problem:s})=>{const n=i.reduce((t,e)=>"planned"===e.kind||"missed"===e.kind?t+(e.end-e.start):null!=e.planStart&&null!=e.planEnd?t+(e.planEnd-e.planStart):t,0),r=i.filter(t=>"ran"===t.kind||"unplanned"===t.kind||"running"===t.kind),o=r.reduce((t,e)=>t+(e.end-e.start),0),l=r.reduce((t,e)=>null==e.liters?t:(t??0)+e.liters,null);return B`
             <div class="row ${e?"clickable":""} ${s?"problem":""}" @click=${()=>e&&this._open(e.view_path)}>
@@ -2309,18 +2309,18 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
                 ${(e?this._offline.get(e.registry_entity)??[]:[]).map(([t,e])=>B`<i
                     class="offline"
                     style="left:${a(t)}%;width:${Math.max(a(e)-a(t),.3)}%"
-                    title="Offline ${Fi(t)}–${Fi(e)}"
+                    title="Offline ${Ii(t)}–${Ii(e)}"
                   ></i>`)}
                 ${p.map(t=>B`<i class="dayline" style="left:${t}%"></i>`)}
                 ${i.map(t=>B`<i
-                    class="bar ${t.kind} ${Wi(t)?"dry":""}"
+                    class="bar ${t.kind} ${ji(t)?"dry":""}"
                     style="left:${a(t.start)}%;width:${Math.max(a(t.end)-a(t.start),.4)}%"
                     title=${t.summary}
                   ></i>`)}
                 ${null!==h?B`<i class="now" style="left:${h}%"></i>`:G}
               </div>
-              <div class="metric ${n?"":"muted"}">${Ii(n)}</div>
-              <div class="metric ${o?"":"muted"}">${Ii(o)}</div>
+              <div class="metric ${n?"":"muted"}">${Hi(n)}</div>
+              <div class="metric ${o?"":"muted"}">${Hi(o)}</div>
               <div class="metric ${null==l?"muted":""}">${(t=>null==t?"–":String(Math.round(t)))(l)}</div>
               <div class="metric ${e&&null!=this._battery(e)?"":"muted"}" title="Battery now">
                 ${e&&null!=this._battery(e)?`${this._battery(e)} %`:"–"}
@@ -2342,7 +2342,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         ${m}
         ${t.length?this._problemsOnly&&0===u?B`<div class="empty">No missed or unplanned runs in this range.</div>`:G:B`<div class="empty">No metering points or valves match.</div>`}
       </div>
-    `}}if(Gi.styles=[fe,r`
+    `}}if(Ki.styles=[ge,r`
     :host {
       --cc-text: var(--primary-text-color, #212121);
       --cc-dim: var(--xt-dim);
@@ -2822,7 +2822,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         }
       }
     }
-  `],t([ut({attribute:!1})],Gi.prototype,"hass",void 0),t([mt()],Gi.prototype,"_config",void 0),t([mt()],Gi.prototype,"_mode",void 0),t([mt()],Gi.prototype,"_range",void 0),t([mt()],Gi.prototype,"_anchor",void 0),t([mt()],Gi.prototype,"_events",void 0),t([mt()],Gi.prototype,"_problemsOnly",void 0),t([mt()],Gi.prototype,"_filter",void 0),t([mt()],Gi.prototype,"_farm",void 0),t([mt()],Gi.prototype,"_farmReady",void 0),t([mt()],Gi.prototype,"_eventsReady",void 0),t([mt()],Gi.prototype,"_offline",void 0),t([mt()],Gi.prototype,"_loading",void 0),t([mt()],Gi.prototype,"_error",void 0),!customElements.get("irrigation-calendar-card")){customElements.define("irrigation-calendar-card",Gi);const t=window;t.customCards=t.customCards||[],t.customCards.some(t=>"irrigation-calendar-card"===t.type)||t.customCards.push({type:"irrigation-calendar-card",name:"Irrigation Calendar",description:"Planned, ran, missed and unplanned irrigation runs as a day grid, week grid or per-valve timeline."})}const Ki=r`
+  `],t([ut({attribute:!1})],Ki.prototype,"hass",void 0),t([mt()],Ki.prototype,"_config",void 0),t([mt()],Ki.prototype,"_mode",void 0),t([mt()],Ki.prototype,"_range",void 0),t([mt()],Ki.prototype,"_anchor",void 0),t([mt()],Ki.prototype,"_events",void 0),t([mt()],Ki.prototype,"_problemsOnly",void 0),t([mt()],Ki.prototype,"_filter",void 0),t([mt()],Ki.prototype,"_farm",void 0),t([mt()],Ki.prototype,"_farmReady",void 0),t([mt()],Ki.prototype,"_eventsReady",void 0),t([mt()],Ki.prototype,"_offline",void 0),t([mt()],Ki.prototype,"_loading",void 0),t([mt()],Ki.prototype,"_error",void 0),!customElements.get("irrigation-calendar-card")){customElements.define("irrigation-calendar-card",Ki);const t=window;t.customCards=t.customCards||[],t.customCards.some(t=>"irrigation-calendar-card"===t.type)||t.customCards.push({type:"irrigation-calendar-card",name:"Irrigation Calendar",description:"Planned, ran, missed and unplanned irrigation runs as a day grid, week grid or per-valve timeline."})}const Ji=r`
   .titlebar {
     display: flex;
     align-items: center;
@@ -2998,7 +2998,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
   .dim {
     color: var(--xt-dim);
   }
-`;class Ji extends dt{setConfig(t){this._config=t}getCardSize(){return 3}_delay(t){const e=this._config?.rain_snow_delay,i=e?this.hass?.states[e]:void 0;if(!e||!i)return;const s=i.attributes,n=Number(s.min??0),a=Number(s.max??7),r=Math.min(a,Math.max(n,Number(i.state)+t*Number(s.step??1)));this.hass.callService("number","set_value",{entity_id:e,value:r})}render(){if(!this._config||!this.hass)return G;const t=this._config.sleep_mode?this.hass.states[this._config.sleep_mode]:void 0,e=this._config.rain_snow_delay?this.hass.states[this._config.rain_snow_delay]:void 0,i=e?Number(e.state):NaN,s=t=>!t||"unavailable"===t.state||"unknown"===t.state;return B`<ha-card>
+`;class Yi extends dt{setConfig(t){this._config=t}getCardSize(){return 3}_delay(t){const e=this._config?.rain_snow_delay,i=e?this.hass?.states[e]:void 0;if(!e||!i)return;const s=i.attributes,n=Number(s.min??0),a=Number(s.max??7),r=Math.min(a,Math.max(n,Number(i.state)+t*Number(s.step??1)));this.hass.callService("number","set_value",{entity_id:e,value:r})}render(){if(!this._config||!this.hass)return G;const t=this._config.sleep_mode?this.hass.states[this._config.sleep_mode]:void 0,e=this._config.rain_snow_delay?this.hass.states[this._config.rain_snow_delay]:void 0,i=e?Number(e.state):NaN,s=t=>!t||"unavailable"===t.state||"unknown"===t.state;return B`<ha-card>
       <div class="titlebar">
         <ha-icon icon="mdi:cog-outline"></ha-icon>
         <div class="title"><b>Settings</b></div>
@@ -3036,7 +3036,7 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
               </div>
             </div>`:G}
       </div>
-    </ha-card>`}}Ji.styles=[fe,Ki,r`
+    </ha-card>`}}Yi.styles=[ge,Ji,r`
       .setting {
         display: flex;
         align-items: center;
@@ -3068,4 +3068,4 @@ const pt={attribute:!0,type:String,converter:x,reflect:!1,hasChanged:b},ht=(t=pt
         text-align: center;
         font-weight: 500;
       }
-    `],t([ut({attribute:!1})],Ji.prototype,"hass",void 0),t([mt()],Ji.prototype,"_config",void 0),customElements.get("irrigation-valve-settings-card")||customElements.define("irrigation-valve-settings-card",Ji);
+    `],t([ut({attribute:!1})],Yi.prototype,"hass",void 0),t([mt()],Yi.prototype,"_config",void 0),customElements.get("irrigation-valve-settings-card")||customElements.define("irrigation-valve-settings-card",Yi);
