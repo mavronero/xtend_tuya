@@ -40,6 +40,8 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-29 | 4.4.289 | 4.4.288 | ok (SMOKE OK; bootstrap heals a stale SW cache: 1-byte ranged GET vs loaded ?v=, purge + one reload per version; HEAD is 405 behind nabu.casa. Verified on dev with a simulated release. Rollback: HACS 4.4.288 + restart) |
 | 2026-09-29 | 4.4.290 | 4.4.289 | ok (SMOKE OK; timer registry: live DP wins over restored slot (815 now Tue/Thu/Sat, was daily), schedule_changed_at attribute (3 of 162 stamped at boot), missed marks ignore plans before it; shared valve_locations request. Rollback: HACS 4.4.289 + restart; the attribute is harmless on 289) |
 | 2026-09-29 | 4.4.291 | 4.4.290 | ok (SMOKE OK; searchable pickers, bare valve numbers, daily cloud /timers overlay (first sweep 15 min after load), Silent badge from last_valve_report (35 seeded; 706 485 h, 707 457 h, 712 68 h). No errors in core log. Rollback: HACS 4.4.290 + restart; new attributes are ignored by 290) |
+| 2026-09-30 | 4.4.292 | 4.4.291 | ok (SMOKE OK; offline valves keep their metering point (Tuya id from device identifiers). Data repair via API + stopped-core store edit: 810 back on FG Verbs North Fence, 968 split to FG Verbs Fig Trees since 02.07 (backup .pre-backdate968). Rollback: HACS 4.4.291) |
+| 2026-09-30 | 4.4.293 | 4.4.292 | ok (SMOKE OK; unplanned runs not counted as problems, live L/min in Water now. Frontend only. Rollback: HACS 4.4.292) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
