@@ -338,6 +338,7 @@ function buildControlCard(v: ValveEntities): unknown | null {
     valve: v.switch,
     duration: v.duration,
     volume_sensor: v.volume_sensor,
+    flow_rate_sensor: v.flow_rate_sensor,
     start_time_sensor: v.start_time_sensor,
     end_time_sensor: v.end_time_sensor,
     mode_sensor: v.mode_sensor,

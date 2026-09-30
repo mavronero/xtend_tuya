@@ -683,8 +683,8 @@ export class IrrigationCalendarCard extends LitElement {
           const { evs, valve: v } = row;
           const problem = evs.some(
             (e) =>
+              // unplanned is not a problem: a manual watering is fine (Simon 30.09)
               e.kind === "missed" ||
-              e.kind === "unplanned" ||
               isDry(e) || // opened, but no water went through (977, 25.09.)
               e.end - e.start > 4 * HOUR_MS
           );
@@ -761,7 +761,7 @@ export class IrrigationCalendarCard extends LitElement {
         ${!tlRows.length
           ? html`<div class="empty">No metering points or valves match.</div>`
           : this._problemsOnly && shown === 0
-            ? html`<div class="empty">No missed or unplanned runs in this range.</div>`
+            ? html`<div class="empty">No missed or dry runs in this range.</div>`
             : nothing}
       </div>
     `;

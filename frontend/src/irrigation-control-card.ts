@@ -188,6 +188,12 @@ export class IrrigationControlCard extends LitElement {
     return { total, elapsed, remaining: Math.max(0, total - elapsed) };
   }
 
+  private _currentFlow(): number | null {
+    const e = this._config.flow_rate_sensor ? this.hass.states[this._config.flow_rate_sensor] : undefined;
+    const n = e ? parseFloat(e.state) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }
+
   private _currentVolume(): number | null {
     if (!this._config.volume_sensor) return null;
     const e = this.hass.states[this._config.volume_sensor];
@@ -367,7 +373,10 @@ export class IrrigationControlCard extends LitElement {
       <div class="progress">
         <div class="progress-text"><span class="big">${formatDuration(remaining)}</span><span class="dim">left of ${formatDuration(total)}</span></div>
         <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
-        <div class="dim">${formatDuration(elapsed)} elapsed</div>
+        <div class="dim">${formatDuration(elapsed)} elapsed${(() => {
+          const f = this._currentFlow();
+          return f !== null ? html` · <b class="flow">${f.toFixed(1)} L/min</b>` : nothing;
+        })()}</div>
       </div>
       <button class="btn wide" @click=${this._stop}><ha-icon icon="mdi:stop"></ha-icon>Stop watering</button>
     `;

@@ -70,6 +70,8 @@ export interface IrrigationControlCardConfig {
   duration?: string;
   /** Sensor with cumulative water volume (liters) */
   volume_sensor?: string;
+  /** Live L/min while a run is on (Simon 30.09: missed the removed flow graph). */
+  flow_rate_sensor?: string;
   /** Sensor with last watering start timestamp */
   start_time_sensor?: string;
   /** Sensor with last watering end timestamp */
