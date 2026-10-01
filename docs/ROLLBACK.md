@@ -42,6 +42,7 @@ Whoever deploys writes the previous version here before updating.
 | 2026-09-29 | 4.4.291 | 4.4.290 | ok (SMOKE OK; searchable pickers, bare valve numbers, daily cloud /timers overlay (first sweep 15 min after load), Silent badge from last_valve_report (35 seeded; 706 485 h, 707 457 h, 712 68 h). No errors in core log. Rollback: HACS 4.4.290 + restart; new attributes are ignored by 290) |
 | 2026-09-30 | 4.4.292 | 4.4.291 | ok (SMOKE OK; offline valves keep their metering point (Tuya id from device identifiers). Data repair via API + stopped-core store edit: 810 back on FG Verbs North Fence, 968 split to FG Verbs Fig Trees since 02.07 (backup .pre-backdate968). Rollback: HACS 4.4.291) |
 | 2026-09-30 | 4.4.293 | 4.4.292 | ok (SMOKE OK; unplanned runs not counted as problems, live L/min in Water now. Frontend only. Rollback: HACS 4.4.292) |
+| 2026-10-01 | 4.4.294 | 4.4.293 | ok (SMOKE OK over Tailscale, no canary; a run whose start the valve never reported is logged from the counter's first rise. 961's lost run of 01.10 11:30:25-11:43:15, 770 s / 112 L from counter_custom, added to the runs store with core stopped; backup .storage/xtend_tuya.irrigation_runs.pre-961-1001. Rollback: HACS 4.4.293 + restart; the added row is a real run, keep it) |
 
 ## Rollback (HACS, ~5 min)
 1. HA → HACS → Xtend Tuya → ⋮ → **Redownload** → pick the rollback version → Download.
