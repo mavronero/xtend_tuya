@@ -165,6 +165,13 @@ def test_counter_custom(raw, expected):
     assert counter_custom.parse(raw) == expected
 
 
+def test_counter_custom_short():
+    assert counter_custom.parse_short("770,112") == (770, 112)  # 961, 2026-10-01
+    assert counter_custom.parse_short(base64.b64encode(b"1000,114").decode()) == (1000, 114)
+    for raw in ("9000", "0,1,600,113,20260714161000", "a,b", "", None):
+        assert counter_custom.parse_short(raw) is None
+
+
 # --- start_time / close_time ---------------------------------------------------------
 
 def test_run_time_captures():

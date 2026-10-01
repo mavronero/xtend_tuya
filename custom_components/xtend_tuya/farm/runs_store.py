@@ -388,11 +388,19 @@ class RunsStore:
             # The valve reported a close but no start for this run (961 on
             # 2026-10-01: opened right after coming back online, the start
             # sensor still read the run of 28.09, so the run was dropped).
-            # The counter's first rise is when the water began to flow.
-            # ponytail: a few seconds late, and after a lost run it is that
-            # run's rise; the 6 h cap below bounds the damage.
+            if self._row_near(d["tuya_device_id"], end, CLOSE_SETTLE_SEC):
+                return  # the same close, re-reported a second later
+            # The valve's own record of the run (counter_custom, on the end
+            # sensor while fresh) gives the exact start; without it, the
+            # counter's first rise is when the water began to flow.
+            # ponytail: the rise is a few seconds late, and after a lost run
+            # it is that run's rise; the 6 h cap below bounds the damage.
+            run_seconds = new_state.attributes.get("run_seconds")
             acc = self._vol.get(d["tuya_device_id"])
-            start = acc["first_rise"] if acc else None
+            if isinstance(run_seconds, (int, float)) and run_seconds > 0:
+                start = end - timedelta(seconds=run_seconds)
+            else:
+                start = acc["first_rise"] if acc else None
         if start is None or end <= start:
             return
         # A close pushed before its own start pairs with the PREVIOUS cycle's

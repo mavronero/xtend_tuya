@@ -3,8 +3,9 @@
 QT-08W-T3: a CSV string 'mode,flag,duration_s,volume_L,timestamp', e.g.
 '0,1,600,113,20260714161000'; duration 65534 (0xFFFE) = aborted sentinel.
 The value arrives as plain CSV or base64 depending on which manager filled
-device.status (seen live 4.4.236-238). The QT-08W reports a bare number
-('9000') here, which is not a run.
+device.status (seen live 4.4.236-238). The QT-08W reports 'duration_s,liters'
+of the run that just closed ('770,112', what SmartLife shows) or a bare
+number ('9000'), which is not a run.
 """
 
 from __future__ import annotations
@@ -46,5 +47,16 @@ def parse(raw: object) -> LastRun | None:
         return None
     try:
         return LastRun(duration=int(parts[2]), volume=int(parts[3]), ts=parts[4])
+    except ValueError:
+        return None
+
+
+def parse_short(raw: object) -> tuple[int, int] | None:
+    """QT-08W: (duration_s, liters) of the run that just closed."""
+    parts = (as_csv(raw) or "").split(",")
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
     except ValueError:
         return None

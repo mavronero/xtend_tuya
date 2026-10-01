@@ -3,6 +3,7 @@
 from __future__ import annotations
 import base64
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Mapping
@@ -391,6 +392,43 @@ class Fdm5kwTimerRegistryEntity(XTSensorEntity):
 # ---------------------------------------------------------------------------
 
 
+class Fdm5kwCloseTimeEntity(XTSensorEntity):
+    """Last watering end, plus the valve's own record of that run.
+
+    The QT-08W sends counter_custom ('duration_s,liters') with the close.
+    The runs store takes the run's start from it when the start report never
+    arrived (961 on 2026-10-01: opened while offline, start_time still read
+    28.09). The attributes are only set while the record is fresh, so a
+    close is never paired with an older run's record.
+    """
+
+    # The close report repeats a second later without the record (961: two
+    # frames, 11:43:14 and 11:43:15); both belong to it.
+    RUN_RECORD_FRESH_SEC = 60
+
+    _run_record_at: float | None = None
+
+    async def _process_device_update(
+        self, updated_status_properties: list[str], dp_timestamps: dict | None
+    ) -> bool:
+        if counter_custom.CODE in updated_status_properties:
+            self._run_record_at = time.monotonic()
+            return True
+        return await super()._process_device_update(updated_status_properties, dp_timestamps)
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        if (
+            self._run_record_at is None
+            or time.monotonic() - self._run_record_at > self.RUN_RECORD_FRESH_SEC
+        ):
+            return None
+        record = counter_custom.parse_short(self.device.status.get(counter_custom.CODE))
+        if record is None:
+            return None
+        return {"run_seconds": record[0], "run_liters": record[1]}
+
+
 class Fdm5kwFlowRateEntity(XTSensorEntity):
     """Derived instantaneous flow-rate sensor (liters/minute).
 
@@ -659,6 +697,27 @@ class Fdm5kwTimerRegistryDescription(Fdm5kwSensorEntityDescription):
 
 
 @dataclass(frozen=True)
+class Fdm5kwCloseTimeDescription(Fdm5kwSensorEntityDescription):
+    """Descriptor that returns a Fdm5kwCloseTimeEntity (carries the run record)."""
+
+    def get_entity_instance(
+        self,
+        device: XTDevice,
+        device_manager: MultiManager,
+        description: XTSensorEntityDescription,
+        definition: TuyaSensorDefinition,
+        supported_descriptors: dict[str, tuple[XTSensorEntityDescription, ...]],
+    ) -> Fdm5kwCloseTimeEntity:
+        return Fdm5kwCloseTimeEntity(
+            device=device,
+            device_manager=device_manager,
+            description=XTSensorEntityDescription(**description.__dict__),
+            definition=definition,
+            supported_descriptors=supported_descriptors,
+        )
+
+
+@dataclass(frozen=True)
 class Fdm5kwFlowRateDescription(Fdm5kwSensorEntityDescription):
     """Descriptor that returns a Fdm5kwFlowRateEntity (derived l/min)."""
 
@@ -710,7 +769,7 @@ class Fdm5kwSensor:
                 ignore_other_dp_code_handler=True,
                 wrapper_class=(DPCodeTimestampWrapper,),
             ),
-            Fdm5kwSensorEntityDescription(
+            Fdm5kwCloseTimeDescription(
                 key=f"{XTDPCode.CLOSE_TIME}_timestamp",
                 dpcode=XTDPCode.CLOSE_TIME,
                 translation_key="close_time",

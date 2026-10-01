@@ -121,11 +121,11 @@ D = {
 }
 
 
-def end_event(value):
+def end_event(value, **attributes):
     return types.SimpleNamespace(
         data={
             "entity_id": D["end_entity"],
-            "new_state": types.SimpleNamespace(state=value),
+            "new_state": types.SimpleNamespace(state=value, attributes=attributes),
         }
     )
 
@@ -219,6 +219,23 @@ def demo():
     s._on_end_change(end_event(s.hass.states.get(D["end_entity"]).state))
     assert len(s.runs[DEV]) == 1 and s.runs[DEV][0]["total_l"] == 112.0, s.runs
     assert 700 < s.runs[DEV][0]["duration_seconds"] < 720
+
+    # ... and from the valve's own record when the close carries it
+    # (counter_custom '770,112'): start = close - 770 s, exact.
+    s = store(
+        {
+            D["start_entity"]: (now - timedelta(days=3)).isoformat(),
+            D["volume_entity"]: "112",
+        }
+    )
+    s._end_entity_to_device = {D["end_entity"]: D}
+    s.per_cycle.add(DEV)
+    close = now - timedelta(seconds=5)
+    s._on_end_change(end_event(close.isoformat(), run_seconds=770, run_liters=112))
+    assert len(s.runs[DEV]) == 1 and s.runs[DEV][0]["duration_seconds"] == 770.0, s.runs
+    # the close repeats one second later (961 sent 11:43:14, then 11:43:15)
+    s._on_end_change(end_event((close + timedelta(seconds=1)).isoformat(), run_seconds=770, run_liters=112))
+    assert len(s.runs[DEV]) == 1, s.runs
 
     # ... while a 15-minute run on the same path is recorded at once.
     s = store(
