@@ -384,6 +384,15 @@ class RunsStore:
             return
         start_state = self.hass.states.get(d["start_entity"])
         start = _parse_iso(start_state.state) if start_state else None
+        if start is None or end <= start or (end - start).total_seconds() > MAX_RUN_SECONDS:
+            # The valve reported a close but no start for this run (961 on
+            # 2026-10-01: opened right after coming back online, the start
+            # sensor still read the run of 28.09, so the run was dropped).
+            # The counter's first rise is when the water began to flow.
+            # ponytail: a few seconds late, and after a lost run it is that
+            # run's rise; the 6 h cap below bounds the damage.
+            acc = self._vol.get(d["tuya_device_id"])
+            start = acc["first_rise"] if acc else None
         if start is None or end <= start:
             return
         # A close pushed before its own start pairs with the PREVIOUS cycle's

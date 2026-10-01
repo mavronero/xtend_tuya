@@ -205,6 +205,21 @@ def demo():
     s._on_end_change(end_event(s.hass.states.get(D["end_entity"]).state))
     assert s.runs.get(DEV, []) == [], s.runs
 
+    # ... unless the counter saw the water flow: 961 on 2026-10-01 reported
+    # a close but no start, the run is logged from the counter's first rise.
+    s._vol_entity_to_device = {D["volume_entity"]: D}
+    vol = lambda v: types.SimpleNamespace(
+        data={"entity_id": D["volume_entity"], "new_state": types.SimpleNamespace(state=v)}
+    )
+    s._on_volume_change(vol("0"))
+    s._on_volume_change(vol("4"))
+    s._vol[DEV]["first_rise"] = now - timedelta(minutes=12)
+    s.per_cycle.add(DEV)  # like 961: the close reading is the run total
+    s.hass.states.values[D["volume_entity"]] = "112"
+    s._on_end_change(end_event(s.hass.states.get(D["end_entity"]).state))
+    assert len(s.runs[DEV]) == 1 and s.runs[DEV][0]["total_l"] == 112.0, s.runs
+    assert 700 < s.runs[DEV][0]["duration_seconds"] < 720
+
     # ... while a 15-minute run on the same path is recorded at once.
     s = store(
         {
