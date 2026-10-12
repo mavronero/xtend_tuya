@@ -209,6 +209,7 @@ class XTIrrigationLocationsView(HomeAssistantView):
                         "begin": a["begin"],
                         "end": a["end"],
                         "source": a["source"],
+                        "end_reason": a.get("end_reason"),
                     }
                 )
             lat, lon = lm.lat_lon(loc)
@@ -269,9 +270,9 @@ class XTIrrigationLocationsView(HomeAssistantView):
                 fields = {k: body[k] for k in ("name", "description", "expected_lpm", "lat", "lon") if k in body}
                 lm.update_location(data, body.get("id"), **fields)
             elif action == "assign_device":
-                lm.assign_device(data, _str(body, "device_id"), body.get("location_id"), now)
+                lm.assign_device(data, _str(body, "device_id"), body.get("location_id"), now, body.get("reason"))
             elif action == "end_assignment":
-                lm.end_assignment(data, _str(body, "device_id"), body.get("location_id"), now)
+                lm.end_assignment(data, _str(body, "device_id"), body.get("location_id"), now, body.get("reason"))
             elif action == "delete_location":
                 from .runs_store import async_get_store
 

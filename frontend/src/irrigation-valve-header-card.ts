@@ -74,20 +74,25 @@ export class IrrigationValveHeaderCard extends LitElement {
   @state() private _moving = false;
   @state() private _busy = false;
   @state() private _moveError: string | null = null;
+  /** Why the valve leaves its metering point (asked on move and remove). */
+  @state() private _reason = "";
   private _farm = new FarmController(this);
 
   /** Same action as the Location card's "Move to…" / "Assign to…". */
-  private async _move(deviceId: string, locationId: string): Promise<void> {
+  /** Move to `locationId`, or with `remove` take it off `locationId`. */
+  private async _move(deviceId: string, locationId: string, remove = false): Promise<void> {
     if (!this.hass?.callApi) return;
     this._busy = true;
     this._moveError = null;
     try {
       await this.hass.callApi("POST", "xtend_tuya/irrigation_locations", {
-        action: "assign_device",
+        action: remove ? "end_assignment" : "assign_device",
         device_id: deviceId,
         location_id: locationId,
+        reason: this._reason,
       });
       this._moving = false;
+      this._reason = "";
       announceFarmChange(); // this card's controller, the log and other pages reload
     } catch (e) {
       this._moveError = errText(e);
@@ -108,7 +113,18 @@ export class IrrigationValveHeaderCard extends LitElement {
         <ha-icon icon="mdi:pencil-outline"></ha-icon>
       </button>
       ${this._moving
-        ? html`<span class="move">${pickList(
+        ? html`<span class="move">
+            ${currentId
+              ? html`<input
+                  class="pick"
+                  placeholder="Reason (e.g. battery, defect)"
+                  aria-label="Why the valve leaves this metering point"
+                  maxlength="200"
+                  .value=${this._reason}
+                  @input=${(e: Event) => (this._reason = (e.target as HTMLInputElement).value)}
+                />`
+              : nothing}
+            ${pickList(
             "xt-move-mp",
             label,
             this._farm.data.locations
@@ -119,7 +135,13 @@ export class IrrigationValveHeaderCard extends LitElement {
               })),
             this._busy,
             (id) => void this._move(deviceId, id)
-          )}</span>`
+          )}
+            ${currentId
+              ? html`<button class="remove" ?disabled=${this._busy} @click=${() => void this._move(deviceId, currentId, true)}>
+                  Remove from metering point
+                </button>`
+              : nothing}
+          </span>`
         : nothing}
       ${this._moveError ? html`<span class="err">${this._moveError}</span>` : nothing}`;
   }
@@ -147,6 +169,10 @@ export class IrrigationValveHeaderCard extends LitElement {
     const mp = mpRec ? summarizeMp(mpRec, this._farm.data, mpValves as typeof v[], now) : null;
     // A metering point's view wins where it has one: its history survives
     // valve exchanges and it knows the expected flow.
+    // Every metering point the valve served, newest first.
+    const history = this._farm.data.locations
+      .flatMap((l) => l.assignments.filter((a) => a.device_id === v.device_id).map((a) => ({ ...a, name: l.name })))
+      .sort((a, b) => (b.begin ?? 0) - (a.begin ?? 0));
     const week = mp?.week ?? v.week;
     const last = mp?.last ?? v.last;
     const badges = [...new Set([...(mp?.badges.filter((b) => b !== "no_valve") ?? []), ...v.badges])];
@@ -180,6 +206,11 @@ export class IrrigationValveHeaderCard extends LitElement {
                   >
                   ${v.site ? html`<span title="Site"><ha-icon icon="mdi:map-marker-radius-outline"></ha-icon>${v.site.name}</span>` : nothing}`
               : html`<span><span class="dim">Not assigned</span>${this._moveControl(v.device_id, null)}</span>`}
+            ${v.home || v.room
+              ? html`<span title="SmartLife account · room"
+                  ><ha-icon icon="mdi:cellphone-link"></ha-icon>${[v.home, v.room].filter(Boolean).join(" · ")}</span
+                >`
+              : nothing}
             ${mp?.pump
               ? html`<span title="Pump${mp.pump.via ? `, inherited from ${mp.pump.via}` : ""}"
                   ><ha-icon icon="mdi:pump"></ha-icon>${mp.pump.name}${mp.pump.via ? html`<span class="dim"> · via ${mp.pump.via}</span>` : nothing}</span
@@ -230,6 +261,21 @@ export class IrrigationValveHeaderCard extends LitElement {
             : nothing}
         </div>
       </div>
+      ${history.length > (mpRec ? 1 : 0)
+        ? html`<details class="history">
+            <summary>Metering points of this valve <span class="dim">${history.length}</span></summary>
+            <ul>
+              ${history.map(
+                (a) => html`<li>
+                  <b>${a.name}</b>
+                  <span class="dim"
+                    >${a.begin ? when(a.begin) : "from the start"} – ${a.end ? when(a.end) : "now"}${a.reason ? ` · ${a.reason}` : ""}</span
+                  >
+                </li>`
+              )}
+            </ul>
+          </details>`
+        : nothing}
     </ha-card>`;
   }
 
@@ -339,6 +385,45 @@ export class IrrigationValveHeaderCard extends LitElement {
       .where select {
         font: inherit;
         margin-left: 4px;
+      }
+      .where > span:has(.move) {
+        flex-wrap: wrap;
+      }
+      .move {
+        /* own line: beside the name it squeezed it into a column */
+        flex-basis: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .move input.pick {
+        width: auto;
+        flex: 1 1 180px;
+        max-width: 280px;
+      }
+      .remove {
+        font: inherit;
+        cursor: pointer;
+        color: var(--xt-bad);
+        background: none;
+        border: 1px solid currentColor;
+        border-radius: 14px;
+        padding: 2px 10px;
+      }
+      .history {
+        margin-top: 12px;
+        font-size: 0.9rem;
+      }
+      .history summary {
+        cursor: pointer;
+      }
+      .history ul {
+        list-style: none;
+        margin: 6px 0 0;
+        padding: 0;
+        display: grid;
+        gap: 2px;
       }
       .err {
         color: var(--xt-bad);

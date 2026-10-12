@@ -227,28 +227,40 @@ def update_location(data: dict[str, Any], location_id: str, **fields: Any) -> di
     return loc
 
 
-def assign_device(data: dict[str, Any], device_id: str, location_id: str, now_iso: str) -> None:
+def _end(a: dict[str, Any], now_iso: str, reason: Any) -> None:
+    a["end"] = now_iso
+    # Why the valve left (battery, defect, moved): shown in its history.
+    if reason := str(reason or "").strip()[:200]:
+        a["end_reason"] = reason
+
+
+def assign_device(
+    data: dict[str, Any], device_id: str, location_id: str, now_iso: str, reason: Any = None
+) -> None:
     """Put a valve on an MP. An MP holds one valve at a time: the valve it
     held is exchanged (its assignment ends), and so does the new valve's
-    previous MP assignment. The MP's metering history stays."""
+    previous MP assignment. The MP's metering history stays. `reason` is
+    noted on every assignment this ends."""
     _get(data, location_id)
     current = _open(data, device_id)
     if current is not None and current["location_id"] == location_id:
         current["source"] = "manual"
         return
     if current is not None:
-        current["end"] = now_iso
+        _end(current, now_iso, reason)
     for a in data["assignments"]:
         if a["location_id"] == location_id and a["end"] is None:
-            a["end"] = now_iso
+            _end(a, now_iso, reason)
     _add(data, location_id, device_id, now_iso, "manual")
 
 
-def end_assignment(data: dict[str, Any], device_id: str, location_id: str, now_iso: str) -> None:
+def end_assignment(
+    data: dict[str, Any], device_id: str, location_id: str, now_iso: str, reason: Any = None
+) -> None:
     current = _open(data, device_id)
     if current is None or current["location_id"] != location_id:
         raise ValueError("no open assignment for that device and location")
-    current["end"] = now_iso
+    _end(current, now_iso, reason)
 
 
 def _in_window(a: dict[str, Any], end: datetime) -> bool:

@@ -28,6 +28,8 @@ export interface Assignment {
   device_id: string;
   begin: number | null;
   end: number | null;
+  /** Why the valve left this metering point, if someone said. */
+  reason: string | null;
 }
 
 export interface MeteringPoint {
@@ -108,7 +110,7 @@ interface LocationsResponse {
     expected_lpm?: number | null;
     description?: string;
     pump?: { id: string; name: string; inherited_from: string | null } | null;
-    devices?: { device_id: string; begin: string | null; end: string | null }[];
+    devices?: { device_id: string; begin: string | null; end: string | null; end_reason?: string | null }[];
   }[];
   sites?: Site[];
   pumps?: (Partial<Pump> & { id: string; name: string; meter_entity: string })[];
@@ -183,7 +185,7 @@ async function fetchFarmData(hass: CallApi, now: number): Promise<FarmData> {
       name: loc.name,
       site_id: loc.site_id ?? null,
       valves: devices.filter((d) => d.end === null).map((d) => d.device_id),
-      assignments: devices.map((d) => ({ device_id: d.device_id, begin: ms(d.begin), end: ms(d.end) })),
+      assignments: devices.map((d) => ({ device_id: d.device_id, begin: ms(d.begin), end: ms(d.end), reason: d.end_reason ?? null })),
       expected_lpm: loc.expected_lpm ?? null,
       description: loc.description ?? "",
       pump,

@@ -37,6 +37,9 @@ export interface ValveSummary {
   badges: Badge[];
   location: { id: string; name: string } | null;
   site: { id: string; name: string } | null;
+  /** SmartLife account (home) and room the valve is in. */
+  home: string | null;
+  room: string | null;
 }
 
 export const LOW_BATTERY_PCT = 20;
@@ -164,5 +167,7 @@ export function summarize(
     badges,
     location: location ? { id: location.id, name: location.name } : null,
     site: site ? { id: site.id, name: site.name } : null,
+    home: v.valve_home,
+    room: v.valve_room,
   };
 }

@@ -96,7 +96,8 @@ def demo():
         raise AssertionError("duplicate name accepted")
     except ValueError:
         pass
-    lm.assign_device(d, "x", target["id"], T3)
+    lm.assign_device(d, "x", target["id"], T3, "moved")
+    assert [a.get("end_reason") for a in d["assignments"] if a["device_id"] == "x" and a["end"] == T3] == ["moved"]
     assert not lm.seed_from_names(d, [("x", "New Bed (900)")], T4, no_runs)
     (cur,) = open_of(d, "x")
     assert cur["location_id"] == target["id"] and cur["source"] == "manual"
@@ -109,7 +110,8 @@ def demo():
     d = lm.empty()
     lm.seed_from_names(d, [("y", "Plot A (1)")], T1, no_runs)
     loc_a = d["assignments"][0]["location_id"]
-    lm.end_assignment(d, "y", loc_a, T2)
+    lm.end_assignment(d, "y", loc_a, T2, "  battery dead ")
+    assert d["assignments"][0]["end_reason"] == "battery dead"
     assert not lm.seed_from_names(d, [("y", "Plot A (1)")], T3, no_runs)
     assert not open_of(d, "y")
     try:
