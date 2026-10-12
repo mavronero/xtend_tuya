@@ -159,7 +159,7 @@ export class IrrigationCalendarCard extends LitElement {
   @state() private _farm: FarmData = EMPTY_FARM_DATA;
   private _farmLoaded = false;
   /** Farm data and the first events are in: until then rows would group
-   * every valve under "No metering point" and regroup later. */
+   * every valve under "Not assigned" and regroup later. */
   @state() private _farmReady = false;
   @state() private _eventsReady = false;
   /** Valves found at runtime when the config carries none (then a new or

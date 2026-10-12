@@ -87,8 +87,14 @@ export class XtValveFilterBar extends LitElement {
       box-sizing: border-box;
     }
     select {
-      /* keep the native chevron off the rounded edge */
-      padding-right: 28px;
+      /* own chevron: the native one sits on the rounded edge (Trello QqR3Ne6n) */
+      appearance: none;
+      -webkit-appearance: none;
+      padding-right: 34px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23888' d='M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 18px;
     }
     input {
       flex: 1;

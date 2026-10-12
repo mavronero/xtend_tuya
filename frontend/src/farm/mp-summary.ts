@@ -30,7 +30,7 @@ export interface MpSummary {
   last: RunInfo | null;
   next: RunInfo | null;
   week: Week;
-  /** Mean flow of the last 30 days' runs that measured water (0 L runs excluded). */
+  /** Mean flow of the last 30 days' runs that measured water (0 L and fault runs excluded). */
   avg_lpm: number | null;
   expected_lpm: number | null;
   pump: { name: string; via: string | null } | null;
@@ -40,6 +40,10 @@ export interface MpSummary {
 
 /** Mean flow further than this from the expected L/min is flagged. */
 export const FLOW_TOLERANCE = 0.25;
+/** A run under this share of the point's typical (median) flow is a fault
+ * (tap closed, line empty), not its flow: left out of the mean (Simon 11.10,
+ * Trello ajQ4covG: "20% less than the average"). */
+export const FAULT_BELOW = 0.8;
 const MIN_METERED_MINUTES = 1;
 const DAY_MS = 86_400_000;
 
@@ -65,7 +69,12 @@ export function summarizeMp(mp: MeteringPoint, data: FarmData, valves: ValveSumm
 
   // Dry runs (0 L) are no-waterings, not slow flow: they would drag the mean
   // toward 0. An all-dry point gets avg null and no_flow from its last run.
-  const recent = runs.filter((r) => r.start >= now - 30 * DAY_MS && (r.liters ?? 0) > 0 && r.minutes >= MIN_METERED_MINUTES);
+  const wet = runs.filter((r) => r.start >= now - 30 * DAY_MS && (r.liters ?? 0) > 0 && r.minutes >= MIN_METERED_MINUTES);
+  const lpm = (r: RunInfo) => (r.liters ?? 0) / r.minutes;
+  const sorted = wet.map(lpm).sort((a, b) => a - b);
+  // Median, not mean, as the yardstick: one near-dry run must not lower its own bar.
+  const typical = sorted.length ? (sorted[(sorted.length - 1) >> 1] + sorted[sorted.length >> 1]) / 2 : 0;
+  const recent = wet.filter((r) => lpm(r) >= typical * FAULT_BELOW);
   const minutes = recent.reduce((t, r) => t + r.minutes, 0);
   const avg_lpm = metered && minutes > 0 ? recent.reduce((t, r) => t + (r.liters ?? 0), 0) / minutes : null;
 

@@ -19,7 +19,7 @@ import type { MeteringPoint, Pump } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { summarizeMp, type MpSummary } from "./farm/mp-summary.ts";
 import { balance, flowLines, pumpFeeds, type FlowLines, type StatRow, type StatSeries } from "./farm/pump-summary.ts";
-import { NO_FILTER, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
+import { NO_FILTER, applyMpFilter, mpCounts, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
 import { volume } from "./components/format.ts";
 import { navigate } from "./components/navigate.ts";
 import { NO_PUMP, type PumpListItem } from "./components/pump-list.ts";
@@ -83,8 +83,9 @@ export class IrrigationPumpsCard extends LitElement {
   @state() private _selected: string | null = pumpFromUrl();
   @state() private _range: Range = loadRange();
   @state() private _stats: StatSeries = {};
-  /** Site filter (with sub-sites): limits the valves in balance and feeds. */
-  @state() private _site: string | null = null;
+  /** Filter of the Assigned Valves list only: the water balance is always
+   * the whole pump (Simon 11.10, Trello 9fQfMvh7). */
+  @state() private _filter: ValveFilter = NO_FILTER;
   @state() private _edit = false;
   @state() private _busy = false;
   @state() private _error: string | null = null;
@@ -318,23 +319,16 @@ export class IrrigationPumpsCard extends LitElement {
       ${flow !== null ? html`<span title="Live flow"><ha-icon icon="mdi:waves-arrow-right"></ha-icon>${flow.toFixed(1)} L/min</span>` : nothing}
       ${pressure !== null ? html`<span title="Pressure"><ha-icon icon="mdi:gauge"></ha-icon>${pressure.toFixed(1)} bar</span>` : nothing}
       <span title="Metering points and valves fed now"
-        ><ha-icon icon="mdi:map-marker-multiple-outline"></ha-icon>${feeds.mps} metering points · ${feeds.valves} valves</span
+        ><ha-icon icon="mdi:map-marker-outline"></ha-icon>${feeds.mps} metering points · ${feeds.valves} valves</span
       >
     </div>`;
-  }
-
-  /** Metering-point test for the site filter, or undefined without one. */
-  private _inSite(): ((mp: MeteringPoint) => boolean) | undefined {
-    if (!this._site) return undefined;
-    const ids = subtree(this._farm.data.sites, this._site);
-    return (mp) => !!mp.site_id && ids.has(mp.site_id);
   }
 
   private _balance(p: Pump) {
     const { ms, period } = RANGES[this._range];
     // Recomputed when the pump, range, data or statistics change, and at
     // most once a minute otherwise (the range end moves with the clock).
-    const key = `${p.id}|${this._range}|${this._site}|${Math.floor(Date.now() / 60_000)}`;
+    const key = `${p.id}|${this._range}|${Math.floor(Date.now() / 60_000)}`;
     const memo = this._balanceMemo;
     if (!memo || memo.key !== key || memo.data !== this._farm.data || memo.stats !== this._stats) {
       const now = Date.now();
@@ -342,12 +336,11 @@ export class IrrigationPumpsCard extends LitElement {
         key,
         data: this._farm.data,
         stats: this._stats,
-        value: balance(this._farm.data, p, this._stats, now - ms, now, period, this._inSite()),
+        value: balance(this._farm.data, p, this._stats, now - ms, now, period),
       };
     }
     const b = this._balanceMemo!.value;
     const pct = (l: number) => (b.pump ? `${Math.round((l / b.pump) * 100)} %` : "");
-    const siteName = this._site ? sitePath(this._farm.data.sites, this._site) : null;
     return html`<section>
       <div class="section-head">
         <h3>Water flow</h3>
@@ -363,24 +356,17 @@ export class IrrigationPumpsCard extends LitElement {
             <ha-icon icon="mdi:waves"></ha-icon>
             <div><span>Pump volume</span><b>${b.pump === null ? "no data" : volume(b.pump)}</b><span class="dim">${pct(b.pump ?? 0)}</span></div>
           </div>
-          <div title="Runs of the valves this pump fed at the time${siteName ? `, in ${siteName}` : ""}">
+          <div title="Runs of the valves this pump fed at the time">
             <ha-icon icon="mdi:pipe-valve"></ha-icon>
+            <div><span>Valve volume</span><b>${volume(b.valves)}</b><span class="dim">${pct(b.valves)}</span></div>
+          </div>
+          <div class="warn" title="Pump minus valves minus metered consumers: tanks, taps, unmetered valves, leaks">
+            <ha-icon icon="mdi:alert-outline"></ha-icon>
             <div>
-              <span>${siteName ? `Valve volume in ${siteName}` : "Valve volume"}</span><b>${volume(b.valves)}</b><span class="dim">${pct(b.valves)}</span>
+              <span>Unaccounted water</span><b>${b.unaccounted === null ? "–" : volume(b.unaccounted)}</b
+              ><span class="dim">${b.unaccounted === null ? "" : pct(b.unaccounted)}</span>
             </div>
           </div>
-          ${siteName
-            ? html`<div class="warn" title="Unaccounted water needs the whole pump: clear the site filter">
-                <ha-icon icon="mdi:alert-outline"></ha-icon>
-                <div><span>Unaccounted water</span><b>–</b><span class="dim">whole pump only</span></div>
-              </div>`
-            : html`<div class="warn" title="Pump minus valves minus metered consumers: tanks, taps, unmetered valves, leaks">
-                <ha-icon icon="mdi:alert-outline"></ha-icon>
-                <div>
-                  <span>Unaccounted water</span><b>${b.unaccounted === null ? "–" : volume(b.unaccounted)}</b
-                  ><span class="dim">${b.unaccounted === null ? "" : pct(b.unaccounted)}</span>
-                </div>
-              </div>`}
         </div>
         <xt-pump-chart .buckets=${b.buckets} period=${period}></xt-pump-chart>
       </div>
@@ -404,12 +390,12 @@ export class IrrigationPumpsCard extends LitElement {
   private _feeds(p: Pump, mpSums: Map<string, MpSummary>) {
     const data = this._farm.data;
     const f0 = pumpFeeds(data, p.id, Date.now());
-    const only = this._inSite();
-    const keep = (id: string) => {
-      const loc = data.locations.find((l) => l.id === id);
-      return !only || (!!loc && only(loc));
-    };
-    const f = { ...f0, mps: f0.mps.filter(keep), overridden: f0.overridden.filter((o) => keep(o.mp)) };
+    const fedSums = f0.mps.map((id) => mpSums.get(id)).filter((m): m is MpSummary => !!m);
+    // Counts follow site and search, like on the valves view.
+    const counts = mpCounts(applyMpFilter(fedSums, { ...this._filter, status: "all" }, data.sites), data.sites);
+    const shown = new Set(applyMpFilter(fedSums, this._filter, data.sites).map((m) => m.id));
+    const filtered = shown.size !== fedSums.length;
+    const f = { ...f0, mps: f0.mps.filter((id) => shown.has(id)), overridden: filtered ? [] : f0.overridden };
     const card = (id: string) => html`<xt-mp-card .summary=${mpSums.get(id)}></xt-mp-card>`;
     const inTree = new Set<string>();
     const groups = f.sites
@@ -428,11 +414,18 @@ export class IrrigationPumpsCard extends LitElement {
     const pumpName = (id: string) => data.pumps.find((x) => x.id === id)?.name ?? id;
     return html`<section>
       <h3>Assigned Valves <span class="count">· ${f.mps.length}</span></h3>
+      <xt-valve-filter-bar
+        .sites=${data.sites}
+        .value=${this._filter}
+        .counts=${counts}
+        @xt-filter-changed=${(e: CustomEvent<ValveFilter>) => (this._filter = e.detail)}
+      ></xt-valve-filter-bar>
       <div class="panel">
         ${this._edit ? this._assignForm(p) : nothing}
-        ${!f.mps.length && !groups.length ? html`<div class="msg">This pump is not assigned to a site or metering point yet.</div>` : nothing}
+        ${!f0.mps.length && !groups.length ? html`<div class="msg">This pump is not assigned to a site or metering point yet.</div>` : nothing}
+        ${filtered && !f.mps.length ? html`<div class="msg">No metering points match the filter.</div>` : nothing}
         ${groups.map(
-          (g) => g.mps.length === 0 && this._site ? nothing : html`<div class="group">
+          (g) => g.mps.length === 0 && filtered ? nothing : html`<div class="group">
               <span>${g.path}</span><span class="dim">assigned here · ${g.mps.length}</span>
               ${this._edit
                 ? html`<button class="link danger" ?disabled=${this._busy}
@@ -623,13 +616,6 @@ export class IrrigationPumpsCard extends LitElement {
           : nothing}
         ${pump
           ? html`${this._figures(pump, { mps: fed.length, valves: valveCount })}
-              <xt-valve-filter-bar
-                .sites=${data.sites}
-                .value=${{ ...NO_FILTER, site: this._site }}
-                .statuses=${false}
-                .search=${false}
-                @xt-filter-changed=${(e: CustomEvent<ValveFilter>) => (this._site = e.detail.site)}
-              ></xt-valve-filter-bar>
               ${this._edit ? this._pumpForm(pump) : nothing} ${this._balance(pump)} ${this._feeds(pump, mpSums)}
               ${this._connections(pump, valveCount)}`
           : nothing}

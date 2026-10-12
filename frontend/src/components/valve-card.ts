@@ -75,7 +75,7 @@ export class XtValveCard extends LitElement {
     // The metering point usually carries the valve's name; show it only
     // when it says something new, then the site.
     const mp = s.location && s.location.name !== baseName(s) ? s.location.name : null;
-    const place = s.location ? [mp, s.site?.name].filter(Boolean).join(" · ") : "No location";
+    const place = s.location ? [mp, s.site?.name].filter(Boolean).join(" · ") : "Not assigned";
     return html`<ha-card class=${s.status} @click=${this._open} tabindex="0" role="link" aria-label=${s.name}>
       <div class="head">
         <span class="name" title=${s.name}>${baseName(s)}</span>

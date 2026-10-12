@@ -16,7 +16,7 @@ import type { HomeAssistantLike } from "./farm/discovery.ts";
 import { announceFarmChange, type MeteringPoint, type Site } from "./farm/data.ts";
 import { FarmController } from "./farm/controller.ts";
 import { childSites, NO_SITE, summarizeSite, type SiteSummary } from "./farm/site-summary.ts";
-import { sitePath, subtree } from "./farm/valve-filter.ts";
+import { NO_FILTER, applyMpFilter, mpCounts, sitePath, subtree, type ValveFilter } from "./farm/valve-filter.ts";
 import { summarizeMp } from "./farm/mp-summary.ts";
 import type { ValveSummary } from "./farm/valve-summary.ts";
 import { liters } from "./components/format.ts";
@@ -27,6 +27,7 @@ import "./components/mp-card.ts";
 import "./components/mp-editor.ts";
 import type { MpSaveDetail, ValveOption } from "./components/mp-editor.ts";
 import "./components/week-bars.ts";
+import "./components/valve-filter-bar.ts";
 import { farmTokens } from "./components/theme.ts";
 import { pageStyles } from "./components/page-styles.ts";
 
@@ -44,6 +45,8 @@ function siteFromUrl(): string | null {
 export class IrrigationSitesCard extends LitElement {
   @property({ attribute: false }) hass?: Hass;
   @state() private _selected: string | null = siteFromUrl();
+  /** Status and search of the filter bar; its site is the selected site. */
+  @state() private _filter: ValveFilter = NO_FILTER;
   @state() private _edit = false;
   /** Metering point open in the editor panel. */
   @state() private _editing: string | null = null;
@@ -119,6 +122,12 @@ export class IrrigationSitesCard extends LitElement {
     if (await this._post({ action: "delete_site", id: site.id })) this._open(site.parent_id);
   }
 
+  private _onFilter(e: CustomEvent<ValveFilter>, sel: string | null): void {
+    const site = e.detail.site;
+    if (site !== (sel === NO_SITE ? null : sel)) this._open(site);
+    this._filter = { ...e.detail, site: null };
+  }
+
   // ------------------------------------------------------------ render
 
   private _header(sum: SiteSummary | null, total: { sites: number; mps: number; valves: number; online: number }) {
@@ -147,7 +156,7 @@ export class IrrigationSitesCard extends LitElement {
       <div class="figures">
         ${sum
           ? html`
-              <span title="Metering points"><ha-icon icon="mdi:map-marker-multiple-outline"></ha-icon>${sum.mps} metering points</span>
+              <span title="Metering points"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${sum.mps} metering points</span>
               <span title="Valves online / valves"><ha-icon icon="mdi:valve"></ha-icon>${sum.online} / ${sum.valves} online</span>
               ${sum.watering
                 ? html`<span class="water" title="Valves watering now"><i></i>${sum.watering} watering</span>`
@@ -161,8 +170,8 @@ export class IrrigationSitesCard extends LitElement {
                 : nothing}
             `
           : html`
-              <span><ha-icon icon="mdi:sprout-outline"></ha-icon>${total.sites} sites</span>
-              <span><ha-icon icon="mdi:map-marker-multiple-outline"></ha-icon>${total.mps} metering points</span>
+              <span><ha-icon icon="mdi:map-marker-radius-outline"></ha-icon>${total.sites} sites</span>
+              <span><ha-icon icon="mdi:map-marker-outline"></ha-icon>${total.mps} metering points</span>
               <span><ha-icon icon="mdi:valve"></ha-icon>${total.online} / ${total.valves} online</span>
             `}
       </div>
@@ -312,6 +321,17 @@ export class IrrigationSitesCard extends LitElement {
       online: placed.filter((v) => v.status !== "offline").length,
     };
 
+    // Filter bar as on the valves view (Trello c674YwMq): the site select
+    // navigates, status and search list the matching metering points of the
+    // selected site and everything below it.
+    const below = sel && sel !== NO_SITE ? subtree(data.sites, sel) : null;
+    const scope = mpSums.filter((m) => (sel === NO_SITE ? !m.site_id : !below || (!!m.site_id && below.has(m.site_id))));
+    const searched = applyMpFilter(scope, { ...this._filter, status: "all" }, data.sites);
+    const matches = applyMpFilter(searched, { ...NO_FILTER, status: this._filter.status }, data.sites).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    const filtering = this._filter.status !== "all" || !!this._filter.search.trim();
+
     const editing = this._editing ? data.locations.find((m) => m.id === this._editing) : undefined;
     const isAdmin = !!this.hass.user?.is_admin;
     return html`<div
@@ -324,20 +344,36 @@ export class IrrigationSitesCard extends LitElement {
         <xt-site-tree .sites=${data.sites} .selected=${sel} .counts=${counts} ?noSite=${hasNoSite}></xt-site-tree>
       </aside>
       <main>
+        <xt-valve-filter-bar
+          .sites=${data.sites}
+          .value=${{ ...this._filter, site: sel === NO_SITE ? null : sel }}
+          .counts=${mpCounts(searched, data.sites)}
+          @xt-filter-changed=${(e: CustomEvent<ValveFilter>) => this._onFilter(e, sel)}
+        ></xt-valve-filter-bar>
         <section class="panel">
           ${this._header(sum, total)}
           ${this._error && !editing ? html`<div class="msg err">${this._error}</div>` : nothing}
           ${this._farm.error ? html`<div class="msg err">Could not load farm data: ${this._farm.error}</div>` : nothing}
           ${this._edit && site ? this._editSite(site) : nothing}
         </section>
-        ${children.length || (this._edit && sel !== NO_SITE)
+        ${filtering
+          ? html`<section class="panel">
+              <h3>Metering points <span class="count">${matches.length}</span></h3>
+              ${matches.length
+                ? html`<div class="grid">
+                    ${matches.map((m) => html`<xt-mp-card .summary=${m} ?editable=${this._edit} ?admin=${isAdmin}></xt-mp-card>`)}
+                  </div>`
+                : html`<div class="msg">No metering points match the filter.</div>`}
+            </section>`
+          : nothing}
+        ${!filtering && (children.length || (this._edit && sel !== NO_SITE))
           ? html`<section class="panel">
               <h3>${sel ? "Sub-sites" : "Sites"} <span class="count">${children.length}</span></h3>
               <div class="grid">${children.map((c) => html`<xt-site-card .summary=${c}></xt-site-card>`)}</div>
               ${this._edit && sel !== NO_SITE ? this._addSite(sel) : nothing}
             </section>`
           : nothing}
-        ${mps.length || (this._edit && sel)
+        ${!filtering && (mps.length || (this._edit && sel))
           ? html`<section class="panel">
               <h3>Metering points <span class="count">${mps.length}</span></h3>
               <div class="grid">

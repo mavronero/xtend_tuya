@@ -2,6 +2,7 @@
 
 import type { Site } from "./data.ts";
 import type { ValveSummary } from "./valve-summary.ts";
+import type { MpSummary } from "./mp-summary.ts";
 
 export type StatusFilter = "all" | "online" | "watering" | "attention" | "offline";
 
@@ -35,12 +36,10 @@ export const SECTION_TITLES: Record<SectionKey, string> = {
   attention: "Needs attention",
   sites: "Online",
   offline: "Offline",
-  unassigned: "Without location",
+  unassigned: "Not assigned",
 };
 
-// "unassigned" stays opt-in: the valves page lists those valves in the
-// irrigation-locations-card (unassigned: true) with its "Assign to…" select.
-export const ALL_SECTIONS: SectionKey[] = ["watering", "attention", "sites", "offline"];
+export const ALL_SECTIONS: SectionKey[] = ["watering", "attention", "unassigned", "sites", "offline"];
 
 /** The site and every site below it. */
 export function subtree(sites: Site[], id: string): Set<string> {
@@ -68,7 +67,9 @@ export function sitePath(sites: Site[], id: string): string {
 }
 
 export function needsAttention(v: ValveSummary): boolean {
-  return v.status !== "offline" && v.badges.length > 0;
+  // A valve without a metering point is "Not assigned", its own group
+  // (Simon 11.10, Trello BmUOo3Wl): setup valves would bury the real problems.
+  return v.status !== "offline" && !!v.location && v.badges.length > 0;
 }
 
 export function applyFilter(valves: ValveSummary[], f: ValveFilter, sites: Site[]): ValveSummary[] {
@@ -91,7 +92,8 @@ export function applyFilter(valves: ValveSummary[], f: ValveFilter, sites: Site[
 
 /** Sections in order. Watering and attention are extra views on top: those
  * valves also stay in their site group. Offline and unassigned valves only
- * appear in their own section. Empty sections are left out. */
+ * appear in their own section (an unassigned one also under Watering now
+ * while it runs). Empty sections are left out. */
 export function sectionize(valves: ValveSummary[], sites: Site[], keys: SectionKey[] = ALL_SECTIONS): Section[] {
   const byName = (a: ValveSummary, b: ValveSummary) => a.name.localeCompare(b.name);
   const single = (key: SectionKey, list: ValveSummary[]): Section => ({
@@ -125,4 +127,34 @@ export function sectionize(valves: ValveSummary[], sites: Site[], keys: SectionK
     unassigned: single("unassigned", online.filter((v) => !v.location)),
   };
   return keys.map((k) => all[k]).filter((s) => s.count > 0);
+}
+
+export function mpNeedsAttention(m: MpSummary): boolean {
+  return m.status !== "offline" && m.badges.length > 0;
+}
+
+/** The same filter over metering points (sites and pump views). */
+export function applyMpFilter(mps: MpSummary[], f: ValveFilter, sites: Site[]): MpSummary[] {
+  const inSite = f.site ? subtree(sites, f.site) : null;
+  const q = f.search.trim().toLowerCase();
+  const siteName = new Map(sites.map((s) => [s.id, s.name.toLowerCase()]));
+  return mps.filter(
+    (m) =>
+      (!inSite || (m.site_id !== null && inSite.has(m.site_id))) &&
+      (f.status === "all" ||
+        (f.status === "online" && (m.status === "idle" || m.status === "watering")) ||
+        (f.status === "watering" && m.status === "watering") ||
+        (f.status === "offline" && m.status === "offline") ||
+        (f.status === "attention" && mpNeedsAttention(m))) &&
+      (!q ||
+        m.name.toLowerCase().includes(q) ||
+        m.valves.some((v) => v.name.toLowerCase().includes(q) || (v.number ?? "").includes(q)) ||
+        (siteName.get(m.site_id ?? "")?.includes(q) ?? false))
+  );
+}
+
+/** Chip counts for a list already narrowed to site and search. */
+export function mpCounts(mps: MpSummary[], sites: Site[]): Record<StatusFilter, number> {
+  const n = (status: StatusFilter) => applyMpFilter(mps, { ...NO_FILTER, status }, sites).length;
+  return { all: mps.length, online: n("online"), watering: n("watering"), attention: n("attention"), offline: n("offline") };
 }

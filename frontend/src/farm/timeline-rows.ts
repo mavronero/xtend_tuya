@@ -11,7 +11,7 @@ import { mpAt, type FarmData, type MeteringPoint, type Run } from "./data.ts";
 import { sitePath, subtree } from "./valve-filter.ts";
 
 export const NO_SITE_GROUP = "No site";
-export const NO_MP_GROUP = "No metering point";
+export const NO_MP_GROUP = "Not assigned";
 
 export interface TlValve {
   device_id: string;

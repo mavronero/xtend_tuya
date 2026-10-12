@@ -29,7 +29,7 @@ export class XtSiteCard extends LitElement {
         ${s.children.length
           ? html`<span class="dim" title="Sub-sites"><ha-icon icon="mdi:file-tree-outline"></ha-icon>${s.children.length}</span>`
           : nothing}
-        <span class="dim" title="Metering points"><ha-icon icon="mdi:map-marker-multiple-outline"></ha-icon>${s.mps}</span>
+        <span class="dim" title="Metering points"><ha-icon icon="mdi:map-marker-outline"></ha-icon>${s.mps}</span>
       </div>
       ${s.pump
         ? html`<div class="row dim" title="Pump${s.pump.via ? `, inherited from ${s.pump.via}` : ""}">

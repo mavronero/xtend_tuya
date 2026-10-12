@@ -54,7 +54,7 @@ export class XtSiteTree extends LitElement {
   render() {
     return html`
       <button class="node all ${this.selected === null ? "on" : ""}" @click=${() => this._open(null)}>
-        <ha-icon class="chev" icon="mdi:sprout-outline"></ha-icon><span class="label">All sites</span>
+        <ha-icon class="chev" icon="mdi:map-marker-radius-outline"></ha-icon><span class="label">All sites</span>
       </button>
       ${childSites(this.sites, null).map((s) => this._node(s, 0))}
       ${this.noSite

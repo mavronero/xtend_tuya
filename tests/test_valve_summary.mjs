@@ -2,7 +2,7 @@
 // Run: node --experimental-strip-types tests/test_valve_summary.mjs
 import assert from "node:assert/strict";
 import { summarize } from "../frontend/src/farm/valve-summary.ts";
-import { applyFilter, sectionize, subtree, sitePath, NO_FILTER } from "../frontend/src/farm/valve-filter.ts";
+import { applyFilter, applyMpFilter, mpCounts, needsAttention, sectionize, subtree, sitePath, NO_FILTER } from "../frontend/src/farm/valve-filter.ts";
 import { summarizeSite, pumpForSite, childSites, NO_SITE } from "../frontend/src/farm/site-summary.ts";
 import { summarizeMp, mpRuns } from "../frontend/src/farm/mp-summary.ts";
 
@@ -157,13 +157,14 @@ assert.deepEqual(names(applyFilter(all, { ...NO_FILTER, search: "olive" }, sites
 const sections = sectionize(all, sites);
 assert.deepEqual(
   sections.map((s) => [s.key, s.count]),
-  [["watering", 1], ["attention", 1], ["sites", 2], ["offline", 1]]
+  [["watering", 1], ["attention", 1], ["unassigned", 1], ["sites", 2], ["offline", 1]]
 );
-assert.equal(sections[2].title, "Online");
-// Without location is opt-in (the locations card lists them on the page).
-assert.deepEqual(sectionize(all, sites, ["unassigned"]).map((s) => [s.key, s.count]), [["unassigned", 1]]);
+assert.equal(sections[2].title, "Not assigned");
+assert.equal(sections[3].title, "Online");
+// A valve without a metering point is "Not assigned", never "Needs attention".
+assert.ok(!needsAttention({ ...b, location: null }));
 assert.deepEqual(
-  sections[2].groups.map((g) => [g.title, names(g.valves)]),
+  sections[3].groups.map((g) => [g.title, names(g.valves)]),
   [["Big Farm › FF East", ["907"]], ["Honeymoon", ["703"]]]
 );
 assert.deepEqual(sectionize([c], sites).map((s) => s.key), ["offline"]); // empty sections dropped
@@ -222,6 +223,9 @@ const data3 = { ...data2, runs: [...data2.runs, run("a", now - 26 * H, 30, 0)] }
 const m1dry = summarizeMp(data3.locations[0], data3, all, now);
 assert.ok(Math.abs(m1dry.avg_lpm - 386 / 36) < 1e-9);
 assert.deepEqual(m1dry.badges, ["flow_low"]);
+// A fault run (2 L/min where ~10 is typical) stays out of the mean as well.
+const data4 = { ...data2, runs: [...data2.runs, run("a", now - 27 * H, 15, 30)] };
+assert.ok(Math.abs(summarizeMp(data4.locations[0], data4, all, now).avg_lpm - 386 / 36) < 1e-9);
 
 const m2 = summarizeMp(data2.locations[1], data2, all, now);
 assert.deepEqual(m2.badges, ["low_battery", "stale", "missed", "no_flow"]);
@@ -230,6 +234,14 @@ const m4 = summarizeMp(data2.locations[3], data2, all, now);
 assert.deepEqual([m4.status, m4.badges, m4.last], ["empty", ["no_valve"], null]);
 
 const mps = data2.locations.map((m) => summarizeMp(m, data2, all, now));
+// The valve filter over metering points (sites and pump views).
+const mpIds = (f) => applyMpFilter(mps, { ...NO_FILTER, ...f }, sites).map((m) => m.id);
+assert.deepEqual(mpIds({ site: "farm" }), ["mp1", "mp4"]);
+assert.deepEqual(mpIds({ status: "watering" }), ["mp1"]);
+assert.deepEqual(mpIds({ status: "offline" }), ["mp3"]);
+assert.deepEqual(mpIds({ search: "olive" }), ["mp2"]);
+assert.deepEqual(mpIds({ search: "907" }), ["mp1"]); // by valve number
+assert.equal(mpCounts(mps, sites).all, 5);
 assert.deepEqual(childSites(sites, null).map((s) => s.id), ["farm", "hm"]);
 assert.deepEqual(pumpForSite(data2, "east").via, "Big Farm");
 assert.equal(pumpForSite(data2, "farm").via, null);

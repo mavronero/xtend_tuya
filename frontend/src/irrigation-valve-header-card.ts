@@ -178,8 +178,8 @@ export class IrrigationValveHeaderCard extends LitElement {
                     ><ha-icon icon="mdi:map-marker-outline"></ha-icon><span title="Metering point">${mpRec.name}</span
                     >${this._moveControl(v.device_id, mpRec.id)}</span
                   >
-                  ${v.site ? html`<span title="Site"><ha-icon icon="mdi:sprout-outline"></ha-icon>${v.site.name}</span>` : nothing}`
-              : html`<span><span class="dim">No metering point</span>${this._moveControl(v.device_id, null)}</span>`}
+                  ${v.site ? html`<span title="Site"><ha-icon icon="mdi:map-marker-radius-outline"></ha-icon>${v.site.name}</span>` : nothing}`
+              : html`<span><span class="dim">Not assigned</span>${this._moveControl(v.device_id, null)}</span>`}
             ${mp?.pump
               ? html`<span title="Pump${mp.pump.via ? `, inherited from ${mp.pump.via}` : ""}"
                   ><ha-icon icon="mdi:pump"></ha-icon>${mp.pump.name}${mp.pump.via ? html`<span class="dim"> · via ${mp.pump.via}</span>` : nothing}</span
