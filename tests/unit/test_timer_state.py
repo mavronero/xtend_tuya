@@ -234,9 +234,15 @@ def test_untrusted_reads_keep_the_previous_overlay():
     assert state.apply_cloud([cloud("06:00")], mirror_on=True)
     before = state.cloud
     assert not state.apply_cloud([], mirror_on=True)  # empty while HA holds an enabled slot
+    assert state.cloud is before
     assert not state.apply_cloud([cloud("06:00", alias="1"), cloud("22:00", alias="1")], mirror_on=True)  # 969
     assert not state.apply_cloud([cloud("06:00"), cloud("06:00")], mirror_on=True)
-    assert state.cloud is before
+    # a collision keeps the overlay and is remembered for the Checks page
+    assert state.cloud == {**before, "collision": ["06:00", "06:00"]}
+    assert state.apply_cloud([cloud("06:00")], mirror_on=True) and "collision" not in state.cloud
+    fresh = ts.TimerState()
+    assert not fresh.apply_cloud([cloud("06:00", alias="1"), cloud("22:00", alias="1")], mirror_on=True)
+    assert fresh.cloud == {"checked_at": None, "slots": {}, "cloud_only": [], "collision": ["06:00", "22:00"]}
     assert ts.TimerState().apply_cloud([], mirror_on=True)  # no timers anywhere: fine
 
 

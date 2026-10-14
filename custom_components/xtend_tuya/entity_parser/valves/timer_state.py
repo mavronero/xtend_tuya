@@ -121,6 +121,10 @@ class TimerState:
         keys = [_key(p) for p in parsed]
         if len(set(aliases)) != len(aliases) or len(set(keys)) != len(keys):
             _LOGGER.warning("cloud timers collide (alias or time listed twice), overlay kept: %s", timers)
+            # Keep the overlay, but say so: the Checks page lists the valve
+            # (fix = delete both timers in SmartLife and create them again).
+            prev = self.cloud or {"checked_at": None, "slots": {}, "cloud_only": []}
+            self.cloud = {**prev, "collision": sorted(str(t.get("time")) for t in timers if isinstance(t, dict))}
             return False
 
         planned = self._planned()

@@ -6,4 +6,5 @@ import "./irrigation-pumps-card.ts";
 import "./irrigation-run-history-card.ts";
 import "./irrigation-valve-header-card.ts";
 import "./irrigation-calendar-card.ts";
+import "./irrigation-checks-card.ts";
 import "./irrigation-valve-settings-card.ts";

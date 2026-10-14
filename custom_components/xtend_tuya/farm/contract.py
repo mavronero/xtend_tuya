@@ -32,7 +32,9 @@ ROOM_ATTR = "valve_room"
 #   {"checked_at": ISO UTC,
 #    "slots": {"<slot>": "on" | "off" | "missing" | "unknown"},
 #    "cloud_only": [slot-shaped dicts: hour, minute, days_mask, days, mode,
-#                   value (0 = T3 app timer, duration unknown), enabled]}
+#                   value (0 = T3 app timer, duration unknown), enabled],
+#    "collision": ["HH:MM", ...]  (only after a read where two app timers
+#                   claim one slot; checked_at may then be None)}
 # "off": switched off in the app (old QT-08W only). "missing": enabled in HA,
 # no cloud timer, while the hub mirrors timers to the cloud. A slot without
 # an entry has no judgement (a DP report since the read resets it).

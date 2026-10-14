@@ -28,6 +28,7 @@ const PREFIX = "/xtend_tuya_static/cards/";
 const BUNDLES = {
   "irrigation-locations-card": "irrigation-locations-card.js",
   "irrigation-calendar-card": "irrigation-farm-cards.js",
+  "irrigation-checks-card": "irrigation-farm-cards.js",
   "irrigation-valves-card": "irrigation-farm-cards.js",
   "xt-valve-card": "irrigation-farm-cards.js",
   "xt-valve-section": "irrigation-farm-cards.js",

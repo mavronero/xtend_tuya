@@ -86,6 +86,7 @@ class IrrigationValvesStrategy extends HTMLElement {
       pumpsView(),
       calendarView(),
       timelineView(),
+      checksView(),
       valveDetailView(hours),
     ];
 
@@ -196,6 +197,26 @@ function timelineView(): DashboardView {
             layout_options: { grid_columns: 12, grid_rows: "auto" },
           },
         ],
+      },
+    ],
+  };
+}
+
+/** Checks (Simon 23.09.: "so we have another view"): every valve problem
+ * someone has to act on, one list per kind. Replaces the daily Mattermost
+ * drift report. */
+function checksView(): DashboardView {
+  return {
+    title: "Checks",
+    path: "checks",
+    icon: "mdi:clipboard-check-outline",
+    type: "sections",
+    max_columns: 3,
+    sections: [
+      {
+        type: "grid",
+        column_span: 3,
+        cards: [{ type: "custom:irrigation-checks-card", layout_options: { grid_columns: 12, grid_rows: "auto" } }],
       },
     ],
   };
